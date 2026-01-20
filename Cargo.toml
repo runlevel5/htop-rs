@@ -1,0 +1,53 @@
+[package]
+name = "htop-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["htop-rs contributors"]
+description = "A Rust port of htop - an interactive process viewer"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/htop-dev/htop"
+keywords = ["htop", "process", "monitor", "terminal", "ncurses"]
+categories = ["command-line-utilities", "os"]
+
+[dependencies]
+# ncurses bindings with wide character support
+ncurses = "6.0"
+
+# Command line argument parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Time handling
+chrono = "0.4"
+
+# User/group information
+users = "0.11"
+
+# Lazy static for global state
+lazy_static = "1.4"
+
+# Platform-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.16"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "0.14"
+mach2 = "0.4"
+libc = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.28", features = ["signal", "user", "process"] }
+libc = "0.2"
+
+[features]
+default = []
+hwloc = []  # Optional hardware locality support
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
