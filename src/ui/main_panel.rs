@@ -407,11 +407,12 @@ impl MainPanel {
             }
             ProcessField::Command | ProcessField::CmdLine => {
                 // Command: use basename highlighting with tree view support
-                // When show_program_path is false, show only basename
+                // When show_program_path is false, show command starting from basename
+                // (basename + arguments), matching C htop behavior
                 let cmd = if show_program_path {
                     process.get_command()
                 } else {
-                    process.get_basename()
+                    process.get_command_from_basename()
                 };
                 
                 // Draw tree indentation if in tree view mode
@@ -459,8 +460,19 @@ impl MainPanel {
                         str.append(cmd, process_color);
                     }
                 } else {
-                    // When not showing path, entire command is the basename
-                    str.append(cmd, basename_color);
+                    // When not showing path, cmd starts with basename followed by arguments
+                    // Highlight the basename portion, then show arguments in normal color
+                    let basename = process.get_basename();
+                    if cmd.starts_with(basename) {
+                        str.append(basename, basename_color);
+                        let after = basename.len();
+                        if after < cmd.len() {
+                            str.append(&cmd[after..], process_color);
+                        }
+                    } else {
+                        // Fallback: just show entire command highlighted
+                        str.append(cmd, basename_color);
+                    }
                 }
                 str.append_char(' ', process_color);
             }

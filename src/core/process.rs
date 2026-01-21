@@ -603,6 +603,80 @@ impl Process {
         "<unknown>"
     }
 
+    /// Get the command starting from the basename (basename + arguments)
+    /// This is used when showProgramPath is false - matches C htop behavior
+    /// which shows cmdline[cmdlineBasenameStart..] (not just the basename)
+    pub fn get_command_from_basename(&self) -> &str {
+        if let Some(ref cmdline) = self.cmdline {
+            if self.cmdline_basename_start < cmdline.len() {
+                return &cmdline[self.cmdline_basename_start..];
+            }
+        }
+        // Fallback to get_command behavior
+        self.get_command()
+    }
+
+    /// Update the cmdline and compute basename indices
+    /// This matches C htop's Process_updateCmdline behavior
+    /// - cmdline: the full command line string
+    /// - basename_end: position of end of first argument (before first space), or 0 to auto-detect
+    pub fn update_cmdline(&mut self, cmdline: String, basename_end: usize) {
+        let end = if basename_end == 0 {
+            // Auto-detect: find first space or end of string
+            cmdline.find(' ').unwrap_or(cmdline.len())
+        } else {
+            basename_end.min(cmdline.len())
+        };
+        
+        // Compute basename_start by finding last '/' before end
+        // This matches C htop's skipPotentialPath logic
+        let start = if cmdline.starts_with('/') {
+            Self::skip_potential_path(&cmdline, end)
+        } else {
+            0
+        };
+        
+        self.cmdline_basename_start = start;
+        self.cmdline_basename_end = end;
+        self.cmdline = Some(cmdline);
+    }
+
+    /// Skip potential path prefix - find position after last '/' before end
+    /// This matches C htop's skipPotentialPath function
+    fn skip_potential_path(cmdline: &str, end: usize) -> usize {
+        if !cmdline.starts_with('/') {
+            return 0;
+        }
+        
+        let bytes = cmdline.as_bytes();
+        let mut slash = 0;
+        let mut i = 1;
+        
+        while i < end && i < bytes.len() {
+            let c = bytes[i];
+            
+            if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] != 0 {
+                slash = i + 1;
+                i += 1;
+                continue;
+            }
+            
+            // Space not preceded by backslash ends the search
+            if c == b' ' && (i == 0 || bytes[i - 1] != b'\\') {
+                return slash;
+            }
+            
+            // Colon followed by space ends the search
+            if c == b':' && i + 1 < bytes.len() && bytes[i + 1] == b' ' {
+                return slash;
+            }
+            
+            i += 1;
+        }
+        
+        slash
+    }
+
     /// Compare two processes by a specific field
     pub fn compare_by_field(&self, other: &Process, field: ProcessField) -> Ordering {
         match field {

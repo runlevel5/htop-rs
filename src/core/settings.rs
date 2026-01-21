@@ -260,7 +260,7 @@ impl Settings {
             account_guest_in_cpu_meter: false,
             show_program_path: true,
             show_thread_names: false,
-            shadow_other_users: false,
+            shadow_other_users: true,
             hide_kernel_threads: true,
             hide_userland_threads: false,
             hide_running_in_container: false,

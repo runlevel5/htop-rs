@@ -305,7 +305,10 @@ pub fn scan_processes(machine: &mut Machine) {
         // Try to get full cmdline
         if let Ok(cmdline) = proc.cmdline() {
             if !cmdline.is_empty() {
-                process.cmdline = Some(cmdline.join(" "));
+                let joined = cmdline.join(" ");
+                // basename_end is the length of the first argument
+                let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
+                process.update_cmdline(joined, basename_end);
             }
         }
         

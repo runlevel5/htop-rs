@@ -23,6 +23,8 @@ const CTL_VM: c_int = 2;
 const KERN_BOOTTIME: c_int = 21;
 const KERN_PROC: c_int = 14;
 const KERN_PROC_ALL: c_int = 0;
+const KERN_ARGMAX: c_int = 8;
+const KERN_PROCARGS2: c_int = 49;
 
 const HW_NCPU: c_int = 3;
 const HW_MEMSIZE: c_int = 24;
@@ -532,6 +534,116 @@ fn determine_process_state(pbi_status: u32, pti_numrunning: i32) -> ProcessState
     }
 }
 
+/// Get command line arguments for a process
+/// Returns (cmdline, basename_end) where basename_end is the position after the first argument
+/// This matches C htop's DarwinProcess_setFromKInfoProc/KERN_PROCARGS2 logic
+fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
+    // Get the maximum argument size
+    let mut argmax: c_int = 0;
+    let mut size = mem::size_of::<c_int>();
+    let mut mib: [c_int; 2] = [CTL_KERN, KERN_ARGMAX];
+    
+    let ret = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            2,
+            &mut argmax as *mut _ as *mut c_void,
+            &mut size,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    
+    if ret != 0 || argmax <= 0 {
+        return None;
+    }
+    
+    // Allocate buffer for arguments
+    let mut procargs: Vec<u8> = vec![0; argmax as usize];
+    let mut size = argmax as size_t;
+    let mut mib: [c_int; 3] = [CTL_KERN, KERN_PROCARGS2, pid];
+    
+    let ret = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            procargs.as_mut_ptr() as *mut c_void,
+            &mut size,
+            ptr::null_mut(),
+            0,
+        )
+    };
+    
+    if ret != 0 {
+        return None;
+    }
+    
+    // Parse the procargs buffer
+    // Layout: nargs (int) | exec_path | \0+ | arg0 | \0 | arg1 | \0 | ...
+    if size < mem::size_of::<c_int>() {
+        return None;
+    }
+    
+    // Get nargs
+    let nargs = i32::from_ne_bytes([procargs[0], procargs[1], procargs[2], procargs[3]]);
+    if nargs <= 0 {
+        return None;
+    }
+    
+    let mut pos = mem::size_of::<c_int>();
+    
+    // Skip exec_path (find first \0)
+    while pos < size && procargs[pos] != 0 {
+        pos += 1;
+    }
+    if pos >= size {
+        return None;
+    }
+    
+    // Skip trailing \0 characters
+    while pos < size && procargs[pos] == 0 {
+        pos += 1;
+    }
+    if pos >= size {
+        return None;
+    }
+    
+    // Now we're at the start of arg0
+    let _args_start = pos;
+    let mut arg_count = 0;
+    let mut cmdline = String::new();
+    let mut basename_end = 0;
+    
+    while pos < size && arg_count < nargs as usize {
+        if procargs[pos] == 0 {
+            arg_count += 1;
+            if arg_count == 1 {
+                // End of first argument - record position in cmdline
+                basename_end = cmdline.len();
+            }
+            if arg_count < nargs as usize {
+                // Add space between arguments
+                cmdline.push(' ');
+            }
+        } else {
+            // Add character to cmdline
+            cmdline.push(procargs[pos] as char);
+        }
+        pos += 1;
+    }
+    
+    // If basename_end wasn't set (single arg), it's the whole string
+    if basename_end == 0 {
+        basename_end = cmdline.len();
+    }
+    
+    if cmdline.is_empty() {
+        None
+    } else {
+        Some((cmdline, basename_end))
+    }
+}
+
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
     // Get list of all PIDs
@@ -657,9 +769,20 @@ pub fn scan_processes(machine: &mut Machine) {
         if path_len > 0 {
             if let Ok(path) = CStr::from_bytes_until_nul(&path_buf) {
                 let path_str = path.to_string_lossy().to_string();
-                process.exe = Some(path_str.clone());
-                process.cmdline = Some(path_str);
+                process.exe = Some(path_str);
             }
+        }
+        
+        // Get full command line with arguments via KERN_PROCARGS2
+        // This matches C htop's DarwinProcess_setFromKInfoProc behavior
+        if let Some((cmdline, basename_end)) = get_process_cmdline(pid) {
+            process.update_cmdline(cmdline, basename_end);
+        } else if let Some(ref exe) = process.exe {
+            // Fallback to exe path if KERN_PROCARGS2 fails
+            process.update_cmdline(exe.clone(), 0);
+        } else if let Some(ref comm) = process.comm {
+            // Fallback to comm
+            process.update_cmdline(comm.clone(), comm.len());
         }
         
         // Task info
