@@ -24,7 +24,7 @@ pub struct CpuData {
     pub steal_time: u64,
     pub guest_time: u64,
     pub guest_nice_time: u64,
-    
+
     // Previous values for calculating deltas
     pub prev_user: u64,
     pub prev_nice: u64,
@@ -36,7 +36,7 @@ pub struct CpuData {
     pub prev_steal: u64,
     pub prev_guest: u64,
     pub prev_guest_nice: u64,
-    
+
     // Calculated percentages
     pub user_percent: f64,
     pub nice_percent: f64,
@@ -49,8 +49,8 @@ pub struct CpuData {
     pub total_percent: f64,
 
     pub online: bool,
-    pub frequency: f64,  // in MHz
-    pub temperature: Option<f32>,  // in Celsius
+    pub frequency: f64,           // in MHz
+    pub temperature: Option<f32>, // in Celsius
 }
 
 impl CpuData {
@@ -63,27 +63,41 @@ impl CpuData {
 
     /// Store current values as previous and update percentages
     pub fn update(&mut self) {
-        let prev_total = self.prev_user + self.prev_nice + self.prev_system + 
-            self.prev_idle + self.prev_iowait + self.prev_irq + 
-            self.prev_softirq + self.prev_steal;
-        
-        let curr_total = self.user_time + self.nice_time + self.system_time +
-            self.idle_time + self.iowait_time + self.irq_time +
-            self.softirq_time + self.steal_time;
+        let prev_total = self.prev_user
+            + self.prev_nice
+            + self.prev_system
+            + self.prev_idle
+            + self.prev_iowait
+            + self.prev_irq
+            + self.prev_softirq
+            + self.prev_steal;
+
+        let curr_total = self.user_time
+            + self.nice_time
+            + self.system_time
+            + self.idle_time
+            + self.iowait_time
+            + self.irq_time
+            + self.softirq_time
+            + self.steal_time;
 
         let total_delta = (curr_total - prev_total) as f64;
-        
+
         if total_delta > 0.0 {
             self.user_percent = ((self.user_time - self.prev_user) as f64 / total_delta) * 100.0;
             self.nice_percent = ((self.nice_time - self.prev_nice) as f64 / total_delta) * 100.0;
-            self.system_percent = ((self.system_time - self.prev_system) as f64 / total_delta) * 100.0;
+            self.system_percent =
+                ((self.system_time - self.prev_system) as f64 / total_delta) * 100.0;
             self.irq_percent = ((self.irq_time - self.prev_irq) as f64 / total_delta) * 100.0;
-            self.softirq_percent = ((self.softirq_time - self.prev_softirq) as f64 / total_delta) * 100.0;
+            self.softirq_percent =
+                ((self.softirq_time - self.prev_softirq) as f64 / total_delta) * 100.0;
             self.steal_percent = ((self.steal_time - self.prev_steal) as f64 / total_delta) * 100.0;
             self.guest_percent = ((self.guest_time - self.prev_guest) as f64 / total_delta) * 100.0;
-            self.iowait_percent = ((self.iowait_time - self.prev_iowait) as f64 / total_delta) * 100.0;
-            
-            self.total_percent = 100.0 - ((self.idle_time - self.prev_idle) as f64 / total_delta) * 100.0;
+            self.iowait_percent =
+                ((self.iowait_time - self.prev_iowait) as f64 / total_delta) * 100.0;
+
+            self.total_percent =
+                100.0 - ((self.idle_time - self.prev_idle) as f64 / total_delta) * 100.0;
         }
 
         // Store current as previous
@@ -138,10 +152,10 @@ pub struct Machine {
     pub monotonic_ms: u64,
     pub prev_monotonic_ms: u64,
     pub last_scan: Instant,
-    
+
     // Iteration control
     pub iterations_remaining: i64,
-    
+
     // Memory statistics (in KB)
     pub total_mem: Memory,
     pub used_mem: Memory,
@@ -149,46 +163,46 @@ pub struct Machine {
     pub cached_mem: Memory,
     pub shared_mem: Memory,
     pub available_mem: Memory,
-    pub compressed_mem: Memory,  // Compressed memory (macOS)
-    
+    pub compressed_mem: Memory, // Compressed memory (macOS)
+
     // Swap statistics (in KB)
     pub total_swap: Memory,
     pub used_swap: Memory,
     pub cached_swap: Memory,
-    
+
     // CPU information
     pub active_cpus: u32,
     pub existing_cpus: u32,
     pub cpus: Vec<CpuData>,
-    pub avg_cpu: CpuData,  // Average/combined CPU stats
-    
+    pub avg_cpu: CpuData, // Average/combined CPU stats
+
     // Users
     pub users_table: UsersTable,
     pub htop_user_id: u32,
     pub max_user_id: u32,
     pub filter_user_id: Option<u32>,
-    
+
     // Processes
     pub processes: ProcessList,
     pub max_pid: i32,
     pub pid_filter: Option<HashSet<u32>>,
-    
+
     // Sorting
     pub sort_key: ProcessField,
     pub sort_descending: bool,
-    
+
     // Running/thread counts
     pub running_tasks: u32,
     pub total_tasks: u32,
     pub userland_threads: u32,
     pub kernel_threads: u32,
-    
+
     // System information
     pub hostname: String,
     pub kernel_version: String,
     pub uptime: Duration,
     pub load_average: [f64; 3],
-    
+
     // Boot time
     pub boot_time: i64,
 }
@@ -196,7 +210,7 @@ pub struct Machine {
 impl Machine {
     pub fn new(filter_user_id: Option<u32>) -> Self {
         let htop_user_id = unsafe { libc::geteuid() };
-        
+
         Machine {
             realtime: SystemTime::now(),
             realtime_ms: 0,
@@ -252,14 +266,14 @@ impl Machine {
                 return false;
             }
         }
-        
+
         // Check user filter
         if let Some(uid) = self.filter_user_id {
             if process.uid != uid {
                 return false;
             }
         }
-        
+
         true
     }
 
@@ -268,7 +282,8 @@ impl Machine {
         // Update timing
         self.prev_monotonic_ms = self.monotonic_ms;
         self.realtime = SystemTime::now();
-        self.realtime_ms = self.realtime
+        self.realtime_ms = self
+            .realtime
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
@@ -283,12 +298,12 @@ impl Machine {
     pub fn update_processes(&mut self) {
         // Clean up processes that no longer exist
         self.processes.cleanup();
-        
+
         // Note: Task counts (total_tasks, running_tasks, userland_threads, kernel_threads)
         // are set by the platform-specific scan_processes() function, not here.
         // This matches C htop where DarwinProcessTable_scan() accumulates these values
         // during process iteration rather than after.
-        
+
         // Sort processes
         let ascending = !self.sort_descending;
         self.processes.sort_by(self.sort_key, ascending);
@@ -299,7 +314,7 @@ impl Machine {
         if self.prev_monotonic_ms > 0 {
             self.monotonic_ms.saturating_sub(self.prev_monotonic_ms)
         } else {
-            1000  // Assume 1 second for first scan
+            1000 // Assume 1 second for first scan
         }
     }
 

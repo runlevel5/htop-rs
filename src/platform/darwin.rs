@@ -12,8 +12,8 @@ use std::mem;
 use std::ptr;
 use std::time::Duration;
 
-use crate::core::{Process, ProcessState};
 use crate::core::{CpuData, Machine};
+use crate::core::{Process, ProcessState};
 
 // sysctl MIB constants
 const CTL_KERN: c_int = 1;
@@ -160,18 +160,8 @@ struct XswUsage {
 extern "C" {
     fn mach_host_self() -> u32;
     fn mach_task_self() -> u32;
-    fn host_statistics64(
-        host: u32,
-        flavor: c_int,
-        info: *mut c_void,
-        count: *mut u32,
-    ) -> c_int;
-    fn host_statistics(
-        host: u32,
-        flavor: c_int,
-        info: *mut c_void,
-        count: *mut u32,
-    ) -> c_int;
+    fn host_statistics64(host: u32, flavor: c_int, info: *mut c_void, count: *mut u32) -> c_int;
+    fn host_statistics(host: u32, flavor: c_int, info: *mut c_void, count: *mut u32) -> c_int;
     fn host_processor_info(
         host: u32,
         flavor: c_int,
@@ -179,11 +169,7 @@ extern "C" {
         out_processor_info: *mut *mut c_int,
         out_processor_info_cnt: *mut u32,
     ) -> c_int;
-    fn vm_deallocate(
-        target_task: u32,
-        address: usize,
-        size: usize,
-    ) -> c_int;
+    fn vm_deallocate(target_task: u32, address: usize, size: usize) -> c_int;
 }
 
 // libproc functions
@@ -209,7 +195,7 @@ const MAXCOMLEN: usize = 16;
 fn sysctl<T>(mib: &[c_int]) -> Option<T> {
     let mut value: T = unsafe { mem::zeroed() };
     let mut size = mem::size_of::<T>() as size_t;
-    
+
     let ret = unsafe {
         libc::sysctl(
             mib.as_ptr() as *mut c_int,
@@ -220,7 +206,7 @@ fn sysctl<T>(mib: &[c_int]) -> Option<T> {
             0,
         )
     };
-    
+
     if ret == 0 {
         Some(value)
     } else {
@@ -232,7 +218,7 @@ fn sysctl<T>(mib: &[c_int]) -> Option<T> {
 fn sysctlbyname_string(name: &str) -> Option<String> {
     let cname = std::ffi::CString::new(name).ok()?;
     let mut size: size_t = 0;
-    
+
     // First call to get size
     let ret = unsafe {
         libc::sysctlbyname(
@@ -243,11 +229,11 @@ fn sysctlbyname_string(name: &str) -> Option<String> {
             0,
         )
     };
-    
+
     if ret != 0 || size == 0 {
         return None;
     }
-    
+
     let mut buffer = vec![0u8; size];
     let ret = unsafe {
         libc::sysctlbyname(
@@ -258,7 +244,7 @@ fn sysctlbyname_string(name: &str) -> Option<String> {
             0,
         )
     };
-    
+
     if ret == 0 {
         // Remove trailing null
         if let Some(pos) = buffer.iter().position(|&c| c == 0) {
@@ -274,7 +260,7 @@ fn sysctlbyname_u64(name: &str) -> Option<u64> {
     let cname = std::ffi::CString::new(name).ok()?;
     let mut value: u64 = 0;
     let mut size = mem::size_of::<u64>() as size_t;
-    
+
     let ret = unsafe {
         libc::sysctlbyname(
             cname.as_ptr(),
@@ -284,8 +270,12 @@ fn sysctlbyname_u64(name: &str) -> Option<u64> {
             0,
         )
     };
-    
-    if ret == 0 { Some(value) } else { None }
+
+    if ret == 0 {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 /// Initialize macOS platform
@@ -305,12 +295,12 @@ pub fn get_system_info(machine: &mut Machine) {
             machine.hostname = name.to_string_lossy().to_string();
         }
     }
-    
+
     // Get kernel version
     if let Some(version) = sysctlbyname_string("kern.osrelease") {
         machine.kernel_version = format!("Darwin {}", version);
     }
-    
+
     // Get boot time and calculate uptime
     let mib = [CTL_KERN, KERN_BOOTTIME];
     if let Some(boottime) = sysctl::<libc::timeval>(&mib) {
@@ -321,7 +311,7 @@ pub fn get_system_info(machine: &mut Machine) {
         let uptime_secs = now.as_secs().saturating_sub(boottime.tv_sec as u64);
         machine.uptime = Duration::from_secs(uptime_secs);
     }
-    
+
     // Get load averages
     let mut loadavg: [f64; 3] = [0.0; 3];
     if unsafe { libc::getloadavg(loadavg.as_mut_ptr(), 3) } == 3 {
@@ -344,13 +334,13 @@ pub fn scan_cpu(machine: &mut Machine) {
         machine.active_cpus = ncpu;
         machine.existing_cpus = ncpu;
     }
-    
+
     // Use host_processor_info to get per-CPU load data
     let host = unsafe { mach_host_self() };
     let mut cpu_count: u32 = 0;
     let mut processor_info: *mut c_int = ptr::null_mut();
     let mut processor_info_cnt: u32 = 0;
-    
+
     let ret = unsafe {
         host_processor_info(
             host,
@@ -360,7 +350,7 @@ pub fn scan_cpu(machine: &mut Machine) {
             &mut processor_info_cnt,
         )
     };
-    
+
     if ret == 0 && !processor_info.is_null() {
         // Ensure we have the right number of CPUs
         let ncpu = cpu_count as usize;
@@ -372,24 +362,24 @@ pub fn scan_cpu(machine: &mut Machine) {
         }
         machine.active_cpus = cpu_count;
         machine.existing_cpus = cpu_count;
-        
+
         // Each CPU has CPU_STATE_MAX (4) values: user, system, idle, nice
         // processor_info is an array of [cpu0_user, cpu0_sys, cpu0_idle, cpu0_nice, cpu1_user, ...]
         let cpu_info = processor_info as *const u32;
-        
+
         // Accumulators for average CPU
         let mut total_user: u64 = 0;
         let mut total_system: u64 = 0;
         let mut total_idle: u64 = 0;
         let mut total_nice: u64 = 0;
-        
+
         for i in 0..ncpu {
             let base = i * CPU_STATE_MAX;
             let user = unsafe { *cpu_info.add(base + CPU_STATE_USER) } as u64;
             let system = unsafe { *cpu_info.add(base + CPU_STATE_SYSTEM) } as u64;
             let idle = unsafe { *cpu_info.add(base + CPU_STATE_IDLE) } as u64;
             let nice = unsafe { *cpu_info.add(base + CPU_STATE_NICE) } as u64;
-            
+
             // Update this CPU's data
             let cpu = &mut machine.cpus[i];
             cpu.user_time = user;
@@ -397,21 +387,21 @@ pub fn scan_cpu(machine: &mut Machine) {
             cpu.idle_time = idle;
             cpu.nice_time = nice;
             cpu.update();
-            
+
             // Accumulate for average
             total_user += user;
             total_system += system;
             total_idle += idle;
             total_nice += nice;
         }
-        
+
         // Update average CPU (sum of all CPUs, not divided)
         machine.avg_cpu.user_time = total_user;
         machine.avg_cpu.system_time = total_system;
         machine.avg_cpu.idle_time = total_idle;
         machine.avg_cpu.nice_time = total_nice;
         machine.avg_cpu.update();
-        
+
         // Deallocate the processor info buffer
         let buffer_size = processor_info_cnt as usize * mem::size_of::<c_int>();
         unsafe {
@@ -426,16 +416,16 @@ pub fn scan_memory(machine: &mut Machine) {
     if let Some(memsize) = sysctlbyname_u64("hw.memsize") {
         machine.total_mem = memsize / 1024; // Convert to KB
     }
-    
+
     // Get page size
     let mib = [CTL_HW, HW_PAGESIZE];
     let page_size = sysctl::<c_int>(&mib).unwrap_or(4096) as u64;
-    
+
     // Get VM statistics
     let host = unsafe { mach_host_self() };
     let mut vm_stat: VmStatistics64 = Default::default();
     let mut count = (mem::size_of::<VmStatistics64>() / mem::size_of::<u32>()) as u32;
-    
+
     let ret = unsafe {
         host_statistics64(
             host,
@@ -444,34 +434,34 @@ pub fn scan_memory(machine: &mut Machine) {
             &mut count,
         )
     };
-    
+
     if ret == 0 {
         let page_kb = page_size / 1024;
-        
+
         // Calculate memory values to match C htop darwin/Platform.c
         let wired = vm_stat.wire_count as u64 * page_kb;
         let active = vm_stat.active_count as u64 * page_kb;
         let compressed = vm_stat.compressor_page_count as u64 * page_kb;
         let purgeable = vm_stat.purgeable_count as u64 * page_kb;
         let inactive = vm_stat.inactive_count as u64 * page_kb;
-        
+
         // Used memory (excluding compressed, like C htop)
         machine.used_mem = wired + active;
         machine.compressed_mem = compressed;
-        machine.buffers_mem = purgeable;  // Purgeable = buffers in C htop
-        machine.cached_mem = inactive;     // Inactive = cache in C htop
-        
+        machine.buffers_mem = purgeable; // Purgeable = buffers in C htop
+        machine.cached_mem = inactive; // Inactive = cache in C htop
+
         // Available memory
         let free = vm_stat.free_count as u64 * page_kb;
         let speculative = vm_stat.speculative_count as u64 * page_kb;
         machine.available_mem = free + inactive + speculative;
     }
-    
+
     // Get swap usage
     let mib = [CTL_VM, VM_SWAPUSAGE];
     let mut size = mem::size_of::<XswUsage>() as size_t;
     let mut swap: XswUsage = unsafe { mem::zeroed() };
-    
+
     let ret = unsafe {
         libc::sysctl(
             mib.as_ptr() as *mut c_int,
@@ -482,7 +472,7 @@ pub fn scan_memory(machine: &mut Machine) {
             0,
         )
     };
-    
+
     if ret == 0 {
         machine.total_swap = swap.xsu_total / 1024;
         machine.used_swap = swap.xsu_used / 1024;
@@ -493,12 +483,12 @@ pub fn scan_memory(machine: &mut Machine) {
 /// This is only used for zombie/stopped states from kinfo_proc p_stat
 fn convert_process_state(status: u32) -> ProcessState {
     // macOS process status values (from sys/proc.h)
-    const SIDL: u32 = 1;    // Process being created
-    const SRUN: u32 = 2;    // Running
-    const SSLEEP: u32 = 3;  // Sleeping
-    const SSTOP: u32 = 4;   // Stopped
-    const SZOMB: u32 = 5;   // Zombie
-    
+    const SIDL: u32 = 1; // Process being created
+    const SRUN: u32 = 2; // Running
+    const SSLEEP: u32 = 3; // Sleeping
+    const SSTOP: u32 = 4; // Stopped
+    const SZOMB: u32 = 5; // Zombie
+
     match status {
         SIDL => ProcessState::Idle,
         SRUN => ProcessState::Running,
@@ -513,9 +503,9 @@ fn convert_process_state(status: u32) -> ProcessState {
 /// Uses pti_numrunning for Running vs Sleeping, and pbi_status for special states
 fn determine_process_state(pbi_status: u32, pti_numrunning: i32) -> ProcessState {
     // macOS process status values (from sys/proc.h)
-    const SSTOP: u32 = 4;   // Stopped
-    const SZOMB: u32 = 5;   // Zombie
-    
+    const SSTOP: u32 = 4; // Stopped
+    const SZOMB: u32 = 5; // Zombie
+
     // First check for zombie/stopped states from BSD info
     // (matches C htop DarwinProcessTable.c lines 107-110)
     if pbi_status == SZOMB {
@@ -524,7 +514,7 @@ fn determine_process_state(pbi_status: u32, pti_numrunning: i32) -> ProcessState
     if pbi_status == SSTOP {
         return ProcessState::Stopped;
     }
-    
+
     // Use pti_numrunning to determine running vs sleeping
     // (matches C htop DarwinProcess.c line 387)
     if pti_numrunning > 0 {
@@ -542,7 +532,7 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
     let mut argmax: c_int = 0;
     let mut size = mem::size_of::<c_int>();
     let mut mib: [c_int; 2] = [CTL_KERN, KERN_ARGMAX];
-    
+
     let ret = unsafe {
         libc::sysctl(
             mib.as_mut_ptr(),
@@ -553,16 +543,16 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
             0,
         )
     };
-    
+
     if ret != 0 || argmax <= 0 {
         return None;
     }
-    
+
     // Allocate buffer for arguments
     let mut procargs: Vec<u8> = vec![0; argmax as usize];
     let mut size = argmax as size_t;
     let mut mib: [c_int; 3] = [CTL_KERN, KERN_PROCARGS2, pid];
-    
+
     let ret = unsafe {
         libc::sysctl(
             mib.as_mut_ptr(),
@@ -573,25 +563,25 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
             0,
         )
     };
-    
+
     if ret != 0 {
         return None;
     }
-    
+
     // Parse the procargs buffer
     // Layout: nargs (int) | exec_path | \0+ | arg0 | \0 | arg1 | \0 | ...
     if size < mem::size_of::<c_int>() {
         return None;
     }
-    
+
     // Get nargs
     let nargs = i32::from_ne_bytes([procargs[0], procargs[1], procargs[2], procargs[3]]);
     if nargs <= 0 {
         return None;
     }
-    
+
     let mut pos = mem::size_of::<c_int>();
-    
+
     // Skip exec_path (find first \0)
     while pos < size && procargs[pos] != 0 {
         pos += 1;
@@ -599,7 +589,7 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
     if pos >= size {
         return None;
     }
-    
+
     // Skip trailing \0 characters
     while pos < size && procargs[pos] == 0 {
         pos += 1;
@@ -607,13 +597,13 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
     if pos >= size {
         return None;
     }
-    
+
     // Now we're at the start of arg0
     let _args_start = pos;
     let mut arg_count = 0;
     let mut cmdline = String::new();
     let mut basename_end = 0;
-    
+
     while pos < size && arg_count < nargs as usize {
         if procargs[pos] == 0 {
             arg_count += 1;
@@ -631,12 +621,12 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
         }
         pos += 1;
     }
-    
+
     // If basename_end wasn't set (single arg), it's the whole string
     if basename_end == 0 {
         basename_end = cmdline.len();
     }
-    
+
     if cmdline.is_empty() {
         None
     } else {
@@ -654,33 +644,33 @@ pub fn scan_processes(machine: &mut Machine) {
             (pids.len() * mem::size_of::<i32>()) as c_int,
         )
     };
-    
+
     if count <= 0 {
         return;
     }
-    
+
     let pid_count = count as usize;
     pids.truncate(pid_count);
-    
+
     // Get current time for CPU% calculation
     let time_delta = machine.time_delta_ms() as f64 / 1000.0;
-    
+
     // Get total memory for MEM% calculation
     let total_mem_kb = machine.total_mem as f64;
-    
+
     // Reset task counts (will be accumulated during scan)
     // Match C htop: kernelThreads is always 0 on Darwin, userlandThreads is sum of pti_threadnum
     machine.total_tasks = 0;
     machine.running_tasks = 0;
     machine.userland_threads = 0;
     machine.kernel_threads = 0;
-    
+
     // Process each PID
     for &pid in &pids {
         if pid <= 0 {
             continue;
         }
-        
+
         // Get BSD info
         let mut bsd_info: ProcBsdInfo = Default::default();
         let bsd_size = unsafe {
@@ -692,11 +682,11 @@ pub fn scan_processes(machine: &mut Machine) {
                 mem::size_of::<ProcBsdInfo>() as c_int,
             )
         };
-        
+
         if bsd_size <= 0 {
             continue;
         }
-        
+
         // Get task info
         let mut task_info: ProcTaskInfo = Default::default();
         let task_size = unsafe {
@@ -708,7 +698,7 @@ pub fn scan_processes(machine: &mut Machine) {
                 mem::size_of::<ProcTaskInfo>() as c_int,
             )
         };
-        
+
         // Create or update process
         let is_new = machine.processes.get(pid).is_none();
         let prev_time = if !is_new {
@@ -716,13 +706,17 @@ pub fn scan_processes(machine: &mut Machine) {
         } else {
             0
         };
-        
+
         let mut process = if is_new {
             Process::new(pid)
         } else {
-            machine.processes.get(pid).cloned().unwrap_or_else(|| Process::new(pid))
+            machine
+                .processes
+                .get(pid)
+                .cloned()
+                .unwrap_or_else(|| Process::new(pid))
         };
-        
+
         // Basic info from BSD
         process.pid = pid;
         process.ppid = bsd_info.pbi_ppid as i32;
@@ -730,27 +724,35 @@ pub fn scan_processes(machine: &mut Machine) {
         process.uid = bsd_info.pbi_uid;
         process.nice = bsd_info.pbi_nice as i64;
         process.starttime_ctime = bsd_info.pbi_start_tvsec as i64;
-        
+
         // Determine process state using task info (pti_numrunning)
         // This matches C htop behavior - see DarwinProcess.c line 387
-        let pti_numrunning = if task_size > 0 { task_info.pti_numrunning } else { 0 };
+        let pti_numrunning = if task_size > 0 {
+            task_info.pti_numrunning
+        } else {
+            0
+        };
         process.state = determine_process_state(bsd_info.pbi_status, pti_numrunning);
-        
+
         // Get username
         process.user = Some(machine.get_username(process.uid));
-        
+
         // Get process name/command
         let mut name_buf = [0u8; MAXCOMLEN + 1];
         let name_len = unsafe {
-            proc_name(pid, name_buf.as_mut_ptr() as *mut c_void, name_buf.len() as u32)
+            proc_name(
+                pid,
+                name_buf.as_mut_ptr() as *mut c_void,
+                name_buf.len() as u32,
+            )
         };
-        
+
         if name_len > 0 {
             if let Ok(name) = CStr::from_bytes_until_nul(&name_buf) {
                 process.comm = Some(name.to_string_lossy().to_string());
             }
         }
-        
+
         // Fallback to pbi_comm
         if process.comm.is_none() {
             if let Some(pos) = bsd_info.pbi_comm.iter().position(|&c| c == 0) {
@@ -759,20 +761,19 @@ pub fn scan_processes(machine: &mut Machine) {
                 }
             }
         }
-        
+
         // Get executable path
         let mut path_buf = [0u8; MAXPATHLEN];
-        let path_len = unsafe {
-            proc_pidpath(pid, path_buf.as_mut_ptr() as *mut c_void, MAXPATHLEN as u32)
-        };
-        
+        let path_len =
+            unsafe { proc_pidpath(pid, path_buf.as_mut_ptr() as *mut c_void, MAXPATHLEN as u32) };
+
         if path_len > 0 {
             if let Ok(path) = CStr::from_bytes_until_nul(&path_buf) {
                 let path_str = path.to_string_lossy().to_string();
                 process.exe = Some(path_str);
             }
         }
-        
+
         // Get full command line with arguments via KERN_PROCARGS2
         // This matches C htop's DarwinProcess_setFromKInfoProc behavior
         if let Some((cmdline, basename_end)) = get_process_cmdline(pid) {
@@ -784,27 +785,27 @@ pub fn scan_processes(machine: &mut Machine) {
             // Fallback to comm
             process.update_cmdline(comm.clone(), comm.len());
         }
-        
+
         // Task info
         if task_size > 0 {
             // Memory (convert bytes to KB)
             process.m_virt = (task_info.pti_virtual_size / 1024) as i64;
             process.m_resident = (task_info.pti_resident_size / 1024) as i64;
-            
+
             // CPU time (in nanoseconds -> convert to hundredths of a second)
             let total_time_ns = task_info.pti_total_user + task_info.pti_total_system;
             process.time = (total_time_ns / 10_000_000) as u64; // ns to centiseconds
-            
+
             // Thread count
             process.nlwp = task_info.pti_threadnum as i64;
-            
+
             // Priority
             process.priority = task_info.pti_priority as i64;
-            
+
             // Page faults
             process.minflt = task_info.pti_faults as u64;
             process.majflt = task_info.pti_pageins as u64;
-            
+
             // Calculate CPU%
             if !is_new && time_delta > 0.0 && prev_time < process.time {
                 let time_diff = (process.time - prev_time) as f64;
@@ -813,27 +814,27 @@ pub fn scan_processes(machine: &mut Machine) {
                 // Clamp to reasonable value
                 process.percent_cpu = process.percent_cpu.min(100.0 * machine.active_cpus as f32);
             }
-            
+
             // Calculate MEM%
             if total_mem_kb > 0.0 {
                 process.percent_mem = ((process.m_resident as f64 / total_mem_kb) * 100.0) as f32;
             }
-            
+
             // Accumulate task counts (matching C htop darwin/DarwinProcess.c)
             // kernelThreads is always 0 on Darwin
-            // userlandThreads is sum of pti_threadnum across all processes  
+            // userlandThreads is sum of pti_threadnum across all processes
             // totalTasks includes both the process AND its threads
             machine.userland_threads += task_info.pti_threadnum as u32;
-            machine.total_tasks += task_info.pti_threadnum as u32;  // Add threads to totalTasks
+            machine.total_tasks += task_info.pti_threadnum as u32; // Add threads to totalTasks
             machine.running_tasks += task_info.pti_numrunning as u32;
         }
-        
+
         // Count this process in total_tasks (matching DarwinProcessTable.c line 125)
         machine.total_tasks += 1;
-        
+
         // Check if kernel thread (PID 0 or ppid 0 with specific patterns)
         process.is_kernel_thread = pid == 0 || process.ppid == 0;
-        
+
         process.updated = true;
         machine.processes.add(process);
     }

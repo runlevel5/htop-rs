@@ -8,10 +8,10 @@
 
 #![allow(dead_code)]
 
-use ncurses::*;
-use crate::core::Settings;
 use super::crt::ColorElement;
 use super::Crt;
+use crate::core::Settings;
+use ncurses::*;
 
 /// Default function key labels (6-char fixed width with trailing spaces, like C htop)
 pub const DEFAULT_FUNCTIONS: [(&str, &str); 10] = [
@@ -66,7 +66,7 @@ impl FunctionBar {
                 }
             })
             .collect();
-        
+
         FunctionBar { functions }
     }
 
@@ -97,7 +97,7 @@ impl FunctionBar {
         let width = crt.width();
         let bar_color = crt.color(ColorElement::FunctionBar);
         let key_color = crt.color(ColorElement::FunctionKey);
-        
+
         // First fill entire line with spaces in FUNCTION_BAR color
         mv(y, 0);
         attron(bar_color);
@@ -133,7 +133,7 @@ impl FunctionBar {
         let width = crt.width();
         let bar_color = crt.color(ColorElement::FunctionBar);
         let key_color = crt.color(ColorElement::FunctionKey);
-        
+
         // First fill entire line with spaces in FUNCTION_BAR color
         mv(y, 0);
         attron(bar_color);

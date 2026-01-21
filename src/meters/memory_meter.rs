@@ -1,12 +1,12 @@
 //! Memory Meter
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// Memory Meter
-/// 
+///
 /// Displays memory usage exactly like C htop:
 /// Bar mode: "Mem[|||||||||     XXXM/YYYM]"
 /// The value text appears right-aligned INSIDE the bar
@@ -72,7 +72,15 @@ impl Meter for MemoryMeter {
         self.cache = machine.cached_mem as f64;
     }
 
-    fn draw(&self, crt: &Crt, _machine: &Machine, _settings: &Settings, x: i32, y: i32, width: i32) {
+    fn draw(
+        &self,
+        crt: &Crt,
+        _machine: &Machine,
+        _settings: &Settings,
+        x: i32,
+        y: i32,
+        width: i32,
+    ) {
         use ncurses::*;
 
         match self.mode {
@@ -105,9 +113,11 @@ impl Meter for MemoryMeter {
                 // Format the text to show inside the bar (right-aligned)
                 // Calculate actual used including shared and compressed (like C htop)
                 let display_used = self.used + self.shared.max(0.0) + self.compressed.max(0.0);
-                let text = format!("{}/{}", 
-                    Self::human_unit(display_used), 
-                    Self::human_unit(self.total));
+                let text = format!(
+                    "{}/{}",
+                    Self::human_unit(display_used),
+                    Self::human_unit(self.total)
+                );
 
                 // Build the bar content with text right-aligned
                 let text_len = text.len();
@@ -180,9 +190,11 @@ impl Meter for MemoryMeter {
 
                 let display_used = self.used + self.shared.max(0.0);
                 attron(value_attr);
-                let _ = addstr(&format!("{}/{}", 
+                let _ = addstr(&format!(
+                    "{}/{}",
                     Self::human_unit(display_used),
-                    Self::human_unit(self.total)));
+                    Self::human_unit(self.total)
+                ));
                 attroff(value_attr);
             }
             _ => {

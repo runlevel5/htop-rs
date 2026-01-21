@@ -2,14 +2,14 @@
 
 #![allow(dead_code)]
 
-use ncurses::*;
-use crate::core::{Machine, Process, ProcessField, ProcessState, Settings};
-use super::crt::{ColorElement, KEY_F3, KEY_F4, KEY_F10, KEY_F15, KEY_DEL_MAC};
+use super::crt::{ColorElement, KEY_DEL_MAC, KEY_F10, KEY_F15, KEY_F3, KEY_F4};
 use super::function_bar::FunctionBar;
 use super::panel::HandlerResult;
 use super::rich_string::RichString;
-use super::row_print::{print_kbytes, print_time, print_percentage, print_left_aligned};
+use super::row_print::{print_kbytes, print_left_aligned, print_percentage, print_time};
 use super::Crt;
+use crate::core::{Machine, Process, ProcessField, ProcessState, Settings};
+use ncurses::*;
 
 /// Incremental mode type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub struct IncSearch {
     pub active: bool,
     pub text: String,
     pub mode: Option<IncType>,
-    pub found: bool,  // For search mode - whether match was found
+    pub found: bool, // For search mode - whether match was found
 }
 
 impl IncSearch {
@@ -76,7 +76,7 @@ impl IncSearch {
     pub fn backspace(&mut self) {
         self.text.pop();
     }
-    
+
     pub fn clear(&mut self) {
         self.text.clear();
     }
@@ -97,14 +97,14 @@ pub struct MainPanel {
 
     // Process display
     pub fields: Vec<ProcessField>,
-    
+
     // Search/filter
     pub inc_search: IncSearch,
     pub filter: Option<String>,
-    
+
     // Following state (for filter/search - shows yellow highlight)
     pub following: bool,
-    pub following_pid: Option<i32>,  // PID to follow when following is enabled
+    pub following_pid: Option<i32>, // PID to follow when following is enabled
     pub selection_color: ColorElement,
 
     // Function bar
@@ -114,8 +114,8 @@ pub struct MainPanel {
     pub tree_view: bool,
     pub show_header: bool,
     pub needs_redraw: bool,
-    pub wrap_command: bool,  // Wrap long command lines
-    
+    pub wrap_command: bool, // Wrap long command lines
+
     // PID search
     pub pid_search: Option<String>,
 }
@@ -137,8 +137,8 @@ impl MainPanel {
                 ProcessField::User,
                 ProcessField::Priority,
                 ProcessField::Nice,
-                ProcessField::MSize,      // M_VIRT
-                ProcessField::MResident,  // M_RESIDENT
+                ProcessField::MSize,     // M_VIRT
+                ProcessField::MResident, // M_RESIDENT
                 ProcessField::State,
                 ProcessField::PercentCpu, // PERCENT_CPU
                 ProcessField::PercentMem, // PERCENT_MEM
@@ -167,7 +167,7 @@ impl MainPanel {
             self.filter = Some(filter.to_string());
         }
     }
-    
+
     /// Clear the filter
     pub fn clear_filter(&mut self) {
         self.filter = None;
@@ -176,7 +176,7 @@ impl MainPanel {
         self.following = false;
         self.selection_color = ColorElement::PanelSelectionFocus;
     }
-    
+
     /// Check if filtering is active (has filter text)
     pub fn is_filtering(&self) -> bool {
         self.filter.is_some()
@@ -186,11 +186,11 @@ impl MainPanel {
     /// Matches C htop MainPanel_updateLabels behavior
     pub fn update_labels(&mut self, tree_view: bool, has_filter: bool) {
         self.tree_view = tree_view;
-        
+
         // Update F5 label: shows what action will be taken
         let tree_label = if tree_view { "List  " } else { "Tree  " };
         self.function_bar.set_function(4, "F5", tree_label);
-        
+
         // Update F4 label: "FILTER" when filter active, "Filter" otherwise
         // C htop uses uppercase to indicate filter is active
         let filter_label = if has_filter { "FILTER" } else { "Filter" };
@@ -217,7 +217,7 @@ impl MainPanel {
         if rel_x < 0 {
             return None;
         }
-        
+
         let mut current_x = 0;
         for field in &self.fields {
             let title_len = field.title().len() as i32;
@@ -226,7 +226,7 @@ impl MainPanel {
             }
             current_x += title_len;
         }
-        
+
         // Default to Command if clicked past all fields
         Some(ProcessField::Command)
     }
@@ -241,33 +241,44 @@ impl MainPanel {
     /// Ensure the selected process is visible
     fn ensure_visible(&mut self, process_count: i32) {
         let visible_height = if self.show_header { self.h - 1 } else { self.h };
-        
+
         if self.selected < self.scroll_v {
             self.scroll_v = self.selected;
         } else if self.selected >= self.scroll_v + visible_height {
             self.scroll_v = self.selected - visible_height + 1;
         }
-        
+
         // Clamp scroll
         let max_scroll = (process_count - visible_height).max(0);
         self.scroll_v = self.scroll_v.clamp(0, max_scroll);
     }
 
     /// Draw the panel header with sort indicator
-    fn draw_header(&self, crt: &Crt, y: i32, _settings: &Settings, sort_key: ProcessField, sort_descending: bool) {
+    fn draw_header(
+        &self,
+        crt: &Crt,
+        y: i32,
+        _settings: &Settings,
+        sort_key: ProcessField,
+        sort_descending: bool,
+    ) {
         let header_attr = crt.color(ColorElement::PanelHeaderFocus);
         let sort_attr = crt.color(ColorElement::PanelSelectionFocus);
-        
+
         // Determine the active sort key - in tree view, it's always PID
         let active_sort_key = if self.tree_view {
             ProcessField::Pid
         } else {
             sort_key
         };
-        
+
         // In tree view, sort is always ascending
-        let ascending = if self.tree_view { true } else { !sort_descending };
-        
+        let ascending = if self.tree_view {
+            true
+        } else {
+            !sort_descending
+        };
+
         // Fill the line with the header attribute (starting at self.x, not 0)
         mv(y, self.x);
         attron(header_attr);
@@ -275,35 +286,51 @@ impl MainPanel {
             addch(' ' as u32);
         }
         attroff(header_attr);
-        
+
         // Draw field titles with highlighting for sort column
         mv(y, self.x);
         let mut str = RichString::with_capacity(256);
-        
+
         for field in &self.fields {
             let title = field.title();
             let is_sort_column = *field == active_sort_key;
-            let attr = if is_sort_column { sort_attr } else { header_attr };
-            
+            let attr = if is_sort_column {
+                sort_attr
+            } else {
+                header_attr
+            };
+
             str.append(title, attr);
-            
+
             if is_sort_column {
                 // Replace trailing space with sort indicator (matches C htop Table.c:308-314)
                 // Check if last char is a space, if so replace it with indicator
                 if str.len() > 0 && str.last_char() == Some(' ') {
                     str.rewind(1);
                     // Ascending (small to large): △ (north), Descending (large to small): ▽ (south)
-                    let indicator = if ascending { crt.tree_str.asc } else { crt.tree_str.desc };
+                    let indicator = if ascending {
+                        crt.tree_str.asc
+                    } else {
+                        crt.tree_str.desc
+                    };
                     str.append(indicator, attr);
                 }
             }
         }
-        
+
         str.write_at_width(y, self.x, self.w as usize);
     }
 
     /// Draw a single process line with C htop-compatible coloring
-    fn draw_process(&self, crt: &Crt, y: i32, process: &Process, selected: bool, settings: &Settings, current_uid: u32) {
+    fn draw_process(
+        &self,
+        crt: &Crt,
+        y: i32,
+        process: &Process,
+        selected: bool,
+        settings: &Settings,
+        current_uid: u32,
+    ) {
         let selection_attr = if selected {
             crt.color(self.selection_color)
         } else {
@@ -314,7 +341,16 @@ impl MainPanel {
         let coloring = settings.highlight_megabytes;
 
         for field in &self.fields {
-            self.write_field(&mut str, process, *field, coloring, crt, current_uid, settings.show_program_path, settings.shadow_other_users);
+            self.write_field(
+                &mut str,
+                process,
+                *field,
+                coloring,
+                crt,
+                current_uid,
+                settings.show_program_path,
+                settings.shadow_other_users,
+            );
         }
 
         // Apply selection highlighting if selected
@@ -322,11 +358,11 @@ impl MainPanel {
             // For selected rows, we draw with selection background
             mv(y, self.x);
             attron(selection_attr);
-            
+
             let text = str.text();
             let display_text: String = text.chars().take(self.w as usize).collect();
             let _ = addstr(&display_text);
-            
+
             // Pad to width
             let current_len = display_text.chars().count();
             for _ in current_len..self.w as usize {
@@ -340,7 +376,17 @@ impl MainPanel {
     }
 
     /// Write a single field to a RichString with C htop-compatible coloring
-    fn write_field(&self, str: &mut RichString, process: &Process, field: ProcessField, coloring: bool, crt: &Crt, current_uid: u32, show_program_path: bool, shadow_other_users: bool) {
+    fn write_field(
+        &self,
+        str: &mut RichString,
+        process: &Process,
+        field: ProcessField,
+        coloring: bool,
+        crt: &Crt,
+        current_uid: u32,
+        show_program_path: bool,
+        shadow_other_users: bool,
+    ) {
         let process_color = crt.color(ColorElement::Process);
         let shadow_color = crt.color(ColorElement::ProcessShadow);
         let basename_color = crt.color(ColorElement::ProcessBasename);
@@ -370,13 +416,15 @@ impl MainPanel {
                     ProcessState::Running | ProcessState::Runnable | ProcessState::Traced => {
                         crt.color(ColorElement::ProcessRunState)
                     }
-                    ProcessState::Blocked | ProcessState::Defunct | ProcessState::Stopped |
-                    ProcessState::UninterruptibleWait | ProcessState::Zombie => {
-                        crt.color(ColorElement::ProcessDState)
-                    }
-                    ProcessState::Queued | ProcessState::Waiting | ProcessState::Idle | ProcessState::Sleeping => {
-                        shadow_color
-                    }
+                    ProcessState::Blocked
+                    | ProcessState::Defunct
+                    | ProcessState::Stopped
+                    | ProcessState::UninterruptibleWait
+                    | ProcessState::Zombie => crt.color(ColorElement::ProcessDState),
+                    ProcessState::Queued
+                    | ProcessState::Waiting
+                    | ProcessState::Idle
+                    | ProcessState::Sleeping => shadow_color,
                     _ => process_color,
                 };
                 str.append(&format!("{} ", state_char), attr);
@@ -426,7 +474,11 @@ impl MainPanel {
             }
             ProcessField::Nlwp => {
                 // NLWP: thread count, dim if 1
-                let attr = if process.nlwp == 1 { shadow_color } else { process_color };
+                let attr = if process.nlwp == 1 {
+                    shadow_color
+                } else {
+                    process_color
+                };
                 str.append(&format!("{:>4} ", process.nlwp), attr);
             }
             ProcessField::Processor => {
@@ -441,13 +493,17 @@ impl MainPanel {
                 } else {
                     process.get_command_from_basename()
                 };
-                
+
                 // Draw tree indentation if in tree view mode
                 if self.tree_view && process.indent != 0 {
                     let tree_attr = crt.color(ColorElement::ProcessTree);
                     let is_last = process.indent < 0;
-                    let mut indent_bits = if is_last { -process.indent } else { process.indent };
-                    
+                    let mut indent_bits = if is_last {
+                        -process.indent
+                    } else {
+                        process.indent
+                    };
+
                     // Right-shift through indent bits, drawing vertical lines where needed
                     // (matches C htop Process.c lines 599-612)
                     while indent_bits > 1 {
@@ -459,16 +515,24 @@ impl MainPanel {
                         }
                         indent_bits >>= 1;
                     }
-                    
+
                     // Draw the branch connector (├ or └)
-                    let branch = if is_last { crt.tree_str.bend } else { crt.tree_str.rtee };
+                    let branch = if is_last {
+                        crt.tree_str.bend
+                    } else {
+                        crt.tree_str.rtee
+                    };
                     str.append(branch, tree_attr);
                     // Draw expand/collapse indicator
-                    let indicator = if process.show_children { crt.tree_str.shut } else { crt.tree_str.open };
+                    let indicator = if process.show_children {
+                        crt.tree_str.shut
+                    } else {
+                        crt.tree_str.open
+                    };
                     str.append(indicator, tree_attr);
                     str.append(" ", tree_attr);
                 }
-                
+
                 if process.is_thread() {
                     str.append(cmd, crt.color(ColorElement::ProcessThread));
                 } else if show_program_path {
@@ -505,7 +569,11 @@ impl MainPanel {
             }
             ProcessField::Tty => {
                 let tty = process.tty_name.as_deref().unwrap_or("?");
-                let attr = if tty == "?" { shadow_color } else { process_color };
+                let attr = if tty == "?" {
+                    shadow_color
+                } else {
+                    process_color
+                };
                 print_left_aligned(str, attr, tty, 8);
             }
             _ => {
@@ -519,7 +587,13 @@ impl MainPanel {
     pub fn draw(&mut self, crt: &Crt, machine: &Machine, settings: &Settings) {
         let visible_height = if self.show_header { self.h - 1 } else { self.h };
         let start_y = if self.show_header {
-            self.draw_header(crt, self.y, settings, machine.sort_key, machine.sort_descending);
+            self.draw_header(
+                crt,
+                self.y,
+                settings,
+                machine.sort_key,
+                machine.sort_descending,
+            );
             self.y + 1
         } else {
             self.y
@@ -528,11 +602,15 @@ impl MainPanel {
         // Filter and collect visible processes
         let processes: Vec<&Process> = if self.tree_view {
             // In tree view, use tree display order
-            machine.processes.iter_tree()
+            machine
+                .processes
+                .iter_tree()
                 .filter(|p| self.should_show_process(p, settings, machine))
                 .collect()
         } else {
-            machine.processes.iter()
+            machine
+                .processes
+                .iter()
                 .filter(|p| self.should_show_process(p, settings, machine))
                 .collect()
         };
@@ -550,7 +628,14 @@ impl MainPanel {
 
             if process_idx < processes.len() {
                 let selected = process_idx as i32 == self.selected;
-                self.draw_process(crt, y, processes[process_idx], selected, settings, current_uid);
+                self.draw_process(
+                    crt,
+                    y,
+                    processes[process_idx],
+                    selected,
+                    settings,
+                    current_uid,
+                );
             } else {
                 // Empty line
                 mv(y, self.x);
@@ -575,31 +660,36 @@ impl MainPanel {
             true
         }
     }
-    
+
     /// Check if a process should be visible based on settings
-    fn should_show_process(&self, process: &Process, settings: &Settings, machine: &Machine) -> bool {
+    fn should_show_process(
+        &self,
+        process: &Process,
+        settings: &Settings,
+        machine: &Machine,
+    ) -> bool {
         // Check text filter first
         if !self.matches_filter(process) {
             return false;
         }
-        
+
         // Check user filter
         if let Some(filter_uid) = machine.filter_user_id {
             if process.uid != filter_uid {
                 return false;
             }
         }
-        
+
         // Check kernel threads filter
         if settings.hide_kernel_threads && process.is_kernel_thread {
             return false;
         }
-        
+
         // Check userland threads filter
         if settings.hide_userland_threads && process.is_userland_thread {
             return false;
         }
-        
+
         true
     }
 
@@ -611,11 +701,13 @@ impl MainPanel {
         }
 
         match key {
-            KEY_UP | 0x10 => {  // Up or Ctrl+P
+            KEY_UP | 0x10 => {
+                // Up or Ctrl+P
                 self.move_selection(-1, machine);
                 HandlerResult::Handled
             }
-            KEY_DOWN | 0x0E => {  // Down or Ctrl+N
+            KEY_DOWN | 0x0E => {
+                // Down or Ctrl+N
                 self.move_selection(1, machine);
                 HandlerResult::Handled
             }
@@ -637,18 +729,22 @@ impl MainPanel {
                 self.selected = (count - 1).max(0);
                 HandlerResult::Handled
             }
-            KEY_F3 | 0x2F => {  // F3 or /
+            KEY_F3 | 0x2F => {
+                // F3 or /
                 self.inc_search.start(IncType::Search, None);
                 HandlerResult::Handled
             }
-            KEY_F4 | 0x5C => {  // F4 or \
+            KEY_F4 | 0x5C => {
+                // F4 or \
                 // Start filter mode with existing filter text (if any)
                 // Matches C htop actionIncFilter - always opens filter mode
-                self.inc_search.start(IncType::Filter, self.filter.as_deref());
+                self.inc_search
+                    .start(IncType::Filter, self.filter.as_deref());
                 HandlerResult::Handled
             }
             // Note: F5 (tree view toggle) is handled by ScreenManager
-            KEY_F10 | 0x71 | 0x51 => {  // F10 or q/Q
+            KEY_F10 | 0x71 | 0x51 => {
+                // F10 or q/Q
                 HandlerResult::BreakLoop
             }
             _ => HandlerResult::Ignored,
@@ -659,7 +755,7 @@ impl MainPanel {
     fn handle_search_key(&mut self, key: i32, machine: &Machine) -> HandlerResult {
         let is_filter = self.inc_search.is_filter();
         let is_search = self.inc_search.is_search();
-        
+
         match key {
             // F3 - find next (search mode only)
             KEY_F3 if is_search => {
@@ -671,7 +767,8 @@ impl MainPanel {
                 self.find_next(machine, -1);
                 HandlerResult::Handled
             }
-            0x1B => {  // ESC - for filter: clear and exit; for search: just exit
+            0x1B => {
+                // ESC - for filter: clear and exit; for search: just exit
                 if is_filter {
                     // Esc in filter mode clears the filter (like C htop)
                     self.inc_search.clear();
@@ -742,24 +839,26 @@ impl MainPanel {
             }
         }
     }
-    
+
     /// Find next/previous match (matches C htop IncMode_find)
     /// step: 1 for next, -1 for previous
     fn find_next(&mut self, machine: &Machine, step: i32) {
         if self.inc_search.text.is_empty() {
             return;
         }
-        
+
         let search_lower = self.inc_search.text.to_lowercase();
-        let processes: Vec<&Process> = machine.processes.iter()
+        let processes: Vec<&Process> = machine
+            .processes
+            .iter()
             .filter(|p| self.matches_filter(p))
             .collect();
-        
+
         let size = processes.len() as i32;
         if size == 0 {
             return;
         }
-        
+
         let mut i = self.selected;
         loop {
             i += step;
@@ -775,7 +874,7 @@ impl MainPanel {
                 self.inc_search.found = false;
                 return;
             }
-            
+
             let cmd = processes[i as usize].get_command().to_lowercase();
             if cmd.contains(&search_lower) {
                 self.selected = i;
@@ -799,9 +898,11 @@ impl MainPanel {
         }
 
         let search_lower = self.inc_search.text.to_lowercase();
-        
+
         // Search from current position
-        let processes: Vec<&Process> = machine.processes.iter()
+        let processes: Vec<&Process> = machine
+            .processes
+            .iter()
             .filter(|p| self.matches_filter(p))
             .collect();
 
@@ -817,7 +918,7 @@ impl MainPanel {
                 return;
             }
         }
-        
+
         // No match found
         self.inc_search.found = false;
         // Keep following state but indicate no match
@@ -836,16 +937,39 @@ impl MainPanel {
         self.ensure_visible(count);
     }
 
+    /// Scroll by wheel amount (matches C htop PANEL_SCROLL macro)
+    /// This moves BOTH selection AND scroll position by the given amount
+    pub fn scroll_wheel(&mut self, amount: i32, machine: &Machine) {
+        let count = self.get_visible_count(machine);
+        if count == 0 {
+            return;
+        }
+
+        let visible_height = if self.show_header { self.h - 1 } else { self.h };
+        let max_scroll = (count - visible_height).max(0);
+
+        // Move both selected and scroll_v by the amount (like C htop PANEL_SCROLL)
+        self.selected += amount;
+        self.scroll_v = (self.scroll_v + amount).clamp(0, max_scroll);
+
+        // Clamp selected to valid range
+        self.selected = self.selected.clamp(0, count - 1);
+    }
+
     /// Get count of visible processes
     fn get_visible_count(&self, machine: &Machine) -> i32 {
-        machine.processes.iter()
+        machine
+            .processes
+            .iter()
             .filter(|p| self.matches_filter(p))
             .count() as i32
     }
 
     /// Get the currently selected process
     pub fn get_selected_process<'a>(&self, machine: &'a Machine) -> Option<&'a Process> {
-        let processes: Vec<&Process> = machine.processes.iter()
+        let processes: Vec<&Process> = machine
+            .processes
+            .iter()
             .filter(|p| self.matches_filter(p))
             .collect();
 
@@ -856,7 +980,7 @@ impl MainPanel {
     pub fn get_selected_pid(&self, machine: &Machine) -> Option<i32> {
         self.get_selected_process(machine).map(|p| p.pid)
     }
-    
+
     /// Toggle cursor following mode
     pub fn toggle_following(&mut self, machine: &Machine) {
         self.following = !self.following;
@@ -869,20 +993,24 @@ impl MainPanel {
             self.selection_color = ColorElement::PanelSelectionFocus;
         }
     }
-    
+
     /// Update selection to follow the tracked PID
     pub fn update_following(&mut self, machine: &Machine) {
         if let Some(pid) = self.following_pid {
             let processes: Vec<&Process> = if self.tree_view {
-                machine.processes.iter_tree()
+                machine
+                    .processes
+                    .iter_tree()
                     .filter(|p| self.matches_filter(p))
                     .collect()
             } else {
-                machine.processes.iter()
+                machine
+                    .processes
+                    .iter()
                     .filter(|p| self.matches_filter(p))
                     .collect()
             };
-            
+
             // Find the process with the tracked PID
             for (i, p) in processes.iter().enumerate() {
                 if p.pid == pid {
@@ -897,38 +1025,42 @@ impl MainPanel {
             self.selection_color = ColorElement::PanelSelectionFocus;
         }
     }
-    
+
     /// Toggle wrap command display
     pub fn toggle_wrap_command(&mut self) {
         self.wrap_command = !self.wrap_command;
     }
-    
+
     /// Start incremental PID search
     pub fn start_pid_search(&mut self, digit: char, machine: &Machine) {
         // Initialize or append to PID search string
         if self.pid_search.is_none() {
             self.pid_search = Some(String::new());
         }
-        
+
         if let Some(ref mut search) = self.pid_search {
             search.push(digit);
         }
-        
+
         // Get the search string (non-mutable borrow)
         let search_str = self.pid_search.as_ref().unwrap().clone();
         let filter = self.filter.clone();
-        
+
         // Find process matching the PID prefix
         let processes: Vec<&Process> = if self.tree_view {
-            machine.processes.iter_tree()
+            machine
+                .processes
+                .iter_tree()
                 .filter(|p| self.matches_filter_with(p, &filter))
                 .collect()
         } else {
-            machine.processes.iter()
+            machine
+                .processes
+                .iter()
                 .filter(|p| self.matches_filter_with(p, &filter))
                 .collect()
         };
-        
+
         // Find first process whose PID starts with the search number
         for (i, p) in processes.iter().enumerate() {
             if p.pid.to_string().starts_with(&search_str) {
@@ -937,12 +1069,12 @@ impl MainPanel {
                 break;
             }
         }
-        
+
         // Clear the search after a delay (we'll clear it next time a non-digit key is pressed)
         // For now, just clear after processing
         // In C htop, there's a timeout - we'll simplify by clearing on next non-digit
     }
-    
+
     /// Helper for filtering with explicit filter
     fn matches_filter_with(&self, process: &Process, filter: &Option<String>) -> bool {
         if let Some(ref f) = filter {
@@ -953,7 +1085,7 @@ impl MainPanel {
             true
         }
     }
-    
+
     /// Clear PID search state
     pub fn clear_pid_search(&mut self) {
         self.pid_search = None;

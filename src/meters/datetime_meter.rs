@@ -4,10 +4,10 @@
 
 use chrono::Local;
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// DateTime Meter - displays the current date and time
 #[derive(Debug, Default)]
@@ -28,7 +28,7 @@ impl Meter for DateTimeMeter {
     }
 
     fn caption(&self) -> &str {
-        ""  // No caption, the datetime is self-explanatory
+        "" // No caption, the datetime is self-explanatory
     }
 
     fn update(&mut self, _machine: &Machine) {
@@ -37,7 +37,15 @@ impl Meter for DateTimeMeter {
         self.datetime_str = now.format("%Y-%m-%d %H:%M:%S").to_string();
     }
 
-    fn draw(&self, crt: &Crt, _machine: &Machine, _settings: &Settings, x: i32, y: i32, _width: i32) {
+    fn draw(
+        &self,
+        crt: &Crt,
+        _machine: &Machine,
+        _settings: &Settings,
+        x: i32,
+        y: i32,
+        _width: i32,
+    ) {
         use ncurses::*;
 
         let value_attr = crt.color(ColorElement::DateTime);

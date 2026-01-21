@@ -2,10 +2,10 @@
 //!
 //! Displays battery percentage and charging status.
 
+use super::{draw_bar, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode, draw_bar};
 
 /// Battery status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -34,33 +34,29 @@ impl BatteryMeter {
     #[cfg(target_os = "macos")]
     fn get_battery_info() -> Option<(f64, ACPresence)> {
         use std::process::Command;
-        
+
         // Use pmset to get battery info on macOS
-        let output = Command::new("pmset")
-            .arg("-g")
-            .arg("batt")
-            .output()
-            .ok()?;
-        
+        let output = Command::new("pmset").arg("-g").arg("batt").output().ok()?;
+
         let output_str = String::from_utf8_lossy(&output.stdout);
-        
+
         // Parse output like:
         // Now drawing from 'Battery Power'
         //  -InternalBattery-0 (id=...)    100%; charged; 0:00 remaining present: true
         // OR:
         // Now drawing from 'AC Power'
         //  -InternalBattery-0 (id=...)    100%; charging; ...
-        
+
         let mut percent = None;
         let mut ac_presence = ACPresence::Unknown;
-        
+
         for line in output_str.lines() {
             if line.contains("AC Power") {
                 ac_presence = ACPresence::Online;
             } else if line.contains("Battery Power") {
                 ac_presence = ACPresence::Offline;
             }
-            
+
             // Look for percentage like "100%"
             if let Some(pct_pos) = line.find('%') {
                 // Find the start of the number
@@ -74,7 +70,7 @@ impl BatteryMeter {
                 }
             }
         }
-        
+
         percent.map(|p| (p, ac_presence))
     }
 
@@ -82,25 +78,28 @@ impl BatteryMeter {
     fn get_battery_info() -> Option<(f64, ACPresence)> {
         use std::fs;
         use std::path::Path;
-        
+
         let power_supply_path = Path::new("/sys/class/power_supply");
-        
+
         if !power_supply_path.exists() {
             return None;
         }
-        
+
         let mut total_capacity = 0.0;
         let mut battery_count = 0;
         let mut ac_presence = ACPresence::Unknown;
-        
+
         if let Ok(entries) = fs::read_dir(power_supply_path) {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
-                
+
                 // Check for AC adapter
-                if name_str.starts_with("AC") || name_str.starts_with("ACAD") || name_str.contains("ADP") {
+                if name_str.starts_with("AC")
+                    || name_str.starts_with("ACAD")
+                    || name_str.contains("ADP")
+                {
                     let online_path = path.join("online");
                     if let Ok(content) = fs::read_to_string(&online_path) {
                         ac_presence = if content.trim() == "1" {
@@ -110,7 +109,7 @@ impl BatteryMeter {
                         };
                     }
                 }
-                
+
                 // Check for battery
                 if name_str.starts_with("BAT") {
                     let capacity_path = path.join("capacity");
@@ -123,7 +122,7 @@ impl BatteryMeter {
                 }
             }
         }
-        
+
         if battery_count > 0 {
             Some((total_capacity / battery_count as f64, ac_presence))
         } else {
@@ -140,13 +139,13 @@ impl BatteryMeter {
         if !self.available {
             return "N/A".to_string();
         }
-        
+
         let ac_str = match self.ac_presence {
             ACPresence::Online => "; AC",
             ACPresence::Offline => "; BAT",
             ACPresence::Unknown => "",
         };
-        
+
         format!("{:.1}%{}", self.percent, ac_str)
     }
 }
@@ -172,7 +171,15 @@ impl Meter for BatteryMeter {
         }
     }
 
-    fn draw(&self, crt: &Crt, _machine: &Machine, _settings: &Settings, x: i32, y: i32, width: i32) {
+    fn draw(
+        &self,
+        crt: &Crt,
+        _machine: &Machine,
+        _settings: &Settings,
+        x: i32,
+        y: i32,
+        width: i32,
+    ) {
         use ncurses::*;
 
         match self.mode {
@@ -181,25 +188,25 @@ impl Meter for BatteryMeter {
                     // Draw N/A in text mode
                     let caption_attr = crt.color(ColorElement::MeterText);
                     let value_attr = crt.color(ColorElement::MeterValueError);
-                    
+
                     mv(y, x);
                     attron(caption_attr);
                     let _ = addstr("BAT");
                     attroff(caption_attr);
-                    
+
                     attron(value_attr);
                     let _ = addstr(" N/A");
                     attroff(value_attr);
                     return;
                 }
-                
+
                 // Draw caption
                 let caption_attr = crt.color(ColorElement::MeterText);
                 mv(y, x);
                 attron(caption_attr);
                 let _ = addstr("BAT");
                 attroff(caption_attr);
-                
+
                 // Determine bar color based on percentage
                 let bar_color = if self.percent > 50.0 {
                     ColorElement::Battery as i32
@@ -208,10 +215,17 @@ impl Meter for BatteryMeter {
                 } else {
                     ColorElement::MeterValueError as i32
                 };
-                
+
                 let bar_width = width - 3; // Account for "BAT"
-                draw_bar(crt, x + 3, y, bar_width, &[(self.percent, bar_color)], 100.0);
-                
+                draw_bar(
+                    crt,
+                    x + 3,
+                    y,
+                    bar_width,
+                    &[(self.percent, bar_color)],
+                    100.0,
+                );
+
                 // Overlay percentage text
                 let text = self.format_battery();
                 let text_x = x + width - text.len() as i32 - 2;

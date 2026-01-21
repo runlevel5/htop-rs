@@ -5,11 +5,11 @@
 
 #![allow(dead_code)]
 
-use ncurses::*;
-use super::crt::ColorElement;
+use super::crt::{ColorElement, KEY_WHEELDOWN, KEY_WHEELUP};
 use super::function_bar::FunctionBar;
 use super::rich_string::RichString;
 use super::Crt;
+use ncurses::*;
 
 /// Handler result from event processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub enum HandlerResult {
 pub trait PanelItem {
     /// Display the item
     fn display(&self, buffer: &mut RichString, highlighted: bool);
-    
+
     /// Get the sort key for typing search
     fn sort_key(&self) -> &str;
 }
@@ -41,14 +41,14 @@ pub struct TextItem {
 
 impl TextItem {
     pub fn new(text: &str) -> Self {
-        TextItem { 
+        TextItem {
             text: text.to_string(),
             attr: A_NORMAL,
         }
     }
 
     pub fn with_attr(text: &str, attr: attr_t) -> Self {
-        TextItem { 
+        TextItem {
             text: text.to_string(),
             attr,
         }
@@ -59,7 +59,7 @@ impl PanelItem for TextItem {
     fn display(&self, buffer: &mut RichString, _highlighted: bool) {
         buffer.append(&self.text, self.attr);
     }
-    
+
     fn sort_key(&self) -> &str {
         &self.text
     }
@@ -85,7 +85,7 @@ impl PanelItem for ListItem {
     fn display(&self, buffer: &mut RichString, _highlighted: bool) {
         buffer.append(&self.value, A_NORMAL);
     }
-    
+
     fn sort_key(&self) -> &str {
         &self.value
     }
@@ -98,27 +98,27 @@ pub struct Panel {
     pub y: i32,
     pub w: i32,
     pub h: i32,
-    
+
     // Items
     items: Vec<Box<dyn PanelItem>>,
-    
+
     // Selection state
     pub selected: i32,
     pub old_selected: i32,
     pub scroll_v: i32,
     pub scroll_h: i32,
-    
+
     // Display state
     pub needs_redraw: bool,
     pub cursor_on: bool,
     pub was_focus: bool,
-    
+
     // Header
     pub header: RichString,
-    
+
     // Function bar
     pub function_bar: FunctionBar,
-    
+
     // Selection color
     pub selection_color: ColorElement,
 }
@@ -224,6 +224,26 @@ impl Panel {
         self.move_down(self.h - 1);
     }
 
+    /// Scroll by wheel amount (matches C htop PANEL_SCROLL macro)
+    /// This moves BOTH selection AND scroll position by the given amount
+    pub fn scroll_wheel(&mut self, amount: i32) {
+        let size = self.items.len() as i32;
+        if size == 0 {
+            return;
+        }
+
+        let display_height = self.h - 1; // Account for header
+        let max_scroll = (size - display_height).max(0);
+
+        // Move both selected and scroll_v by the amount
+        self.selected += amount;
+        self.scroll_v = (self.scroll_v + amount).clamp(0, max_scroll);
+
+        // Clamp selected to valid range
+        self.selected = self.selected.clamp(0, size - 1);
+        self.needs_redraw = true;
+    }
+
     /// Ensure the selected item is visible
     fn ensure_visible(&mut self) {
         // Adjust scroll to make selection visible
@@ -297,7 +317,11 @@ impl Panel {
 
             if item_index < self.items.len() {
                 let is_selected = item_index as i32 == self.selected;
-                let attr = if is_selected { selection_attr } else { default_attr };
+                let attr = if is_selected {
+                    selection_attr
+                } else {
+                    default_attr
+                };
 
                 // Get item display
                 let mut buffer = RichString::new();
@@ -308,7 +332,7 @@ impl Panel {
                 let text = buffer.text();
                 let display_text: String = text.chars().take(self.w as usize).collect();
                 let _ = addstr(&display_text);
-                
+
                 // Pad to width
                 let padding = self.w as usize - display_text.chars().count();
                 for _ in 0..padding {
@@ -328,6 +352,9 @@ impl Panel {
 
     /// Handle a key event
     pub fn on_key(&mut self, key: i32) -> HandlerResult {
+        // Scroll wheel amount (matches CRT_scrollWheelVAmount in C htop)
+        const SCROLL_WHEEL_V_AMOUNT: i32 = 10;
+
         match key {
             KEY_UP => {
                 self.move_up(1);
@@ -353,6 +380,14 @@ impl Panel {
                 self.move_end();
                 HandlerResult::Handled
             }
+            KEY_WHEELUP => {
+                self.scroll_wheel(-SCROLL_WHEEL_V_AMOUNT);
+                HandlerResult::Handled
+            }
+            KEY_WHEELDOWN => {
+                self.scroll_wheel(SCROLL_WHEEL_V_AMOUNT);
+                HandlerResult::Handled
+            }
             _ => HandlerResult::Ignored,
         }
     }
@@ -360,7 +395,7 @@ impl Panel {
     /// Select by typing (incremental search)
     pub fn select_by_typing(&mut self, ch: char) -> HandlerResult {
         let search_char = ch.to_lowercase().next().unwrap_or(ch);
-        
+
         // Search from current selection
         for i in (self.selected as usize + 1)..self.items.len() {
             if let Some(first_char) = self.items[i].sort_key().chars().next() {
@@ -370,7 +405,7 @@ impl Panel {
                 }
             }
         }
-        
+
         // Wrap around to beginning
         for i in 0..self.selected as usize {
             if let Some(first_char) = self.items[i].sort_key().chars().next() {
@@ -380,7 +415,7 @@ impl Panel {
                 }
             }
         }
-        
+
         HandlerResult::Ignored
     }
 }

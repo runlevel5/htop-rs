@@ -4,8 +4,8 @@
 
 #![allow(dead_code)]
 
-use ncurses::*;
 use ncurses::CURSOR_VISIBILITY::{CURSOR_INVISIBLE, CURSOR_VISIBLE};
+use ncurses::*;
 
 use crate::core::{ColorScheme, Settings};
 
@@ -35,14 +35,14 @@ pub const TREE_ASCII: TreeStrings = TreeStrings {
 
 /// Unicode tree characters
 pub const TREE_UTF8: TreeStrings = TreeStrings {
-    vert: "\u{2502}",  // │
-    rtee: "\u{251c}",  // ├
-    bend: "\u{2514}",  // └
-    tend: "\u{250c}",  // ┌
-    open: "+",         // expand indicator (children hidden)
-    shut: "\u{2500}",  // ─ collapse indicator (children shown)
-    asc: "\u{25b3}",   // △
-    desc: "\u{25bd}",  // ▽
+    vert: "\u{2502}", // │
+    rtee: "\u{251c}", // ├
+    bend: "\u{2514}", // └
+    tend: "\u{250c}", // ┌
+    open: "+",        // expand indicator (children hidden)
+    shut: "\u{2500}", // ─ collapse indicator (children shown)
+    asc: "\u{25b3}",  // △
+    desc: "\u{25bd}", // ▽
 };
 
 /// Color elements for the UI
@@ -189,17 +189,17 @@ impl MouseEvent {
     pub fn is_left_click(&self) -> bool {
         (self.bstate & BUTTON1_RELEASED as u64) != 0
     }
-    
+
     /// Check if this was a right button release
     pub fn is_right_click(&self) -> bool {
         (self.bstate & BUTTON3_RELEASED as u64) != 0
     }
-    
+
     /// Check if this was a wheel up event
     pub fn is_wheel_up(&self) -> bool {
         (self.bstate & BUTTON4_PRESSED as u64) != 0
     }
-    
+
     /// Check if this was a wheel down event
     pub fn is_wheel_down(&self) -> bool {
         (self.bstate & BUTTON5_PRESSED_COMPAT) != 0
@@ -217,7 +217,7 @@ pub const KEY_F7: i32 = KEY_F0 + 7;
 pub const KEY_F8: i32 = KEY_F0 + 8;
 pub const KEY_F9: i32 = KEY_F0 + 9;
 pub const KEY_F10: i32 = KEY_F0 + 10;
-pub const KEY_F15: i32 = KEY_F0 + 15;  // Shift-F3
+pub const KEY_F15: i32 = KEY_F0 + 15; // Shift-F3
 
 /// Get ALT key code
 pub fn key_alt(x: char) -> i32 {
@@ -248,9 +248,10 @@ impl Crt {
         // This is required for ncurses to properly handle wide/Unicode characters
         // Match C htop: check LC_CTYPE/LC_ALL env vars, or use "" to get system default
         unsafe {
-            let lc_ctype = std::env::var("LC_CTYPE").ok()
+            let lc_ctype = std::env::var("LC_CTYPE")
+                .ok()
                 .or_else(|| std::env::var("LC_ALL").ok());
-            
+
             if let Some(lc) = lc_ctype {
                 let c_str = std::ffi::CString::new(lc).unwrap_or_default();
                 libc::setlocale(libc::LC_CTYPE, c_str.as_ptr());
@@ -258,19 +259,22 @@ impl Crt {
                 libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr() as *const libc::c_char);
             }
         }
-        
+
         // Initialize ncurses
         initscr();
         noecho();
         cbreak();
         curs_set(CURSOR_INVISIBLE);
         keypad(stdscr(), true);
-        
+
         // Enable mouse support
         if settings.enable_mouse {
             // Enable mouse events: button 1 released, button 3 released, and wheel events
             // Note: BUTTON5 may not be available on all platforms
-            let mask = BUTTON1_RELEASED | BUTTON3_RELEASED | BUTTON4_PRESSED | BUTTON5_PRESSED_COMPAT as i32;
+            let mask = BUTTON1_RELEASED
+                | BUTTON3_RELEASED
+                | BUTTON4_PRESSED
+                | BUTTON5_PRESSED_COMPAT as i32;
             mousemask(mask as mmask_t, None);
             mouseinterval(0);
         }
@@ -291,7 +295,7 @@ impl Crt {
             utf8,
             cursor_x: 0,
             scroll_h_amount: 5,
-            scroll_wheel_v_amount: 3,
+            scroll_wheel_v_amount: 10, // Match C htop CRT_scrollWheelVAmount
             screen_width: 0,
             screen_height: 0,
             delay: settings.delay,
@@ -312,7 +316,7 @@ impl Crt {
         #[cfg(unix)]
         {
             use std::ffi::CStr;
-            
+
             // Try nl_langinfo first (matches C htop behavior)
             let codeset = unsafe {
                 let ptr = libc::nl_langinfo(libc::CODESET);
@@ -322,12 +326,12 @@ impl Crt {
                     String::new()
                 }
             };
-            
+
             if codeset.to_uppercase() == "UTF-8" || codeset.to_uppercase() == "UTF8" {
                 return true;
             }
         }
-        
+
         // Fallback: check locale environment variables
         if let Ok(lang) = std::env::var("LANG") {
             if lang.to_lowercase().contains("utf") {
@@ -386,10 +390,10 @@ impl Crt {
         const PAIR_BLACK_GREEN: i16 = 9;
         const PAIR_BLACK_CYAN: i16 = 10;
         const PAIR_WHITE_BLACK: i16 = 11;
-        const PAIR_GRAY_BLACK: i16 = 12;  // For dim/shadow colors
-        const PAIR_BLUE_BLUE: i16 = 13;   // For inactive screen tabs
+        const PAIR_GRAY_BLACK: i16 = 12; // For dim/shadow colors
+        const PAIR_BLUE_BLUE: i16 = 13; // For inactive screen tabs
         const PAIR_GREEN_GREEN: i16 = 14; // For active screen tab border
-        const PAIR_BLACK_BLUE: i16 = 15;  // For inactive screen tab text
+        const PAIR_BLACK_BLUE: i16 = 15; // For inactive screen tab text
         const PAIR_BLACK_YELLOW: i16 = 16; // For PanelSelectionFollow (filter/search following)
 
         init_pair(PAIR_DEFAULT, -1, -1);
@@ -407,7 +411,7 @@ impl Crt {
         init_pair(PAIR_GREEN_GREEN, COLOR_GREEN, COLOR_GREEN);
         init_pair(PAIR_BLACK_BLUE, COLOR_BLACK, COLOR_BLUE);
         init_pair(PAIR_BLACK_YELLOW, COLOR_BLACK, COLOR_YELLOW);
-        
+
         // Gray/black pair: use color 8 (dark gray) if available, otherwise black
         // This matches C htop's ColorPairGrayBlack behavior
         let gray_fg = if COLORS() > 8 { 8 } else { COLOR_BLACK };
@@ -420,8 +424,10 @@ impl Crt {
         self.colors[ColorElement::FunctionKey as usize] = COLOR_PAIR(PAIR_WHITE_BLACK);
         self.colors[ColorElement::PanelHeaderFocus as usize] = COLOR_PAIR(PAIR_BLACK_GREEN);
         self.colors[ColorElement::PanelHeaderUnfocus as usize] = COLOR_PAIR(PAIR_BLACK_GREEN);
-        self.colors[ColorElement::PanelSelectionFocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN) | A_BOLD;
-        self.colors[ColorElement::PanelSelectionFollow as usize] = COLOR_PAIR(PAIR_BLACK_YELLOW) | A_BOLD;
+        self.colors[ColorElement::PanelSelectionFocus as usize] =
+            COLOR_PAIR(PAIR_BLACK_CYAN) | A_BOLD;
+        self.colors[ColorElement::PanelSelectionFollow as usize] =
+            COLOR_PAIR(PAIR_BLACK_YELLOW) | A_BOLD;
         self.colors[ColorElement::PanelSelectionUnfocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
         self.colors[ColorElement::Process as usize] = COLOR_PAIR(PAIR_DEFAULT);
         self.colors[ColorElement::ProcessBasename as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD;
@@ -432,35 +438,36 @@ impl Crt {
         self.colors[ColorElement::CpuNormal as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
         self.colors[ColorElement::CpuSystem as usize] = COLOR_PAIR(PAIR_RED_BLACK);
         self.colors[ColorElement::CpuNice as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::CpuIOWait as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;  // Match C htop
+        self.colors[ColorElement::CpuIOWait as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Match C htop
         self.colors[ColorElement::CpuIrq as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK);
         self.colors[ColorElement::CpuSoftIrq as usize] = COLOR_PAIR(PAIR_MAGENTA_BLACK);
         self.colors[ColorElement::CpuSteal as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
         self.colors[ColorElement::CpuGuest as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
         self.colors[ColorElement::MemoryUsed as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
         self.colors[ColorElement::MemoryBuffers as usize] = COLOR_PAIR(PAIR_BLUE_BLACK) | A_BOLD;
-        self.colors[ColorElement::MemoryBuffersText as usize] = COLOR_PAIR(PAIR_BLUE_BLACK) | A_BOLD;
+        self.colors[ColorElement::MemoryBuffersText as usize] =
+            COLOR_PAIR(PAIR_BLUE_BLACK) | A_BOLD;
         self.colors[ColorElement::MemoryCache as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK);
         self.colors[ColorElement::MemoryShared as usize] = COLOR_PAIR(PAIR_MAGENTA_BLACK);
-        self.colors[ColorElement::MemoryCompressed as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;  // Dim gray
+        self.colors[ColorElement::MemoryCompressed as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
         self.colors[ColorElement::Swap as usize] = COLOR_PAIR(PAIR_RED_BLACK);
         self.colors[ColorElement::MeterValue as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
         self.colors[ColorElement::MeterText as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::MeterShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;  // Dim gray
-        self.colors[ColorElement::BarShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;  // Dim gray
-        self.colors[ColorElement::BarBorder as usize] = A_BOLD;  // Bold white for [ and ]
+        self.colors[ColorElement::MeterShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
+        self.colors[ColorElement::BarShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
+        self.colors[ColorElement::BarBorder as usize] = A_BOLD; // Bold white for [ and ]
         self.colors[ColorElement::Graph1 as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
         self.colors[ColorElement::Graph2 as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
         self.colors[ColorElement::TasksRunning as usize] = COLOR_PAIR(PAIR_GREEN_BLACK) | A_BOLD;
         self.colors[ColorElement::Load as usize] = COLOR_PAIR(PAIR_DEFAULT);
-        self.colors[ColorElement::LoadAverageOne as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD;  // Bold white
-        self.colors[ColorElement::LoadAverageFive as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;  // Bold cyan
-        self.colors[ColorElement::LoadAverageFifteen as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);  // Cyan (no bold)
-        self.colors[ColorElement::Uptime as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;  // Bold cyan
+        self.colors[ColorElement::LoadAverageOne as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD; // Bold white
+        self.colors[ColorElement::LoadAverageFive as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD; // Bold cyan
+        self.colors[ColorElement::LoadAverageFifteen as usize] = COLOR_PAIR(PAIR_CYAN_BLACK); // Cyan (no bold)
+        self.colors[ColorElement::Uptime as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD; // Bold cyan
         self.colors[ColorElement::Hostname as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD;
         self.colors[ColorElement::ProcessMegabytes as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
         self.colors[ColorElement::ProcessGigabytes as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::ProcessShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;  // Dim gray
+        self.colors[ColorElement::ProcessShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
         self.colors[ColorElement::ProcessHighPriority as usize] = COLOR_PAIR(PAIR_RED_BLACK);
         self.colors[ColorElement::ProcessLowPriority as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
         self.colors[ColorElement::ProcessPriv as usize] = COLOR_PAIR(PAIR_RED_BLACK) | A_BOLD;
@@ -472,7 +479,7 @@ impl Crt {
         self.colors[ColorElement::CheckBox as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
         self.colors[ColorElement::CheckMark as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
         self.colors[ColorElement::CheckText as usize] = COLOR_PAIR(PAIR_DEFAULT);
-        
+
         // Screen tabs colors (for "Main" tab header)
         self.colors[ColorElement::ScreensOthBorder as usize] = COLOR_PAIR(PAIR_BLUE_BLUE);
         self.colors[ColorElement::ScreensOthText as usize] = COLOR_PAIR(PAIR_BLACK_BLUE);
@@ -522,7 +529,10 @@ impl Crt {
 
     /// Get color attribute for an element
     pub fn color(&self, element: ColorElement) -> attr_t {
-        self.colors.get(element as usize).copied().unwrap_or(A_NORMAL)
+        self.colors
+            .get(element as usize)
+            .copied()
+            .unwrap_or(A_NORMAL)
     }
 
     /// Update screen dimensions
@@ -569,13 +579,13 @@ impl Crt {
             Some(ch)
         }
     }
-    
+
     /// Get mouse event after KEY_MOUSE was returned and store it
     pub fn get_mouse_event(&mut self) -> Option<MouseEvent> {
         if !self.mouse_enabled {
             return None;
         }
-        
+
         let mut mevent = MEVENT {
             id: 0,
             x: 0,
@@ -583,7 +593,7 @@ impl Crt {
             z: 0,
             bstate: 0,
         };
-        
+
         let result = getmouse(&mut mevent);
         if result == OK {
             let event = MouseEvent {
@@ -597,12 +607,12 @@ impl Crt {
             None
         }
     }
-    
+
     /// Get the last stored mouse event
     pub fn last_mouse_event(&self) -> Option<MouseEvent> {
         self.last_mouse_event
     }
-    
+
     /// Process a mouse event and convert to a key code
     /// This is called when KEY_MOUSE is received
     /// panel_y is the y position of the panel header row
@@ -637,12 +647,39 @@ impl Crt {
         }
         None
     }
-    
+
+    /// Convert a mouse event to a key code (wheel events only)
+    /// This is a simpler version that doesn't store the event, useful for menus
+    /// Call this when KEY_MOUSE is received from getch()
+    pub fn convert_mouse_to_key() -> Option<i32> {
+        let mut mevent = MEVENT {
+            id: 0,
+            x: 0,
+            y: 0,
+            z: 0,
+            bstate: 0,
+        };
+
+        if getmouse(&mut mevent) == OK {
+            let event = MouseEvent {
+                x: mevent.x,
+                y: mevent.y,
+                bstate: mevent.bstate as u64,
+            };
+            if event.is_wheel_up() {
+                return Some(KEY_WHEELUP);
+            } else if event.is_wheel_down() {
+                return Some(KEY_WHEELDOWN);
+            }
+        }
+        None
+    }
+
     /// Check if mouse is enabled
     pub fn is_mouse_enabled(&self) -> bool {
         self.mouse_enabled
     }
-    
+
     /// Get scroll wheel amount
     pub fn scroll_wheel_amount(&self) -> i32 {
         self.scroll_wheel_v_amount as i32
@@ -687,13 +724,13 @@ impl Crt {
         self.hline(y, x, ACS_HLINE(), w);
         mvaddch(y, x, ACS_ULCORNER());
         mvaddch(y, x + w - 1, ACS_URCORNER());
-        
+
         // Side borders
-        for i in 1..h-1 {
+        for i in 1..h - 1 {
             mvaddch(y + i, x, ACS_VLINE());
             mvaddch(y + i, x + w - 1, ACS_VLINE());
         }
-        
+
         // Bottom border
         self.hline(y + h - 1, x, ACS_HLINE(), w);
         mvaddch(y + h - 1, x, ACS_LLCORNER());
@@ -710,7 +747,10 @@ impl Crt {
     pub fn set_mouse(&mut self, enabled: bool) {
         self.mouse_enabled = enabled;
         if enabled {
-            let mask = BUTTON1_RELEASED | BUTTON3_RELEASED | BUTTON4_PRESSED | BUTTON5_PRESSED_COMPAT as i32;
+            let mask = BUTTON1_RELEASED
+                | BUTTON3_RELEASED
+                | BUTTON4_PRESSED
+                | BUTTON5_PRESSED_COMPAT as i32;
             mousemask(mask as mmask_t, None);
         } else {
             mousemask(0, None);

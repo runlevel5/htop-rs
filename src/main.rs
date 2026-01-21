@@ -110,10 +110,10 @@ fn main() -> Result<()> {
     });
 
     let mut machine = Machine::new(user_id);
-    
+
     // Create settings
     let mut settings = Settings::new();
-    
+
     // Apply command line arguments
     if args.no_color {
         settings.color_scheme = core::ColorScheme::Monochrome;
@@ -149,14 +149,14 @@ fn main() -> Result<()> {
 
     settings.allow_unicode = !args.no_unicode;
     machine.iterations_remaining = args.max_iterations.unwrap_or(-1);
-    
+
     if let Some(ref pids) = args.pids {
         machine.set_pid_filter(pids.clone());
     }
 
     // Initialize CRT (terminal)
     let mut crt = Crt::new(&settings)?;
-    
+
     // Create header with meters
     let mut header = Header::new(&machine, settings.header_layout, settings.header_margin);
     header.populate_from_settings(&settings);
@@ -199,28 +199,28 @@ fn print_sort_keys() {
 mod ctrlc {
     use std::sync::atomic::{AtomicBool, Ordering};
     static HANDLER_SET: AtomicBool = AtomicBool::new(false);
-    
+
     pub fn set_handler<F: Fn() + Send + 'static>(handler: F) -> Result<(), ()> {
         if HANDLER_SET.swap(true, Ordering::SeqCst) {
             return Err(());
         }
-        
+
         unsafe {
             libc::signal(libc::SIGINT, handle_signal as libc::sighandler_t);
             libc::signal(libc::SIGTERM, handle_signal as libc::sighandler_t);
         }
-        
+
         // Store handler in a box leak (simple approach)
         let handler = Box::new(handler);
         let handler_ptr = Box::into_raw(handler);
         HANDLER_PTR.store(handler_ptr as *mut (), Ordering::SeqCst);
-        
+
         Ok(())
     }
-    
-    static HANDLER_PTR: std::sync::atomic::AtomicPtr<()> = 
+
+    static HANDLER_PTR: std::sync::atomic::AtomicPtr<()> =
         std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
-    
+
     extern "C" fn handle_signal(_: libc::c_int) {
         let ptr = HANDLER_PTR.load(Ordering::SeqCst);
         if !ptr.is_null() {

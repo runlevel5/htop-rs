@@ -1,12 +1,12 @@
 //! Tasks Meter
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// Tasks Meter
-/// 
+///
 /// Displays task counts exactly like C htop:
 /// "Tasks: N, M thr, K kthr; R running"
 #[derive(Debug, Default)]
@@ -41,13 +41,22 @@ impl Meter for TasksMeter {
         self.kernel_threads = machine.kernel_threads;
         self.userland_threads = machine.userland_threads;
         // Total tasks = total - kernel threads - userland threads (just processes)
-        self.total_tasks = machine.total_tasks
+        self.total_tasks = machine
+            .total_tasks
             .saturating_sub(machine.kernel_threads)
             .saturating_sub(machine.userland_threads);
         self.running = machine.running_tasks.min(machine.active_cpus);
     }
 
-    fn draw(&self, crt: &Crt, _machine: &Machine, settings: &Settings, x: i32, y: i32, _width: i32) {
+    fn draw(
+        &self,
+        crt: &Crt,
+        _machine: &Machine,
+        settings: &Settings,
+        x: i32,
+        y: i32,
+        _width: i32,
+    ) {
         use ncurses::*;
 
         let text_attr = crt.color(ColorElement::MeterText);
@@ -73,7 +82,7 @@ impl Meter for TasksMeter {
         } else {
             (text_attr, running_attr)
         };
-        
+
         attron(thr_text_attr);
         let _ = addstr(", ");
         attroff(thr_text_attr);
@@ -92,7 +101,7 @@ impl Meter for TasksMeter {
         } else {
             (text_attr, running_attr)
         };
-        
+
         attron(kthr_text_attr);
         let _ = addstr(", ");
         attroff(kthr_text_attr);

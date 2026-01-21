@@ -1,12 +1,12 @@
 //! Load Average Meter
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// Load Average Meter
-/// 
+///
 /// Displays load averages exactly like C htop:
 /// "Load average: X.XX Y.YY Z.ZZ"
 /// with each value in a different color
@@ -39,7 +39,15 @@ impl Meter for LoadAverageMeter {
         self.load15 = machine.load_average[2];
     }
 
-    fn draw(&self, crt: &Crt, _machine: &Machine, _settings: &Settings, x: i32, y: i32, _width: i32) {
+    fn draw(
+        &self,
+        crt: &Crt,
+        _machine: &Machine,
+        _settings: &Settings,
+        x: i32,
+        y: i32,
+        _width: i32,
+    ) {
         use ncurses::*;
 
         let caption_attr = crt.color(ColorElement::MeterText);
@@ -48,7 +56,7 @@ impl Meter for LoadAverageMeter {
         let load15_attr = crt.color(ColorElement::LoadAverageFifteen);
 
         mv(y, x);
-        
+
         // "Load average: "
         attron(caption_attr);
         let _ = addstr("Load average: ");

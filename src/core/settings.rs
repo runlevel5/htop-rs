@@ -8,43 +8,148 @@ use std::path::PathBuf;
 
 use super::process::ProcessField;
 
-/// Header layout options
+/// Header layout options (matches C htop HeaderLayout.h)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HeaderLayout {
+    OneColumn100,
     #[default]
     TwoColumns5050,
-    TwoColumns6634,
-    TwoColumns3366,
-    ThreeColumns4040,
-    ThreeColumns4033,
-    ThreeColumns3340,
-    FourColumns,
+    TwoColumns3367,
+    TwoColumns6733,
+    ThreeColumns333433,
+    ThreeColumns252550,
+    ThreeColumns255025,
+    ThreeColumns502525,
+    ThreeColumns403030,
+    ThreeColumns304030,
+    ThreeColumns303040,
+    ThreeColumns402040,
+    FourColumns25252525,
 }
 
 impl HeaderLayout {
     /// Get the number of columns for this layout
     pub fn num_columns(self) -> usize {
         match self {
-            HeaderLayout::TwoColumns5050 | 
-            HeaderLayout::TwoColumns6634 | 
-            HeaderLayout::TwoColumns3366 => 2,
-            HeaderLayout::ThreeColumns4040 | 
-            HeaderLayout::ThreeColumns4033 | 
-            HeaderLayout::ThreeColumns3340 => 3,
-            HeaderLayout::FourColumns => 4,
+            HeaderLayout::OneColumn100 => 1,
+            HeaderLayout::TwoColumns5050
+            | HeaderLayout::TwoColumns3367
+            | HeaderLayout::TwoColumns6733 => 2,
+            HeaderLayout::ThreeColumns333433
+            | HeaderLayout::ThreeColumns252550
+            | HeaderLayout::ThreeColumns255025
+            | HeaderLayout::ThreeColumns502525
+            | HeaderLayout::ThreeColumns403030
+            | HeaderLayout::ThreeColumns304030
+            | HeaderLayout::ThreeColumns303040
+            | HeaderLayout::ThreeColumns402040 => 3,
+            HeaderLayout::FourColumns25252525 => 4,
         }
     }
 
     /// Get column width percentages
     pub fn column_widths(self) -> Vec<f64> {
         match self {
-            HeaderLayout::TwoColumns5050 => vec![0.5, 0.5],
-            HeaderLayout::TwoColumns6634 => vec![0.66, 0.34],
-            HeaderLayout::TwoColumns3366 => vec![0.33, 0.67],
-            HeaderLayout::ThreeColumns4040 => vec![0.4, 0.4, 0.2],
-            HeaderLayout::ThreeColumns4033 => vec![0.4, 0.27, 0.33],
-            HeaderLayout::ThreeColumns3340 => vec![0.33, 0.27, 0.4],
-            HeaderLayout::FourColumns => vec![0.25, 0.25, 0.25, 0.25],
+            HeaderLayout::OneColumn100 => vec![1.0],
+            HeaderLayout::TwoColumns5050 => vec![0.50, 0.50],
+            HeaderLayout::TwoColumns3367 => vec![0.33, 0.67],
+            HeaderLayout::TwoColumns6733 => vec![0.67, 0.33],
+            HeaderLayout::ThreeColumns333433 => vec![0.33, 0.34, 0.33],
+            HeaderLayout::ThreeColumns252550 => vec![0.25, 0.25, 0.50],
+            HeaderLayout::ThreeColumns255025 => vec![0.25, 0.50, 0.25],
+            HeaderLayout::ThreeColumns502525 => vec![0.50, 0.25, 0.25],
+            HeaderLayout::ThreeColumns403030 => vec![0.40, 0.30, 0.30],
+            HeaderLayout::ThreeColumns304030 => vec![0.30, 0.40, 0.30],
+            HeaderLayout::ThreeColumns303040 => vec![0.30, 0.30, 0.40],
+            HeaderLayout::ThreeColumns402040 => vec![0.40, 0.20, 0.40],
+            HeaderLayout::FourColumns25252525 => vec![0.25, 0.25, 0.25, 0.25],
+        }
+    }
+
+    /// Get description for display in Setup screen
+    pub fn description(self) -> &'static str {
+        match self {
+            HeaderLayout::OneColumn100 => "1 column  - full width",
+            HeaderLayout::TwoColumns5050 => "2 columns - 50/50 (default)",
+            HeaderLayout::TwoColumns3367 => "2 columns - 33/67",
+            HeaderLayout::TwoColumns6733 => "2 columns - 67/33",
+            HeaderLayout::ThreeColumns333433 => "3 columns - 33/34/33",
+            HeaderLayout::ThreeColumns252550 => "3 columns - 25/25/50",
+            HeaderLayout::ThreeColumns255025 => "3 columns - 25/50/25",
+            HeaderLayout::ThreeColumns502525 => "3 columns - 50/25/25",
+            HeaderLayout::ThreeColumns403030 => "3 columns - 40/30/30",
+            HeaderLayout::ThreeColumns304030 => "3 columns - 30/40/30",
+            HeaderLayout::ThreeColumns303040 => "3 columns - 30/30/40",
+            HeaderLayout::ThreeColumns402040 => "3 columns - 40/20/40",
+            HeaderLayout::FourColumns25252525 => "4 columns - 25/25/25/25",
+        }
+    }
+
+    /// Get all header layouts
+    pub fn all() -> &'static [HeaderLayout] {
+        &[
+            HeaderLayout::OneColumn100,
+            HeaderLayout::TwoColumns5050,
+            HeaderLayout::TwoColumns3367,
+            HeaderLayout::TwoColumns6733,
+            HeaderLayout::ThreeColumns333433,
+            HeaderLayout::ThreeColumns252550,
+            HeaderLayout::ThreeColumns255025,
+            HeaderLayout::ThreeColumns502525,
+            HeaderLayout::ThreeColumns403030,
+            HeaderLayout::ThreeColumns304030,
+            HeaderLayout::ThreeColumns303040,
+            HeaderLayout::ThreeColumns402040,
+            HeaderLayout::FourColumns25252525,
+        ]
+    }
+
+    /// Convert from index
+    pub fn from_index(index: usize) -> Option<Self> {
+        Self::all().get(index).copied()
+    }
+
+    /// Get index of this layout
+    pub fn to_index(self) -> usize {
+        Self::all().iter().position(|&l| l == self).unwrap_or(0)
+    }
+
+    /// Get name for settings file
+    pub fn name(self) -> &'static str {
+        match self {
+            HeaderLayout::OneColumn100 => "one_100",
+            HeaderLayout::TwoColumns5050 => "two_50_50",
+            HeaderLayout::TwoColumns3367 => "two_33_67",
+            HeaderLayout::TwoColumns6733 => "two_67_33",
+            HeaderLayout::ThreeColumns333433 => "three_33_34_33",
+            HeaderLayout::ThreeColumns252550 => "three_25_25_50",
+            HeaderLayout::ThreeColumns255025 => "three_25_50_25",
+            HeaderLayout::ThreeColumns502525 => "three_50_25_25",
+            HeaderLayout::ThreeColumns403030 => "three_40_30_30",
+            HeaderLayout::ThreeColumns304030 => "three_30_40_30",
+            HeaderLayout::ThreeColumns303040 => "three_30_30_40",
+            HeaderLayout::ThreeColumns402040 => "three_40_20_40",
+            HeaderLayout::FourColumns25252525 => "four_25_25_25_25",
+        }
+    }
+
+    /// Parse from name
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "one_100" => Some(HeaderLayout::OneColumn100),
+            "two_50_50" => Some(HeaderLayout::TwoColumns5050),
+            "two_33_67" => Some(HeaderLayout::TwoColumns3367),
+            "two_67_33" => Some(HeaderLayout::TwoColumns6733),
+            "three_33_34_33" => Some(HeaderLayout::ThreeColumns333433),
+            "three_25_25_50" => Some(HeaderLayout::ThreeColumns252550),
+            "three_25_50_25" => Some(HeaderLayout::ThreeColumns255025),
+            "three_50_25_25" => Some(HeaderLayout::ThreeColumns502525),
+            "three_40_30_30" => Some(HeaderLayout::ThreeColumns403030),
+            "three_30_40_30" => Some(HeaderLayout::ThreeColumns304030),
+            "three_30_30_40" => Some(HeaderLayout::ThreeColumns303040),
+            "three_40_20_40" => Some(HeaderLayout::ThreeColumns402040),
+            "four_25_25_25_25" => Some(HeaderLayout::FourColumns25252525),
+            _ => None,
         }
     }
 }
@@ -143,7 +248,7 @@ impl Default for ScreenSettings {
             ],
             sort_key: ProcessField::PercentCpu,
             tree_sort_key: ProcessField::Pid,
-            direction: -1,  // descending
+            direction: -1, // descending
             tree_direction: 1,
             tree_view: false,
             tree_view_always_by_pid: false,
@@ -169,10 +274,10 @@ pub struct Settings {
 
     // Display settings
     pub color_scheme: ColorScheme,
-    pub delay: u32,  // in tenths of a second
+    pub delay: u32, // in tenths of a second
     pub enable_mouse: bool,
     pub allow_unicode: bool,
-    pub hide_function_bar: i32,  // 0 = show, 1 = hide on ESC, 2 = always hide
+    pub hide_function_bar: i32, // 0 = show, 1 = hide on ESC, 2 = always hide
     pub header_margin: bool,
     pub screen_tabs: bool,
 
@@ -224,16 +329,44 @@ impl Default for Settings {
 impl Settings {
     pub fn new() -> Self {
         let default_meters_left = vec![
-            MeterConfig { name: "LeftCPUs2".to_string(), param: 0, mode: MeterMode::Bar },
-            MeterConfig { name: "Memory".to_string(), param: 0, mode: MeterMode::Bar },
-            MeterConfig { name: "Swap".to_string(), param: 0, mode: MeterMode::Bar },
+            MeterConfig {
+                name: "LeftCPUs2".to_string(),
+                param: 0,
+                mode: MeterMode::Bar,
+            },
+            MeterConfig {
+                name: "Memory".to_string(),
+                param: 0,
+                mode: MeterMode::Bar,
+            },
+            MeterConfig {
+                name: "Swap".to_string(),
+                param: 0,
+                mode: MeterMode::Bar,
+            },
         ];
-        
+
         let default_meters_right = vec![
-            MeterConfig { name: "RightCPUs2".to_string(), param: 0, mode: MeterMode::Bar },
-            MeterConfig { name: "Tasks".to_string(), param: 0, mode: MeterMode::Text },
-            MeterConfig { name: "LoadAverage".to_string(), param: 0, mode: MeterMode::Text },
-            MeterConfig { name: "Uptime".to_string(), param: 0, mode: MeterMode::Text },
+            MeterConfig {
+                name: "RightCPUs2".to_string(),
+                param: 0,
+                mode: MeterMode::Bar,
+            },
+            MeterConfig {
+                name: "Tasks".to_string(),
+                param: 0,
+                mode: MeterMode::Text,
+            },
+            MeterConfig {
+                name: "LoadAverage".to_string(),
+                param: 0,
+                mode: MeterMode::Text,
+            },
+            MeterConfig {
+                name: "Uptime".to_string(),
+                param: 0,
+                mode: MeterMode::Text,
+            },
         ];
 
         Settings {
@@ -245,7 +378,7 @@ impl Settings {
             screens: vec![ScreenSettings::default()],
             active_screen: 0,
             color_scheme: ColorScheme::Default,
-            delay: 15,  // 1.5 seconds
+            delay: 15, // 1.5 seconds
             enable_mouse: true,
             allow_unicode: true,
             hide_function_bar: 0,
@@ -313,7 +446,7 @@ impl Settings {
         for line in reader.lines() {
             let line = line?;
             let line = line.trim();
-            
+
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
@@ -417,25 +550,85 @@ impl Settings {
         writeln!(file, "# htop-rs configuration file")?;
         writeln!(file, "# Automatically generated by htop-rs")?;
         writeln!(file)?;
-        
+
         writeln!(file, "delay={}", self.delay)?;
         writeln!(file, "color_scheme={}", self.color_scheme as i32)?;
-        writeln!(file, "enable_mouse={}", if self.enable_mouse { 1 } else { 0 })?;
+        writeln!(
+            file,
+            "enable_mouse={}",
+            if self.enable_mouse { 1 } else { 0 }
+        )?;
         writeln!(file, "tree_view={}", if self.tree_view { 1 } else { 0 })?;
-        writeln!(file, "show_program_path={}", if self.show_program_path { 1 } else { 0 })?;
-        writeln!(file, "shadow_other_users={}", if self.shadow_other_users { 1 } else { 0 })?;
-        writeln!(file, "hide_kernel_threads={}", if self.hide_kernel_threads { 1 } else { 0 })?;
-        writeln!(file, "hide_userland_threads={}", if self.hide_userland_threads { 1 } else { 0 })?;
-        writeln!(file, "highlight_base_name={}", if self.highlight_base_name { 1 } else { 0 })?;
-        writeln!(file, "highlight_megabytes={}", if self.highlight_megabytes { 1 } else { 0 })?;
-        writeln!(file, "highlight_threads={}", if self.highlight_threads { 1 } else { 0 })?;
-        writeln!(file, "highlight_changes={}", if self.highlight_changes { 1 } else { 0 })?;
-        writeln!(file, "highlight_changes_delay_secs={}", self.highlight_delay_secs)?;
-        writeln!(file, "detailed_cpu_time={}", if self.detailed_cpu_time { 1 } else { 0 })?;
-        writeln!(file, "count_cpus_from_one={}", if self.count_cpus_from_one { 1 } else { 0 })?;
-        writeln!(file, "show_cpu_usage={}", if self.show_cpu_usage { 1 } else { 0 })?;
-        writeln!(file, "show_cpu_frequency={}", if self.show_cpu_frequency { 1 } else { 0 })?;
-        writeln!(file, "header_margin={}", if self.header_margin { 1 } else { 0 })?;
+        writeln!(
+            file,
+            "show_program_path={}",
+            if self.show_program_path { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "shadow_other_users={}",
+            if self.shadow_other_users { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "hide_kernel_threads={}",
+            if self.hide_kernel_threads { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "hide_userland_threads={}",
+            if self.hide_userland_threads { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_base_name={}",
+            if self.highlight_base_name { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_megabytes={}",
+            if self.highlight_megabytes { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_threads={}",
+            if self.highlight_threads { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_changes={}",
+            if self.highlight_changes { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_changes_delay_secs={}",
+            self.highlight_delay_secs
+        )?;
+        writeln!(
+            file,
+            "detailed_cpu_time={}",
+            if self.detailed_cpu_time { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "count_cpus_from_one={}",
+            if self.count_cpus_from_one { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "show_cpu_usage={}",
+            if self.show_cpu_usage { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "show_cpu_frequency={}",
+            if self.show_cpu_frequency { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "header_margin={}",
+            if self.header_margin { 1 } else { 0 }
+        )?;
         writeln!(file, "screen_tabs={}", if self.screen_tabs { 1 } else { 0 })?;
 
         Ok(())

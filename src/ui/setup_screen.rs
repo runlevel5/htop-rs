@@ -8,12 +8,13 @@
 
 use ncurses::*;
 
-use crate::core::{ColorScheme, Settings};
-use super::crt::{ColorElement, KEY_F7, KEY_F8, KEY_F10};
+use super::crt::{ColorElement, KEY_F10, KEY_F7, KEY_F8};
 use super::function_bar::FunctionBar;
-use super::panel::{Panel, HandlerResult};
+use super::header::Header;
+use super::panel::{HandlerResult, Panel};
 use super::rich_string::RichString;
 use super::Crt;
+use crate::core::{ColorScheme, HeaderLayout, Machine, MeterConfig, MeterMode, Settings};
 
 // Key constants for pattern matching
 const KEY_ESC: i32 = 27;
@@ -132,10 +133,12 @@ impl OptionItem {
                 str.append("]    ", box_color);
                 str.append(text, text_color);
             }
-            OptionItem::Number { text, field, scale, .. } => {
+            OptionItem::Number {
+                text, field, scale, ..
+            } => {
                 let value = field.get_int(settings);
                 str.append("[", box_color);
-                
+
                 let value_str = if *scale < 0 {
                     // Decimal format
                     let factor = 10f64.powi(-scale);
@@ -145,7 +148,7 @@ impl OptionItem {
                 };
                 str.append(&value_str, mark_color);
                 str.append("]", box_color);
-                
+
                 // Pad to 5 chars for alignment
                 let padding = 5usize.saturating_sub(value_str.len());
                 for _ in 0..padding {
@@ -305,6 +308,132 @@ pub const COLOR_SCHEME_NAMES: &[&str] = &[
     "Nord",
 ];
 
+/// Available meter information
+#[derive(Debug, Clone)]
+pub struct MeterInfo {
+    /// Internal name used in settings (e.g., "CPU", "Memory")
+    pub name: &'static str,
+    /// Display name shown in UI
+    pub display_name: &'static str,
+    /// Description for the available meters panel
+    pub description: &'static str,
+    /// Whether this meter type supports a parameter (e.g., CPU number)
+    pub supports_param: bool,
+}
+
+impl MeterInfo {
+    const fn new(
+        name: &'static str,
+        display_name: &'static str,
+        description: &'static str,
+    ) -> Self {
+        MeterInfo {
+            name,
+            display_name,
+            description,
+            supports_param: false,
+        }
+    }
+
+    const fn with_param(
+        name: &'static str,
+        display_name: &'static str,
+        description: &'static str,
+    ) -> Self {
+        MeterInfo {
+            name,
+            display_name,
+            description,
+            supports_param: true,
+        }
+    }
+}
+
+/// List of all available meters (matching C htop Platform_meterTypes)
+pub const AVAILABLE_METERS: &[MeterInfo] = &[
+    MeterInfo::with_param("CPU", "CPU", "CPU usage for a specific core"),
+    MeterInfo::new("AllCPUs", "CPUs (1/1)", "All CPUs in a single row"),
+    MeterInfo::new("AllCPUs2", "CPUs (1/2)", "All CPUs in 2 rows"),
+    MeterInfo::new("AllCPUs4", "CPUs (1/4)", "All CPUs in 4 rows"),
+    MeterInfo::new("AllCPUs8", "CPUs (1/8)", "All CPUs in 8 rows"),
+    MeterInfo::new("LeftCPUs", "Left CPUs (1/1)", "Left half of CPUs (1 row)"),
+    MeterInfo::new("LeftCPUs2", "Left CPUs (1/2)", "Left half of CPUs (2 rows)"),
+    MeterInfo::new("LeftCPUs4", "Left CPUs (1/4)", "Left half of CPUs (4 rows)"),
+    MeterInfo::new("LeftCPUs8", "Left CPUs (1/8)", "Left half of CPUs (8 rows)"),
+    MeterInfo::new(
+        "RightCPUs",
+        "Right CPUs (1/1)",
+        "Right half of CPUs (1 row)",
+    ),
+    MeterInfo::new(
+        "RightCPUs2",
+        "Right CPUs (1/2)",
+        "Right half of CPUs (2 rows)",
+    ),
+    MeterInfo::new(
+        "RightCPUs4",
+        "Right CPUs (1/4)",
+        "Right half of CPUs (4 rows)",
+    ),
+    MeterInfo::new(
+        "RightCPUs8",
+        "Right CPUs (1/8)",
+        "Right half of CPUs (8 rows)",
+    ),
+    MeterInfo::new("Memory", "Memory", "Memory usage"),
+    MeterInfo::new("Swap", "Swap", "Swap usage"),
+    MeterInfo::new("LoadAverage", "Load average", "System load averages"),
+    MeterInfo::new("Tasks", "Task counter", "Running/total tasks"),
+    MeterInfo::new("Uptime", "Uptime", "System uptime"),
+    MeterInfo::new("Battery", "Battery", "Battery charge level"),
+    MeterInfo::new("Hostname", "Hostname", "System hostname"),
+    MeterInfo::new("Clock", "Clock", "Current time"),
+    MeterInfo::new("Date", "Date", "Current date"),
+    MeterInfo::new("DateTime", "Date and Time", "Current date and time"),
+    MeterInfo::new("Blank", "Blank", "Empty spacer"),
+];
+
+/// Get the display name for a meter by its internal name
+fn meter_display_name(name: &str, mode: MeterMode) -> String {
+    let base_name = match name {
+        "CPU" => "CPU",
+        "AllCPUs" => "CPUs (1/1)",
+        "AllCPUs2" => "CPUs (1/2)",
+        "AllCPUs4" => "CPUs (1/4)",
+        "AllCPUs8" => "CPUs (1/8)",
+        "LeftCPUs" => "Left CPUs (1/1)",
+        "LeftCPUs2" => "Left CPUs (1/2)",
+        "LeftCPUs4" => "Left CPUs (1/4)",
+        "LeftCPUs8" => "Left CPUs (1/8)",
+        "RightCPUs" => "Right CPUs (1/1)",
+        "RightCPUs2" => "Right CPUs (1/2)",
+        "RightCPUs4" => "Right CPUs (1/4)",
+        "RightCPUs8" => "Right CPUs (1/8)",
+        "Memory" => "Memory",
+        "Swap" => "Swap",
+        "LoadAverage" => "Load average",
+        "Tasks" => "Task counter",
+        "Uptime" => "Uptime",
+        "Battery" => "Battery",
+        "Hostname" => "Hostname",
+        "Clock" => "Clock",
+        "Date" => "Date",
+        "DateTime" => "Date and Time",
+        "Blank" => "Blank",
+        _ => name,
+    };
+
+    // Add mode suffix like C htop (e.g., "[Bar]", "[Text]", etc.)
+    let mode_str = match mode {
+        MeterMode::Bar => "[Bar]",
+        MeterMode::Text => "[Text]",
+        MeterMode::Graph => "[Graph]",
+        MeterMode::Led => "[LED]",
+    };
+
+    format!("{} {}", base_name, mode_str)
+}
+
 /// Setup screen manager
 pub struct SetupScreen {
     /// Current category
@@ -321,21 +450,38 @@ pub struct SetupScreen {
     content_index: usize,
     /// Content scroll
     content_scroll: i32,
-    /// Which panel has focus (0 = categories, 1 = content)
+    /// Which panel has focus (0 = categories, 1 = content, 2+ = meter columns)
     focus: usize,
     /// Function bar for the setup screen
     function_bar: FunctionBar,
     /// Dec/Inc function bar for number items
     dec_inc_bar: FunctionBar,
+    /// Meters function bar
+    meters_bar: FunctionBar,
+    /// Meters moving mode function bar
+    meters_moving_bar: FunctionBar,
+    /// Available meters function bar
+    meters_available_bar: FunctionBar,
     /// Whether settings were changed
     pub changed: bool,
+    // === Meters panel state ===
+    /// Current column index for meters panel (0..num_columns-1, then available_meters)
+    meters_column_focus: usize,
+    /// Selection index within each meter column
+    meters_column_selection: Vec<usize>,
+    /// Selection index for available meters panel
+    meters_available_selection: usize,
+    /// Scroll position for available meters panel
+    meters_available_scroll: i32,
+    /// Whether in moving mode (meter is "grabbed" and can be moved with arrows)
+    meters_moving: bool,
 }
 
 impl SetupScreen {
     pub fn new() -> Self {
         let mut categories_panel = Panel::new(0, 0, 16, 10);
         categories_panel.set_header("Categories");
-        
+
         // Add category items
         for cat in SetupCategory::all() {
             categories_panel.add_text(cat.name());
@@ -374,6 +520,48 @@ impl SetupScreen {
             ("Done", "F10"),
         ]);
 
+        // Meters function bar (matching C htop MetersPanel)
+        let meters_bar = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Style", " "),
+            ("Move", "Enter"),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Delete", "Del"),
+            ("Done", "F10"),
+        ]);
+
+        // Meters moving mode function bar
+        let meters_moving_bar = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Style", " "),
+            ("Lock", "Enter"),
+            ("Up", "Up"),
+            ("Down", "Dn"),
+            ("Left", "<-"),
+            ("Right", "->"),
+            ("Done", "F10"),
+        ]);
+
+        // Available meters function bar (matching C htop AvailableMetersPanel)
+        let meters_available_bar = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Add", "Enter"),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Done", "F10"),
+        ]);
+
         SetupScreen {
             category: SetupCategory::DisplayOptions,
             category_index: 0,
@@ -385,7 +573,16 @@ impl SetupScreen {
             focus: 0,
             function_bar,
             dec_inc_bar,
+            meters_bar,
+            meters_moving_bar,
+            meters_available_bar,
             changed: false,
+            // Meters panel state
+            meters_column_focus: 0,
+            meters_column_selection: vec![0; 4], // Support up to 4 columns
+            meters_available_selection: 0,
+            meters_available_scroll: 0,
+            meters_moving: false,
         }
     }
 
@@ -393,60 +590,195 @@ impl SetupScreen {
         vec![
             OptionItem::text("For current screen tab:"),
             OptionItem::check("Tree view", SettingField::TreeView),
-            OptionItem::check("- Tree view is always sorted by PID (htop 2 behavior)", SettingField::TreeViewAlwaysByPid),
-            OptionItem::check("- Tree view is collapsed by default", SettingField::AllBranchesCollapsed),
+            OptionItem::check(
+                "- Tree view is always sorted by PID (htop 2 behavior)",
+                SettingField::TreeViewAlwaysByPid,
+            ),
+            OptionItem::check(
+                "- Tree view is collapsed by default",
+                SettingField::AllBranchesCollapsed,
+            ),
             OptionItem::text("Global options:"),
             OptionItem::check("Show tabs for screens", SettingField::ScreenTabs),
-            OptionItem::check("Shadow other users' processes", SettingField::ShadowOtherUsers),
+            OptionItem::check(
+                "Shadow other users' processes",
+                SettingField::ShadowOtherUsers,
+            ),
             OptionItem::check("Hide kernel threads", SettingField::HideKernelThreads),
-            OptionItem::check("Hide userland process threads", SettingField::HideUserlandThreads),
-            OptionItem::check("Hide processes running in containers", SettingField::HideRunningInContainer),
-            OptionItem::check("Display threads in a different color", SettingField::HighlightThreads),
+            OptionItem::check(
+                "Hide userland process threads",
+                SettingField::HideUserlandThreads,
+            ),
+            OptionItem::check(
+                "Hide processes running in containers",
+                SettingField::HideRunningInContainer,
+            ),
+            OptionItem::check(
+                "Display threads in a different color",
+                SettingField::HighlightThreads,
+            ),
             OptionItem::check("Show custom thread names", SettingField::ShowThreadNames),
             OptionItem::check("Show program path", SettingField::ShowProgramPath),
-            OptionItem::check("Highlight program \"basename\"", SettingField::HighlightBaseName),
-            OptionItem::check("Highlight out-dated/removed programs (red) / libraries (yellow)", SettingField::HighlightDeletedExe),
-            OptionItem::check("Shadow distribution path prefixes", SettingField::ShadowDistPathPrefix),
-            OptionItem::check("Merge exe, comm and cmdline in Command", SettingField::ShowMergedCommand),
-            OptionItem::check("- Try to find comm in cmdline (when Command is merged)", SettingField::FindCommInCmdline),
-            OptionItem::check("- Try to strip exe from cmdline (when Command is merged)", SettingField::StripExeFromCmdline),
-            OptionItem::check("Highlight large numbers in memory counters", SettingField::HighlightMegabytes),
+            OptionItem::check(
+                "Highlight program \"basename\"",
+                SettingField::HighlightBaseName,
+            ),
+            OptionItem::check(
+                "Highlight out-dated/removed programs (red) / libraries (yellow)",
+                SettingField::HighlightDeletedExe,
+            ),
+            OptionItem::check(
+                "Shadow distribution path prefixes",
+                SettingField::ShadowDistPathPrefix,
+            ),
+            OptionItem::check(
+                "Merge exe, comm and cmdline in Command",
+                SettingField::ShowMergedCommand,
+            ),
+            OptionItem::check(
+                "- Try to find comm in cmdline (when Command is merged)",
+                SettingField::FindCommInCmdline,
+            ),
+            OptionItem::check(
+                "- Try to strip exe from cmdline (when Command is merged)",
+                SettingField::StripExeFromCmdline,
+            ),
+            OptionItem::check(
+                "Highlight large numbers in memory counters",
+                SettingField::HighlightMegabytes,
+            ),
             OptionItem::check("Leave a margin around header", SettingField::HeaderMargin),
-            OptionItem::check("Detailed CPU time (System/IO-Wait/Hard-IRQ/Soft-IRQ/Steal/Guest)", SettingField::DetailedCpuTime),
-            OptionItem::check("Count CPUs from 1 instead of 0", SettingField::CountCpusFromOne),
-            OptionItem::check("Update process names on every refresh", SettingField::UpdateProcessNames),
-            OptionItem::check("Add guest time in CPU meter percentage", SettingField::AccountGuestInCpuMeter),
-            OptionItem::check("Also show CPU percentage numerically", SettingField::ShowCpuUsage),
+            OptionItem::check(
+                "Detailed CPU time (System/IO-Wait/Hard-IRQ/Soft-IRQ/Steal/Guest)",
+                SettingField::DetailedCpuTime,
+            ),
+            OptionItem::check(
+                "Count CPUs from 1 instead of 0",
+                SettingField::CountCpusFromOne,
+            ),
+            OptionItem::check(
+                "Update process names on every refresh",
+                SettingField::UpdateProcessNames,
+            ),
+            OptionItem::check(
+                "Add guest time in CPU meter percentage",
+                SettingField::AccountGuestInCpuMeter,
+            ),
+            OptionItem::check(
+                "Also show CPU percentage numerically",
+                SettingField::ShowCpuUsage,
+            ),
             OptionItem::check("Also show CPU frequency", SettingField::ShowCpuFrequency),
-            OptionItem::check("Show cached memory in graph and bar modes", SettingField::ShowCachedMemory),
+            OptionItem::check(
+                "Show cached memory in graph and bar modes",
+                SettingField::ShowCachedMemory,
+            ),
             OptionItem::check("Enable the mouse", SettingField::EnableMouse),
-            OptionItem::number_scaled("Update interval (in seconds)", SettingField::Delay, 1, 255, -1),
-            OptionItem::check("Highlight new and old processes", SettingField::HighlightChanges),
-            OptionItem::number("- Highlight time (in seconds)", SettingField::HighlightDelaySecs, 1, 86400),
-            OptionItem::number("Hide main function bar (0 - off, 1 - on ESC until next input, 2 - permanently)", SettingField::HideFunctionBar, 0, 2),
+            OptionItem::number_scaled(
+                "Update interval (in seconds)",
+                SettingField::Delay,
+                1,
+                255,
+                -1,
+            ),
+            OptionItem::check(
+                "Highlight new and old processes",
+                SettingField::HighlightChanges,
+            ),
+            OptionItem::number(
+                "- Highlight time (in seconds)",
+                SettingField::HighlightDelaySecs,
+                1,
+                86400,
+            ),
+            OptionItem::number(
+                "Hide main function bar (0 - off, 1 - on ESC until next input, 2 - permanently)",
+                SettingField::HideFunctionBar,
+                0,
+                2,
+            ),
         ]
     }
 
     /// Calculate layout based on terminal size
-    pub fn layout(&mut self, crt: &Crt) {
+    pub fn layout(&mut self, crt: &Crt, header_height: i32, screen_tabs: bool) {
         let width = crt.width();
         let height = crt.height();
 
-        // Categories panel: fixed width of 16, full height minus function bar
-        let panel_height = height - 1; // Leave room for function bar
+        // Account for screen tabs row (1 line) if enabled
+        let tabs_height = if screen_tabs { 1 } else { 0 };
+        let panel_y = header_height + tabs_height;
+
+        // Categories panel: fixed width of 16, full height minus header, tabs, and function bar
+        let panel_height = height - panel_y - 1; // Leave room for function bar
         self.categories_panel.resize(16, panel_height);
-        self.categories_panel.move_to(0, 0);
+        self.categories_panel.move_to(0, panel_y);
 
         // Content panel: remaining width
         let content_width = width - 16;
         self.content_panel.resize(content_width, panel_height);
-        self.content_panel.move_to(16, 0);
+        self.content_panel.move_to(16, panel_y);
+    }
+
+    /// Draw the "[Setup]" tab (like C htop draws screen tabs with a name)
+    fn draw_setup_tab(&self, crt: &Crt, header_height: i32) {
+        const SCREEN_TAB_MARGIN_LEFT: i32 = 2;
+
+        let y = header_height; // Tab row is right after header
+        let mut x = SCREEN_TAB_MARGIN_LEFT;
+        let max_x = crt.width();
+
+        if x >= max_x {
+            return;
+        }
+
+        let border_attr = crt.color(ColorElement::ScreensCurBorder);
+        let text_attr = crt.color(ColorElement::ScreensCurText);
+
+        // Draw '['
+        attron(border_attr);
+        mvaddch(y, x, '[' as u32);
+        attroff(border_attr);
+        x += 1;
+
+        if x >= max_x {
+            attrset(crt.color(ColorElement::ResetColor));
+            return;
+        }
+
+        // Draw "Setup" text
+        let name = "Setup";
+        let name_width = name.len().min((max_x - x) as usize);
+        attron(text_attr);
+        let _ = mvaddnstr(y, x, name, name_width as i32);
+        attroff(text_attr);
+        x += name_width as i32;
+
+        if x >= max_x {
+            attrset(crt.color(ColorElement::ResetColor));
+            return;
+        }
+
+        // Draw ']'
+        attron(border_attr);
+        mvaddch(y, x, ']' as u32);
+        attroff(border_attr);
+
+        attrset(crt.color(ColorElement::ResetColor));
     }
 
     /// Draw the setup screen
-    pub fn draw(&mut self, crt: &Crt, settings: &Settings) {
+    pub fn draw(&mut self, crt: &Crt, settings: &Settings, header: &Header, machine: &Machine) {
         // Clear screen
         erase();
+
+        // Draw header meters (like other screens do)
+        header.draw(crt, machine, settings);
+
+        // Draw "[Setup]" tab if screen tabs are enabled
+        if settings.screen_tabs {
+            self.draw_setup_tab(crt, header.get_height());
+        }
 
         // Draw categories panel
         self.draw_categories_panel(crt);
@@ -683,7 +1015,7 @@ impl SetupScreen {
         }
     }
 
-    fn draw_header_layout(&self, crt: &Crt, _settings: &Settings) {
+    fn draw_header_layout(&self, crt: &Crt, settings: &Settings) {
         let x = self.content_panel.x;
         let y = self.content_panel.y;
         let w = self.content_panel.w;
@@ -698,22 +1030,69 @@ impl SetupScreen {
 
         mv(y, x);
         attron(header_attr);
-        let header = "Header layout";
+        let header = "Header Layout";
         let _ = addstr(header);
         for _ in header.len()..w as usize {
             addch(' ' as u32);
         }
         attroff(header_attr);
 
-        // Placeholder for header layout options
+        // Draw header layout options with checkmarks (like C htop HeaderOptionsPanel)
+        let layouts = HeaderLayout::all();
+        let current_layout = settings.header_layout;
+        let display_height = (h - 1) as usize; // Minus header row
+
         let text_attr = crt.color(ColorElement::Process);
-        mv(y + 1, x);
-        attron(text_attr);
-        let _ = addstr("(Header layout configuration - not yet implemented)");
-        attroff(text_attr);
+        let selected_attr = crt.color(ColorElement::PanelSelectionFocus);
+        let check_attr = crt.color(ColorElement::CheckBox);
+
+        for (i, &layout) in layouts.iter().enumerate() {
+            if i >= display_height {
+                break;
+            }
+
+            let screen_y = y + 1 + i as i32;
+            let is_selected = self.focus == 1 && i == self.content_index;
+            let is_checked = layout == current_layout;
+
+            mv(screen_y, x);
+
+            // Draw checkbox
+            let checkbox = if is_checked { "[x] " } else { "[ ] " };
+
+            if is_selected {
+                // Selected row - highlight entire line
+                attron(selected_attr);
+                let _ = addstr(checkbox);
+                let desc = layout.description();
+                let _ = addstr(desc);
+                // Pad to width
+                let used = checkbox.len() + desc.len();
+                for _ in used..w as usize {
+                    addch(' ' as u32);
+                }
+                attroff(selected_attr);
+            } else {
+                // Non-selected row
+                attron(check_attr);
+                let _ = addstr(checkbox);
+                attroff(check_attr);
+
+                attron(text_attr);
+                let desc = layout.description();
+                let _ = addstr(desc);
+                attroff(text_attr);
+
+                // Pad to width
+                let used = checkbox.len() + desc.len();
+                for _ in used..w as usize {
+                    addch(' ' as u32);
+                }
+            }
+        }
 
         // Fill remaining lines
-        for i in 2..h {
+        for i in (layouts.len() as i32 + 1)..h {
             mv(y + i, x);
             for _ in 0..w {
                 addch(' ' as u32);
@@ -721,14 +1100,80 @@ impl SetupScreen {
         }
     }
 
-    fn draw_meters_panel(&self, crt: &Crt, _settings: &Settings) {
+    fn draw_meters_panel(&self, crt: &Crt, settings: &Settings) {
         let x = self.content_panel.x;
         let y = self.content_panel.y;
-        let w = self.content_panel.w;
+        let total_width = self.content_panel.w;
         let h = self.content_panel.h;
 
+        // Get number of columns from current layout
+        let num_columns = settings.header_layout.num_columns();
+
+        // Calculate panel widths:
+        // - Each column panel gets equal space
+        // - Available meters panel gets the same width as a column
+        // Total panels = num_columns + 1 (available meters)
+        let num_panels = num_columns + 1;
+        let panel_width = total_width / num_panels as i32;
+        let remainder = total_width - (panel_width * num_panels as i32);
+
+        // Determine which panel has focus
+        // focus == 1 means we're in meters mode (not categories)
+        // meters_column_focus: 0..num_columns-1 = column panels, num_columns = available meters
+        let focused_column = if self.focus == 1 {
+            Some(self.meters_column_focus)
+        } else {
+            None
+        };
+
+        // Draw column panels
+        let mut cur_x = x;
+        for col_idx in 0..num_columns {
+            let w = if col_idx == num_columns - 1 {
+                panel_width + remainder / 2 // Give extra space to last column
+            } else {
+                panel_width
+            };
+
+            self.draw_meter_column_panel(
+                crt,
+                settings,
+                col_idx,
+                cur_x,
+                y,
+                w,
+                h,
+                focused_column == Some(col_idx),
+            );
+            cur_x += w;
+        }
+
+        // Draw available meters panel (rightmost)
+        let available_width = panel_width + (remainder - remainder / 2);
+        self.draw_available_meters_panel(
+            crt,
+            cur_x,
+            y,
+            available_width,
+            h,
+            focused_column == Some(num_columns),
+        );
+    }
+
+    /// Draw a single meter column panel
+    fn draw_meter_column_panel(
+        &self,
+        crt: &Crt,
+        settings: &Settings,
+        col_idx: usize,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        has_focus: bool,
+    ) {
         // Draw header
-        let header_attr = if self.focus == 1 {
+        let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
         } else {
             crt.color(ColorElement::PanelHeaderUnfocus)
@@ -736,25 +1181,152 @@ impl SetupScreen {
 
         mv(y, x);
         attron(header_attr);
-        let header = "Meters";
-        let _ = addstr(header);
-        for _ in header.len()..w as usize {
+        let header = format!("Column {}", col_idx + 1);
+        let header_display: String = header.chars().take(w as usize).collect();
+        let _ = addstr(&header_display);
+        for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
         attroff(header_attr);
 
-        // Placeholder
-        let text_attr = crt.color(ColorElement::Process);
-        mv(y + 1, x);
-        attron(text_attr);
-        let _ = addstr("(Meters configuration - not yet implemented)");
-        attroff(text_attr);
+        // Get meters for this column
+        let meters = settings.header_columns.get(col_idx);
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
 
-        // Fill remaining lines
-        for i in 2..h {
-            mv(y + i, x);
-            for _ in 0..w {
-                addch(' ' as u32);
+        // Selection color
+        let selection_attr = if has_focus {
+            if self.meters_moving {
+                crt.color(ColorElement::PanelSelectionFollow)
+            } else {
+                crt.color(ColorElement::PanelSelectionFocus)
+            }
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
+        let normal_attr = crt.color(ColorElement::Process);
+
+        // Draw meters in this column
+        let display_height = (h - 1) as usize;
+        for i in 0..display_height {
+            let screen_y = y + 1 + i as i32;
+            mv(screen_y, x);
+
+            if let Some(meters) = meters {
+                if i < meters.len() {
+                    let meter = &meters[i];
+                    let is_selected = has_focus && i == selection;
+
+                    // Get display name with mode
+                    let display = meter_display_name(&meter.name, meter.mode);
+                    let display_text: String = display.chars().take((w - 1) as usize).collect();
+
+                    if is_selected {
+                        attron(selection_attr);
+                        let _ = addstr(&display_text);
+                        for _ in display_text.chars().count()..w as usize {
+                            addch(' ' as u32);
+                        }
+                        attroff(selection_attr);
+                    } else {
+                        attron(normal_attr);
+                        let _ = addstr(&display_text);
+                        attroff(normal_attr);
+                        for _ in display_text.chars().count()..w as usize {
+                            addch(' ' as u32);
+                        }
+                    }
+                } else {
+                    // Empty row
+                    for _ in 0..w {
+                        addch(' ' as u32);
+                    }
+                }
+            } else {
+                // No meters array
+                for _ in 0..w {
+                    addch(' ' as u32);
+                }
+            }
+        }
+    }
+
+    /// Draw the available meters panel
+    fn draw_available_meters_panel(
+        &self,
+        crt: &Crt,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        has_focus: bool,
+    ) {
+        // Draw header
+        let header_attr = if has_focus {
+            crt.color(ColorElement::PanelHeaderFocus)
+        } else {
+            crt.color(ColorElement::PanelHeaderUnfocus)
+        };
+
+        mv(y, x);
+        attron(header_attr);
+        let header = "Available meters";
+        let header_display: String = header.chars().take(w as usize).collect();
+        let _ = addstr(&header_display);
+        for _ in header_display.len()..w as usize {
+            addch(' ' as u32);
+        }
+        attroff(header_attr);
+
+        // Selection color
+        let selection_attr = if has_focus {
+            crt.color(ColorElement::PanelSelectionFocus)
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
+        let normal_attr = crt.color(ColorElement::Process);
+
+        // Draw available meters
+        let display_height = (h - 1) as usize;
+        for i in 0..display_height {
+            let item_index = self.meters_available_scroll as usize + i;
+            let screen_y = y + 1 + i as i32;
+            mv(screen_y, x);
+
+            if item_index < AVAILABLE_METERS.len() {
+                let meter_info = &AVAILABLE_METERS[item_index];
+                let is_selected = has_focus && item_index == self.meters_available_selection;
+
+                // Show display name (description could be shown as tooltip)
+                let display_text: String = meter_info
+                    .display_name
+                    .chars()
+                    .take((w - 1) as usize)
+                    .collect();
+
+                if is_selected {
+                    attron(selection_attr);
+                    let _ = addstr(&display_text);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                    attroff(selection_attr);
+                } else {
+                    attron(normal_attr);
+                    let _ = addstr(&display_text);
+                    attroff(normal_attr);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                }
+            } else {
+                // Empty row
+                for _ in 0..w {
+                    addch(' ' as u32);
+                }
             }
         }
     }
@@ -799,17 +1371,33 @@ impl SetupScreen {
 
     fn draw_function_bar(&self, crt: &Crt, settings: &Settings) {
         let y = crt.height() - 1;
-        
-        // Choose which function bar to show based on current selection
-        let bar = if self.focus == 1 && self.category == SetupCategory::DisplayOptions {
-            if let Some(item) = self.display_options.get(self.content_index) {
-                if matches!(item, OptionItem::Number { .. }) {
-                    &self.dec_inc_bar
-                } else {
-                    &self.function_bar
+
+        // Choose which function bar to show based on current category and selection
+        let bar = if self.focus == 1 {
+            match self.category {
+                SetupCategory::DisplayOptions => {
+                    if let Some(item) = self.display_options.get(self.content_index) {
+                        if matches!(item, OptionItem::Number { .. }) {
+                            &self.dec_inc_bar
+                        } else {
+                            &self.function_bar
+                        }
+                    } else {
+                        &self.function_bar
+                    }
                 }
-            } else {
-                &self.function_bar
+                SetupCategory::Meters => {
+                    let num_columns = settings.header_layout.num_columns();
+                    if self.meters_column_focus == num_columns {
+                        // Available meters panel
+                        &self.meters_available_bar
+                    } else if self.meters_moving {
+                        &self.meters_moving_bar
+                    } else {
+                        &self.meters_bar
+                    }
+                }
+                _ => &self.function_bar,
             }
         } else {
             &self.function_bar
@@ -819,7 +1407,18 @@ impl SetupScreen {
     }
 
     /// Handle key input
-    pub fn handle_key(&mut self, key: i32, settings: &mut Settings, crt: &mut Crt) -> HandlerResult {
+    pub fn handle_key(
+        &mut self,
+        key: i32,
+        settings: &mut Settings,
+        crt: &mut Crt,
+        header: &mut Header,
+    ) -> HandlerResult {
+        // Handle Meters category separately since it has different panel structure
+        if self.category == SetupCategory::Meters && self.focus == 1 {
+            return self.handle_meters_key(key, settings, header);
+        }
+
         match key {
             // Exit keys
             KEY_F10 | KEY_ESC | KEY_Q => {
@@ -829,7 +1428,14 @@ impl SetupScreen {
 
             // Tab / Left / Right - switch focus between panels
             KEY_TAB | KEY_LEFT | KEY_RIGHT => {
-                if self.category == SetupCategory::DisplayOptions || self.category == SetupCategory::Colors {
+                if self.category == SetupCategory::DisplayOptions
+                    || self.category == SetupCategory::Colors
+                    || self.category == SetupCategory::HeaderLayout
+                {
+                    self.focus = if self.focus == 0 { 1 } else { 0 };
+                    return HandlerResult::Handled;
+                } else if self.category == SetupCategory::Meters {
+                    // Switch to meters panel
                     self.focus = if self.focus == 0 { 1 } else { 0 };
                     return HandlerResult::Handled;
                 }
@@ -842,7 +1448,12 @@ impl SetupScreen {
                     if self.category_index > 0 {
                         self.category_index -= 1;
                         self.category = SetupCategory::all()[self.category_index];
-                        self.content_index = 0;
+                        // For HeaderLayout, select current layout; otherwise start at 0
+                        if self.category == SetupCategory::HeaderLayout {
+                            self.content_index = settings.header_layout.to_index();
+                        } else {
+                            self.content_index = 0;
+                        }
                         self.content_scroll = 0;
                     }
                 } else {
@@ -858,7 +1469,12 @@ impl SetupScreen {
                     if self.category_index < SetupCategory::all().len() - 1 {
                         self.category_index += 1;
                         self.category = SetupCategory::all()[self.category_index];
-                        self.content_index = 0;
+                        // For HeaderLayout, select current layout; otherwise start at 0
+                        if self.category == SetupCategory::HeaderLayout {
+                            self.content_index = settings.header_layout.to_index();
+                        } else {
+                            self.content_index = 0;
+                        }
                         self.content_scroll = 0;
                     }
                 } else {
@@ -912,7 +1528,7 @@ impl SetupScreen {
             // Toggle / Enter / Space
             KEY_ENTER_LF | KEY_ENTER_CR | KEY_SPACE => {
                 if self.focus == 1 {
-                    self.handle_toggle(settings, crt);
+                    self.handle_toggle(settings, crt, header);
                     return HandlerResult::Handled;
                 }
             }
@@ -939,10 +1555,469 @@ impl SetupScreen {
         HandlerResult::Ignored
     }
 
+    /// Handle key input for Meters category
+    fn handle_meters_key(
+        &mut self,
+        key: i32,
+        settings: &mut Settings,
+        header: &mut Header,
+    ) -> HandlerResult {
+        let num_columns = settings.header_layout.num_columns();
+        let is_available_panel = self.meters_column_focus == num_columns;
+
+        match key {
+            // Exit keys
+            KEY_F10 | KEY_ESC | KEY_Q => {
+                if self.meters_moving {
+                    // If moving, stop moving instead of exiting
+                    self.meters_moving = false;
+                    return HandlerResult::Handled;
+                }
+                return HandlerResult::BreakLoop;
+            }
+
+            // Enter - toggle moving mode or add meter from available
+            KEY_ENTER_LF | KEY_ENTER_CR => {
+                if is_available_panel {
+                    // Add selected meter to current column
+                    self.add_meter_from_available(settings, header);
+                    return HandlerResult::Handled;
+                } else {
+                    // Toggle moving mode
+                    self.meters_moving = !self.meters_moving;
+                    return HandlerResult::Handled;
+                }
+            }
+
+            // Space - cycle meter style (Bar/Text/Graph/Led)
+            KEY_SPACE => {
+                if !is_available_panel {
+                    self.cycle_meter_style(settings, header);
+                    return HandlerResult::Handled;
+                }
+            }
+
+            // Delete - remove meter from column
+            KEY_DC => {
+                if !is_available_panel {
+                    self.delete_selected_meter(settings, header);
+                    return HandlerResult::Handled;
+                }
+            }
+
+            // Navigation
+            KEY_UP => {
+                if self.meters_moving && !is_available_panel {
+                    // Move meter up in column
+                    self.move_meter_up(settings, header);
+                } else {
+                    // Move selection up
+                    self.meters_move_selection_up(settings);
+                }
+                return HandlerResult::Handled;
+            }
+
+            KEY_DOWN => {
+                if self.meters_moving && !is_available_panel {
+                    // Move meter down in column
+                    self.move_meter_down(settings, header);
+                } else {
+                    // Move selection down
+                    self.meters_move_selection_down(settings);
+                }
+                return HandlerResult::Handled;
+            }
+
+            KEY_LEFT => {
+                if self.meters_moving && !is_available_panel {
+                    // Move meter to left column
+                    self.move_meter_left(settings, header);
+                } else {
+                    // Move focus to left panel
+                    if self.meters_column_focus > 0 {
+                        self.meters_column_focus -= 1;
+                    } else {
+                        // Go back to categories panel
+                        self.focus = 0;
+                    }
+                }
+                return HandlerResult::Handled;
+            }
+
+            KEY_RIGHT => {
+                if self.meters_moving && !is_available_panel {
+                    // Move meter to right column
+                    self.move_meter_right(settings, header);
+                } else {
+                    // Move focus to right panel
+                    if self.meters_column_focus < num_columns {
+                        self.meters_column_focus += 1;
+                    }
+                }
+                return HandlerResult::Handled;
+            }
+
+            KEY_TAB => {
+                // Cycle through panels
+                if self.meters_column_focus < num_columns {
+                    self.meters_column_focus += 1;
+                } else {
+                    // Go back to categories
+                    self.focus = 0;
+                    self.meters_column_focus = 0;
+                }
+                return HandlerResult::Handled;
+            }
+
+            _ => {}
+        }
+
+        HandlerResult::Ignored
+    }
+
+    /// Move meter selection up in current panel
+    fn meters_move_selection_up(&mut self, settings: &Settings) {
+        let num_columns = settings.header_layout.num_columns();
+
+        if self.meters_column_focus == num_columns {
+            // Available meters panel
+            if self.meters_available_selection > 0 {
+                self.meters_available_selection -= 1;
+                // Adjust scroll
+                if (self.meters_available_selection as i32) < self.meters_available_scroll {
+                    self.meters_available_scroll = self.meters_available_selection as i32;
+                }
+            }
+        } else {
+            // Column panel
+            let col_idx = self.meters_column_focus;
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                if *sel > 0 {
+                    *sel -= 1;
+                }
+            }
+        }
+    }
+
+    /// Move meter selection down in current panel
+    fn meters_move_selection_down(&mut self, settings: &Settings) {
+        let num_columns = settings.header_layout.num_columns();
+
+        if self.meters_column_focus == num_columns {
+            // Available meters panel
+            if self.meters_available_selection < AVAILABLE_METERS.len().saturating_sub(1) {
+                self.meters_available_selection += 1;
+                // Adjust scroll
+                let display_height = (self.content_panel.h - 1) as i32;
+                if (self.meters_available_selection as i32)
+                    >= self.meters_available_scroll + display_height
+                {
+                    self.meters_available_scroll =
+                        self.meters_available_selection as i32 - display_height + 1;
+                }
+            }
+        } else {
+            // Column panel
+            let col_idx = self.meters_column_focus;
+            let max_index = settings
+                .header_columns
+                .get(col_idx)
+                .map(|m| m.len().saturating_sub(1))
+                .unwrap_or(0);
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                if *sel < max_index {
+                    *sel += 1;
+                }
+            }
+        }
+    }
+
+    /// Add a meter from available meters to the first column
+    fn add_meter_from_available(&mut self, settings: &mut Settings, header: &mut Header) {
+        if self.meters_available_selection >= AVAILABLE_METERS.len() {
+            return;
+        }
+
+        let meter_info = &AVAILABLE_METERS[self.meters_available_selection];
+
+        // Add to the first column (or could be current column - 1 if we want)
+        // C htop adds to the last focused column panel
+        let target_column = if self.meters_column_focus > 0 {
+            self.meters_column_focus - 1
+        } else {
+            0
+        };
+
+        // Create meter config
+        let config = MeterConfig {
+            name: meter_info.name.to_string(),
+            param: 0,
+            mode: MeterMode::Bar,
+        };
+
+        // Ensure column exists
+        while settings.header_columns.len() <= target_column {
+            settings.header_columns.push(Vec::new());
+        }
+
+        // Add meter to column
+        settings.header_columns[target_column].push(config);
+        settings.changed = true;
+        self.changed = true;
+
+        // Update selection in that column
+        if let Some(sel) = self.meters_column_selection.get_mut(target_column) {
+            *sel = settings.header_columns[target_column]
+                .len()
+                .saturating_sub(1);
+        }
+
+        // Repopulate header
+        header.populate_from_settings(settings);
+    }
+
+    /// Delete the selected meter from current column
+    fn delete_selected_meter(&mut self, settings: &mut Settings, header: &mut Header) {
+        let col_idx = self.meters_column_focus;
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
+
+        if let Some(column) = settings.header_columns.get_mut(col_idx) {
+            if selection < column.len() {
+                column.remove(selection);
+                settings.changed = true;
+                self.changed = true;
+
+                // Adjust selection
+                if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                    if *sel > 0 && *sel >= column.len() {
+                        *sel = column.len().saturating_sub(1);
+                    }
+                }
+
+                // Repopulate header
+                header.populate_from_settings(settings);
+            }
+        }
+
+        // Stop moving mode if we were moving
+        self.meters_moving = false;
+    }
+
+    /// Cycle the meter style (Bar -> Text -> Graph -> Led -> Bar)
+    fn cycle_meter_style(&mut self, settings: &mut Settings, header: &mut Header) {
+        let col_idx = self.meters_column_focus;
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
+
+        if let Some(column) = settings.header_columns.get_mut(col_idx) {
+            if let Some(meter) = column.get_mut(selection) {
+                meter.mode = match meter.mode {
+                    MeterMode::Bar => MeterMode::Text,
+                    MeterMode::Text => MeterMode::Graph,
+                    MeterMode::Graph => MeterMode::Led,
+                    MeterMode::Led => MeterMode::Bar,
+                };
+                settings.changed = true;
+                self.changed = true;
+
+                // Repopulate header
+                header.populate_from_settings(settings);
+            }
+        }
+    }
+
+    /// Move meter up within its column
+    fn move_meter_up(&mut self, settings: &mut Settings, header: &mut Header) {
+        let col_idx = self.meters_column_focus;
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
+
+        if selection == 0 {
+            return;
+        }
+
+        if let Some(column) = settings.header_columns.get_mut(col_idx) {
+            if selection < column.len() {
+                column.swap(selection, selection - 1);
+                settings.changed = true;
+                self.changed = true;
+
+                // Update selection
+                if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                    *sel = selection - 1;
+                }
+
+                // Repopulate header
+                header.populate_from_settings(settings);
+            }
+        }
+    }
+
+    /// Move meter down within its column
+    fn move_meter_down(&mut self, settings: &mut Settings, header: &mut Header) {
+        let col_idx = self.meters_column_focus;
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
+
+        if let Some(column) = settings.header_columns.get_mut(col_idx) {
+            if selection + 1 < column.len() {
+                column.swap(selection, selection + 1);
+                settings.changed = true;
+                self.changed = true;
+
+                // Update selection
+                if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                    *sel = selection + 1;
+                }
+
+                // Repopulate header
+                header.populate_from_settings(settings);
+            }
+        }
+    }
+
+    /// Move meter to the left column
+    fn move_meter_left(&mut self, settings: &mut Settings, header: &mut Header) {
+        let col_idx = self.meters_column_focus;
+        if col_idx == 0 {
+            return; // Can't move left from first column
+        }
+
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
+        let target_col = col_idx - 1;
+
+        // Remove from current column
+        let meter = if let Some(column) = settings.header_columns.get_mut(col_idx) {
+            if selection < column.len() {
+                Some(column.remove(selection))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Add to target column
+        if let Some(meter) = meter {
+            // Ensure target column exists
+            while settings.header_columns.len() <= target_col {
+                settings.header_columns.push(Vec::new());
+            }
+
+            // Insert at same position or end
+            let insert_pos = selection.min(settings.header_columns[target_col].len());
+            settings.header_columns[target_col].insert(insert_pos, meter);
+            settings.changed = true;
+            self.changed = true;
+
+            // Move focus to target column
+            self.meters_column_focus = target_col;
+
+            // Update selections
+            if let Some(sel) = self.meters_column_selection.get_mut(target_col) {
+                *sel = insert_pos;
+            }
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                let len = settings
+                    .header_columns
+                    .get(col_idx)
+                    .map(|c| c.len())
+                    .unwrap_or(0);
+                if *sel >= len && len > 0 {
+                    *sel = len - 1;
+                }
+            }
+
+            // Repopulate header
+            header.populate_from_settings(settings);
+        }
+    }
+
+    /// Move meter to the right column
+    fn move_meter_right(&mut self, settings: &mut Settings, header: &mut Header) {
+        let col_idx = self.meters_column_focus;
+        let num_columns = settings.header_layout.num_columns();
+
+        if col_idx + 1 >= num_columns {
+            return; // Can't move right from last column
+        }
+
+        let selection = self
+            .meters_column_selection
+            .get(col_idx)
+            .copied()
+            .unwrap_or(0);
+        let target_col = col_idx + 1;
+
+        // Remove from current column
+        let meter = if let Some(column) = settings.header_columns.get_mut(col_idx) {
+            if selection < column.len() {
+                Some(column.remove(selection))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Add to target column
+        if let Some(meter) = meter {
+            // Ensure target column exists
+            while settings.header_columns.len() <= target_col {
+                settings.header_columns.push(Vec::new());
+            }
+
+            // Insert at same position or end
+            let insert_pos = selection.min(settings.header_columns[target_col].len());
+            settings.header_columns[target_col].insert(insert_pos, meter);
+            settings.changed = true;
+            self.changed = true;
+
+            // Move focus to target column
+            self.meters_column_focus = target_col;
+
+            // Update selections
+            if let Some(sel) = self.meters_column_selection.get_mut(target_col) {
+                *sel = insert_pos;
+            }
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                let len = settings
+                    .header_columns
+                    .get(col_idx)
+                    .map(|c| c.len())
+                    .unwrap_or(0);
+                if *sel >= len && len > 0 {
+                    *sel = len - 1;
+                }
+            }
+
+            // Repopulate header
+            header.populate_from_settings(settings);
+        }
+    }
+
     fn get_content_count(&self) -> usize {
         match self.category {
             SetupCategory::DisplayOptions => self.display_options.len(),
             SetupCategory::Colors => COLOR_SCHEME_NAMES.len(),
+            SetupCategory::HeaderLayout => HeaderLayout::all().len(),
             _ => 0,
         }
     }
@@ -950,7 +2025,7 @@ impl SetupScreen {
     fn move_content_up(&mut self, _settings: &Settings) {
         if self.content_index > 0 {
             self.content_index -= 1;
-            
+
             // Skip non-interactive items in display options
             if self.category == SetupCategory::DisplayOptions {
                 while self.content_index > 0 {
@@ -1041,7 +2116,7 @@ impl SetupScreen {
         }
     }
 
-    fn handle_toggle(&mut self, settings: &mut Settings, crt: &mut Crt) {
+    fn handle_toggle(&mut self, settings: &mut Settings, crt: &mut Crt, header: &mut Header) {
         match self.category {
             SetupCategory::DisplayOptions => {
                 if let Some(item) = self.display_options.get(self.content_index) {
@@ -1051,7 +2126,9 @@ impl SetupScreen {
                             settings.changed = true;
                             self.changed = true;
                         }
-                        OptionItem::Number { field, min, max, .. } => {
+                        OptionItem::Number {
+                            field, min, max, ..
+                        } => {
                             // Toggle cycles through values
                             let current = field.get_int(settings);
                             let new_val = if current >= *max { *min } else { current + 1 };
@@ -1069,10 +2146,51 @@ impl SetupScreen {
                 settings.color_scheme = ColorScheme::from_i32(new_scheme);
                 settings.changed = true;
                 self.changed = true;
-                
+
                 // Update colors immediately
                 crt.set_color_scheme(settings.color_scheme);
                 clear();
+            }
+            SetupCategory::HeaderLayout => {
+                // Set header layout (like C htop HeaderOptionsPanel_eventHandler)
+                if let Some(new_layout) = HeaderLayout::from_index(self.content_index) {
+                    let old_num_cols = settings.header_layout.num_columns();
+                    let new_num_cols = new_layout.num_columns();
+
+                    settings.header_layout = new_layout;
+                    settings.changed = true;
+                    self.changed = true;
+
+                    // Handle column count changes (like C htop Header_setLayout)
+                    if new_num_cols > old_num_cols {
+                        // Add new empty columns
+                        while settings.header_columns.len() < new_num_cols {
+                            settings.header_columns.push(Vec::new());
+                        }
+                    } else if new_num_cols < old_num_cols {
+                        // Move meters from removed columns to the last remaining column
+                        // (matching C htop behavior)
+                        for col_idx in (new_num_cols..old_num_cols).rev() {
+                            if let Some(removed_meters) = settings.header_columns.get_mut(col_idx) {
+                                // Take all meters from this column
+                                let meters: Vec<_> = removed_meters.drain(..).collect();
+                                // Add them to the last remaining column
+                                if let Some(last_col) =
+                                    settings.header_columns.get_mut(new_num_cols - 1)
+                                {
+                                    for meter in meters.into_iter().rev() {
+                                        last_col.push(meter);
+                                    }
+                                }
+                            }
+                        }
+                        // Truncate to new column count
+                        settings.header_columns.truncate(new_num_cols);
+                    }
+
+                    // Update header with new layout and meters
+                    header.populate_from_settings(settings);
+                }
             }
             _ => {}
         }
@@ -1123,16 +2241,25 @@ impl SetupScreen {
     }
 
     /// Run the setup screen
-    pub fn run(&mut self, settings: &mut Settings, crt: &mut Crt) {
+    pub fn run(
+        &mut self,
+        settings: &mut Settings,
+        crt: &mut Crt,
+        header: &mut Header,
+        machine: &Machine,
+    ) {
+        // Get header height for layout
+        let mut header_height = header.get_height();
+
         // Initial layout
-        self.layout(crt);
-        
+        self.layout(crt, header_height, settings.screen_tabs);
+
         // Start with first interactive item selected
         self.skip_to_interactive(settings, true);
 
         loop {
             // Draw
-            self.draw(crt, settings);
+            self.draw(crt, settings, header, machine);
 
             // Get input
             let key = getch();
@@ -1140,12 +2267,31 @@ impl SetupScreen {
             // Handle resize
             if key == KEY_RESIZE {
                 crt.handle_resize();
-                self.layout(crt);
+                self.layout(crt, header_height, settings.screen_tabs);
                 continue;
             }
 
             // Handle key
-            let result = self.handle_key(key, settings, crt);
+            let result = self.handle_key(key, settings, crt, header);
+
+            // If settings were changed, update header (like C htop DisplayOptionsPanel)
+            if result == HandlerResult::Handled && self.changed {
+                // Update header margin setting if it changed
+                header.set_header_margin(settings.header_margin);
+
+                // Update meters with current machine data (needed for correct height calculation)
+                // This must happen BEFORE calculate_height() because CPU meters need to know
+                // the actual CPU count to report their correct height
+                header.update(machine);
+
+                // Recalculate header height (may change if layout or headerMargin changed)
+                let new_height = header.calculate_height();
+                if new_height != header_height {
+                    header_height = new_height;
+                    self.layout(crt, header_height, settings.screen_tabs);
+                }
+            }
+
             if result == HandlerResult::BreakLoop {
                 break;
             }

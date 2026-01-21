@@ -1,9 +1,9 @@
 //! CPU Meter
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// CPU selection mode
 #[derive(Debug, Clone, Copy)]
@@ -244,9 +244,10 @@ impl Meter for CpuMeter {
 
         let cpu = match self.selection {
             CpuSelection::Cpu(n) => machine.cpus.get(n),
-            CpuSelection::Average | CpuSelection::All | CpuSelection::Left | CpuSelection::Right => {
-                Some(&machine.avg_cpu)
-            }
+            CpuSelection::Average
+            | CpuSelection::All
+            | CpuSelection::Left
+            | CpuSelection::Right => Some(&machine.avg_cpu),
         };
 
         if let Some(cpu) = cpu {

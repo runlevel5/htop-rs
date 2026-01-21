@@ -5,34 +5,34 @@
 
 #![allow(dead_code)]
 
-mod cpu_meter;
-mod memory_meter;
-mod swap_meter;
-mod load_meter;
-mod tasks_meter;
-mod uptime_meter;
+mod battery_meter;
 mod blank_meter;
-mod hostname_meter;
 mod clock_meter;
+mod cpu_meter;
 mod date_meter;
 mod datetime_meter;
-mod battery_meter;
+mod hostname_meter;
+mod load_meter;
+mod memory_meter;
+mod swap_meter;
+mod tasks_meter;
+mod uptime_meter;
 
 use crate::core::{Machine, Settings};
 use crate::ui::Crt;
 
-pub use cpu_meter::*;
-pub use memory_meter::*;
-pub use swap_meter::*;
-pub use load_meter::*;
-pub use tasks_meter::*;
-pub use uptime_meter::*;
+pub use battery_meter::*;
 pub use blank_meter::*;
-pub use hostname_meter::*;
 pub use clock_meter::*;
+pub use cpu_meter::*;
 pub use date_meter::*;
 pub use datetime_meter::*;
-pub use battery_meter::*;
+pub use hostname_meter::*;
+pub use load_meter::*;
+pub use memory_meter::*;
+pub use swap_meter::*;
+pub use tasks_meter::*;
+pub use uptime_meter::*;
 
 /// Meter display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,29 +48,29 @@ pub enum MeterMode {
 pub trait Meter: std::fmt::Debug {
     /// Get the meter name
     fn name(&self) -> &'static str;
-    
+
     /// Get the caption (prefix in the header)
     fn caption(&self) -> &str;
-    
+
     /// Initialize the meter
     fn init(&mut self) {}
-    
+
     /// Update meter values from machine state
     fn update(&mut self, machine: &Machine);
-    
+
     /// Get the height of the meter in lines
     fn height(&self) -> i32 {
         1
     }
-    
+
     /// Draw the meter
     fn draw(&self, crt: &Crt, machine: &Machine, settings: &Settings, x: i32, y: i32, width: i32);
-    
+
     /// Get the display mode
     fn mode(&self) -> MeterMode {
         MeterMode::Bar
     }
-    
+
     /// Set the display mode
     fn set_mode(&mut self, mode: MeterMode);
 }
@@ -138,22 +138,22 @@ impl MeterType {
 
 /// Draw a bar meter
 pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], total: f64) {
-    use ncurses::*;
     use crate::ui::ColorElement;
-    
+    use ncurses::*;
+
     let bar_width = (width - 2) as usize; // Account for [ and ]
-    
+
     // Draw brackets
     let bracket_attr = crt.color(ColorElement::BarBorder);
     attron(bracket_attr);
     mvaddch(y, x, '[' as u32);
     mvaddch(y, x + width - 1, ']' as u32);
     attroff(bracket_attr);
-    
+
     // Calculate bar content
     let mut bar_pos = 0;
     mv(y, x + 1);
-    
+
     for (value, color) in values {
         let attr = crt.colors[*color as usize];
         let bar_chars = if total > 0.0 {
@@ -161,19 +161,19 @@ pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], to
         } else {
             0
         };
-        
+
         attron(attr);
         for _ in 0..bar_chars.min(bar_width - bar_pos) {
             addch('|' as u32);
             bar_pos += 1;
         }
         attroff(attr);
-        
+
         if bar_pos >= bar_width {
             break;
         }
     }
-    
+
     // Fill remaining with shadow
     let shadow_attr = crt.color(ColorElement::MeterShadow);
     attron(shadow_attr);
@@ -186,17 +186,17 @@ pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], to
 
 /// Draw a text meter
 pub fn draw_text(crt: &Crt, x: i32, y: i32, caption: &str, text: &str) {
-    use ncurses::*;
     use crate::ui::ColorElement;
-    
+    use ncurses::*;
+
     let caption_attr = crt.color(ColorElement::MeterText);
     let value_attr = crt.color(ColorElement::MeterValue);
-    
+
     mv(y, x);
     attron(caption_attr);
     let _ = addstr(caption);
     attroff(caption_attr);
-    
+
     attron(value_attr);
     let _ = addstr(text);
     attroff(value_attr);

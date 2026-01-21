@@ -22,7 +22,10 @@ impl RichChar {
 
 impl Default for RichChar {
     fn default() -> Self {
-        RichChar { ch: ' ', attr: A_NORMAL }
+        RichChar {
+            ch: ' ',
+            attr: A_NORMAL,
+        }
     }
 }
 
@@ -40,7 +43,9 @@ impl RichString {
 
     /// Create a RichString with initial capacity
     pub fn with_capacity(capacity: usize) -> Self {
-        RichString { chars: Vec::with_capacity(capacity) }
+        RichString {
+            chars: Vec::with_capacity(capacity),
+        }
     }
 
     /// Clear the string
@@ -125,10 +130,10 @@ impl RichString {
     /// Write the string to the screen at the given position
     pub fn write_at(&self, y: i32, x: i32) {
         let mut current_attr = A_NORMAL;
-        
+
         mv(y, x);
         attron(current_attr);
-        
+
         for rc in &self.chars {
             if rc.attr != current_attr {
                 attroff(current_attr);
@@ -140,7 +145,7 @@ impl RichString {
             let s = rc.ch.encode_utf8(&mut buf);
             let _ = addstr(s);
         }
-        
+
         attroff(current_attr);
     }
 
@@ -149,7 +154,7 @@ impl RichString {
         mv(y, x);
         let mut current_attr = A_NORMAL;
         attron(current_attr);
-        
+
         let mut written = 0;
         for rc in &self.chars {
             if written >= width {
@@ -166,13 +171,13 @@ impl RichString {
             let _ = addstr(s);
             written += 1;
         }
-        
+
         // Pad with spaces if needed
         while written < width {
             addch(' ' as u32);
             written += 1;
         }
-        
+
         attroff(current_attr);
     }
 
@@ -183,7 +188,7 @@ impl RichString {
         let mut current_attr: attr_t = 0;
         let mut first = true;
         let width = width as usize;
-        
+
         let mut written = 0;
         for rc in &self.chars {
             if written >= width {
@@ -203,7 +208,7 @@ impl RichString {
             let _ = addstr(s);
             written += 1;
         }
-        
+
         // Pad with spaces if needed (using last attribute or normal)
         if !first {
             attroff(current_attr);

@@ -1,8 +1,8 @@
 //! Blank Meter (placeholder/spacer)
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// Blank Meter - just empty space
 #[derive(Debug, Default)]
@@ -29,7 +29,15 @@ impl Meter for BlankMeter {
         // Nothing to update
     }
 
-    fn draw(&self, _crt: &Crt, _machine: &Machine, _settings: &Settings, _x: i32, _y: i32, _width: i32) {
+    fn draw(
+        &self,
+        _crt: &Crt,
+        _machine: &Machine,
+        _settings: &Settings,
+        _x: i32,
+        _y: i32,
+        _width: i32,
+    ) {
         // Draw nothing
     }
 

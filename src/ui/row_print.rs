@@ -7,10 +7,10 @@
 
 #![allow(dead_code)]
 
-use ncurses::attr_t;
 use super::crt::ColorElement;
 use super::rich_string::RichString;
 use super::Crt;
+use ncurses::attr_t;
 
 /// Unit prefixes for memory formatting (K, M, G, T, P, E)
 const UNIT_PREFIXES: [char; 6] = ['K', 'M', 'G', 'T', 'P', 'E'];
@@ -32,7 +32,11 @@ pub fn print_kbytes(str: &mut RichString, number: u64, coloring: bool, crt: &Crt
 
     // Handle invalid/unknown values
     if number == u64::MAX {
-        let color = if coloring { shadow_color } else { process_color };
+        let color = if coloring {
+            shadow_color
+        } else {
+            process_color
+        };
         str.append("  N/A ", color);
         return;
     }
@@ -69,7 +73,7 @@ pub fn print_kbytes(str: &mut RichString, number: u64, coloring: bool, crt: &Crt
     // Convert KiB to (1/100) of MiB
     let mut hundredths = (number / 256) * 25 + (number % 256) * 25 / 256;
     let mut unit_index = 1usize; // Start at M
-    
+
     let mut prev_unit_color = color;
     let mut current_color = next_unit_color;
     let mut current_next_color = if coloring && unit_index + 1 < colors.len() {
@@ -89,7 +93,11 @@ pub fn print_kbytes(str: &mut RichString, number: u64, coloring: bool, crt: &Crt
         }
         if unit_index >= UNIT_PREFIXES.len() {
             // Overflow - show N/A
-            let color = if coloring { shadow_color } else { process_color };
+            let color = if coloring {
+                shadow_color
+            } else {
+                process_color
+            };
             str.append("  N/A ", color);
             return;
         }
@@ -131,9 +139,21 @@ pub fn print_kbytes(str: &mut RichString, number: u64, coloring: bool, crt: &Crt
 pub fn print_time(str: &mut RichString, total_hundredths: u64, coloring: bool, crt: &Crt) {
     let base_color = crt.color(ColorElement::Process);
     let shadow_color = crt.color(ColorElement::ProcessShadow);
-    let hour_color = if coloring { crt.color(ColorElement::ProcessMegabytes) } else { base_color };
-    let day_color = if coloring { crt.color(ColorElement::ProcessGigabytes) } else { base_color };
-    let year_color = if coloring { crt.color(ColorElement::LargeNumber) } else { base_color };
+    let hour_color = if coloring {
+        crt.color(ColorElement::ProcessMegabytes)
+    } else {
+        base_color
+    };
+    let day_color = if coloring {
+        crt.color(ColorElement::ProcessGigabytes)
+    } else {
+        base_color
+    };
+    let year_color = if coloring {
+        crt.color(ColorElement::LargeNumber)
+    } else {
+        base_color
+    };
 
     // Zero time
     if total_hundredths == 0 {
@@ -151,7 +171,10 @@ pub fn print_time(str: &mut RichString, total_hundredths: u64, coloring: bool, c
     // < 60 minutes: "mm:ss.cc "
     if total_minutes < 60 {
         let hundredths = (total_hundredths % 100) as u32;
-        str.append(&format!("{:>2}:{:02}.{:02} ", total_minutes, seconds, hundredths), base_color);
+        str.append(
+            &format!("{:>2}:{:02}.{:02} ", total_minutes, seconds, hundredths),
+            base_color,
+        );
         return;
     }
 
@@ -228,7 +251,10 @@ pub fn print_percentage(str: &mut RichString, val: f32, width: usize, crt: &Crt)
         1
     };
 
-    str.append(&format!("{:>width$.prec$} ", val, width = width, prec = precision), attr);
+    str.append(
+        &format!("{:>width$.prec$} ", val, width = width, prec = precision),
+        attr,
+    );
     attr
 }
 

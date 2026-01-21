@@ -2,10 +2,10 @@
 
 use std::time::Duration;
 
+use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
-use super::{Meter, MeterMode};
 
 /// Uptime Meter
 #[derive(Debug, Default)]
@@ -62,7 +62,15 @@ impl Meter for UptimeMeter {
         self.uptime = machine.uptime;
     }
 
-    fn draw(&self, crt: &Crt, _machine: &Machine, _settings: &Settings, x: i32, y: i32, _width: i32) {
+    fn draw(
+        &self,
+        crt: &Crt,
+        _machine: &Machine,
+        _settings: &Settings,
+        x: i32,
+        y: i32,
+        _width: i32,
+    ) {
         use ncurses::*;
 
         let caption_attr = crt.color(ColorElement::MeterText);

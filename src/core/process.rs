@@ -285,7 +285,9 @@ impl ProcessField {
             ProcessField::Minflt => "Minor page faults (pages from memory)",
             ProcessField::Majflt => "Major page faults (pages from disk)",
             ProcessField::Priority => "Kernel scheduling priority",
-            ProcessField::Nice => "Nice value (the higher, the more it lets other processes take priority)",
+            ProcessField::Nice => {
+                "Nice value (the higher, the more it lets other processes take priority)"
+            }
             ProcessField::Starttime => "Start time of the process",
             ProcessField::Processor => "CPU last executed on",
             ProcessField::MSize => "Virtual memory size",
@@ -447,7 +449,7 @@ pub struct Process {
     pub scheduling_policy: i32,
 
     // Time information
-    pub time: u64,           // in hundredths of a second
+    pub time: u64,            // in hundredths of a second
     pub starttime_ctime: i64, // epoch seconds
     pub starttime_show: String,
 
@@ -466,14 +468,14 @@ pub struct Process {
 
     // Process state
     pub state: ProcessState,
-    pub nlwp: i64,  // number of threads
+    pub nlwp: i64, // number of threads
 
     // Tree display state
     pub tree_depth: i32,
-    pub indent: i32,       // Indentation bits for tree drawing (negative = last child)
+    pub indent: i32, // Indentation bits for tree drawing (negative = last child)
     pub show_children: bool,
     pub is_visible: bool,
-    pub is_root: bool,     // True if this is a root process in the tree
+    pub is_root: bool, // True if this is a root process in the tree
 
     // I/O statistics
     pub io_read_bytes: u64,
@@ -495,12 +497,12 @@ pub struct Process {
 
     // For display
     pub merged_command: MergedCommand,
-    
+
     // Update tracking
     pub updated: bool,
     pub was_shown: bool,
     pub show_timestamp: SystemTime,
-    
+
     // Tagging
     pub tagged: bool,
 }
@@ -627,7 +629,7 @@ impl Process {
         } else {
             basename_end.min(cmdline.len())
         };
-        
+
         // Compute basename_start by finding last '/' before end
         // This matches C htop's skipPotentialPath logic
         let start = if cmdline.starts_with('/') {
@@ -635,7 +637,7 @@ impl Process {
         } else {
             0
         };
-        
+
         self.cmdline_basename_start = start;
         self.cmdline_basename_end = end;
         self.cmdline = Some(cmdline);
@@ -647,33 +649,33 @@ impl Process {
         if !cmdline.starts_with('/') {
             return 0;
         }
-        
+
         let bytes = cmdline.as_bytes();
         let mut slash = 0;
         let mut i = 1;
-        
+
         while i < end && i < bytes.len() {
             let c = bytes[i];
-            
+
             if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] != 0 {
                 slash = i + 1;
                 i += 1;
                 continue;
             }
-            
+
             // Space not preceded by backslash ends the search
             if c == b' ' && (i == 0 || bytes[i - 1] != b'\\') {
                 return slash;
             }
-            
+
             // Colon followed by space ends the search
             if c == b':' && i + 1 < bytes.len() && bytes[i + 1] == b' ' {
                 return slash;
             }
-            
+
             i += 1;
         }
-        
+
         slash
     }
 
@@ -690,8 +692,14 @@ impl Process {
             ProcessField::Priority => self.priority.cmp(&other.priority),
             ProcessField::Nice => self.nice.cmp(&other.nice),
             ProcessField::Processor => self.processor.cmp(&other.processor),
-            ProcessField::PercentCpu => self.percent_cpu.partial_cmp(&other.percent_cpu).unwrap_or(Ordering::Equal),
-            ProcessField::PercentMem => self.percent_mem.partial_cmp(&other.percent_mem).unwrap_or(Ordering::Equal),
+            ProcessField::PercentCpu => self
+                .percent_cpu
+                .partial_cmp(&other.percent_cpu)
+                .unwrap_or(Ordering::Equal),
+            ProcessField::PercentMem => self
+                .percent_mem
+                .partial_cmp(&other.percent_mem)
+                .unwrap_or(Ordering::Equal),
             ProcessField::Time => self.time.cmp(&other.time),
             ProcessField::MSize => self.m_virt.cmp(&other.m_virt),
             ProcessField::MResident => self.m_resident.cmp(&other.m_resident),
@@ -783,7 +791,7 @@ impl Default for Process {
 pub struct ProcessList {
     pub processes: Vec<Process>,
     pub by_pid: std::collections::HashMap<i32, usize>,
-    pub tree_display_order: Vec<i32>,  // PIDs in tree display order
+    pub tree_display_order: Vec<i32>, // PIDs in tree display order
 }
 
 impl ProcessList {
@@ -835,7 +843,11 @@ impl ProcessList {
     pub fn sort_by(&mut self, field: ProcessField, ascending: bool) {
         self.processes.sort_by(|a, b| {
             let ord = a.compare_by_field(b, field);
-            if ascending { ord } else { ord.reverse() }
+            if ascending {
+                ord
+            } else {
+                ord.reverse()
+            }
         });
         // Rebuild the index
         self.by_pid.clear();
@@ -863,10 +875,11 @@ impl ProcessList {
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Process> {
         self.processes.iter_mut()
     }
-    
+
     /// Iterator over processes in tree display order (only visible ones)
     pub fn iter_tree(&self) -> impl Iterator<Item = &Process> {
-        self.tree_display_order.iter()
+        self.tree_display_order
+            .iter()
             .filter_map(move |pid| self.get(*pid))
             .filter(|p| p.is_visible)
     }
@@ -876,7 +889,7 @@ impl ProcessList {
     pub fn build_tree(&mut self) {
         // First, mark root processes and set all as visible
         let pids: std::collections::HashSet<i32> = self.processes.iter().map(|p| p.pid).collect();
-        
+
         for process in &mut self.processes {
             // A process is a root if:
             // 1. ppid == 0 (truly root), OR
@@ -885,14 +898,12 @@ impl ProcessList {
             // Note: On macOS, we may not have permission to see PID 1 (launchd),
             // but we know it exists, so treat ppid=1 processes as children of an implicit root
             let is_orphan = !pids.contains(&process.ppid) && process.ppid != 1;
-            process.is_root = process.ppid == 0 
-                || process.ppid == process.pid 
-                || is_orphan;
+            process.is_root = process.ppid == 0 || process.ppid == process.pid || is_orphan;
             process.indent = 0;
             process.tree_depth = 0;
-            process.is_visible = true;  // Reset visibility
+            process.is_visible = true; // Reset visibility
         }
-        
+
         // Sort by parent, then by comparison key (roots first)
         self.processes.sort_by(|a, b| {
             let a_parent = if a.is_root { 0 } else { a.ppid };
@@ -902,58 +913,62 @@ impl ProcessList {
                 other => other,
             }
         });
-        
+
         // Rebuild the index
         self.by_pid.clear();
         for (idx, process) in self.processes.iter().enumerate() {
             self.by_pid.insert(process.pid, idx);
         }
-        
+
         // Build display list in tree order
         let mut display_list: Vec<i32> = Vec::new();
-        
+
         // Check if PID 1 exists in our process list
         let has_pid_1 = pids.contains(&1);
-        
+
         // Process root nodes
-        let root_indices: Vec<usize> = self.processes.iter()
+        let root_indices: Vec<usize> = self
+            .processes
+            .iter()
             .enumerate()
             .filter(|(_, p)| p.is_root)
             .map(|(i, _)| i)
             .collect();
-        
+
         for idx in root_indices {
             let pid = self.processes[idx].pid;
             self.processes[idx].indent = 0;
             self.processes[idx].tree_depth = 0;
-            self.processes[idx].is_visible = true;  // Root processes are always visible
+            self.processes[idx].is_visible = true; // Root processes are always visible
             display_list.push(pid);
-            
+
             let show_children = self.processes[idx].show_children;
             self.build_tree_branch(pid, 0, 0, show_children, &mut display_list);
         }
-        
+
         // If PID 1 is not in our list, handle its children specially
         // These processes have ppid=1 but aren't marked as roots (they're children of the implicit init)
         if !has_pid_1 {
             // Process children of PID 1 as top-level entries (like roots but with tree connectors)
-            let pid_1_children: Vec<(usize, i32)> = self.processes.iter()
+            let pid_1_children: Vec<(usize, i32)> = self
+                .processes
+                .iter()
                 .enumerate()
                 .filter(|(_, p)| p.ppid == 1 && !p.is_root)
                 .map(|(i, p)| (i, p.pid))
                 .collect();
-            
+
             if !pid_1_children.is_empty() {
                 let last_idx = pid_1_children.len() - 1;
-                
+
                 for (i, (idx, pid)) in pid_1_children.iter().enumerate() {
                     let is_last = i == last_idx;
-                    
+
                     // Add to display list
                     display_list.push(*pid);
-                    
+
                     // Set indent for PID 1 children (depth 1)
-                    let next_indent = 1;  // 1 << 0 = 1
+                    let next_indent = 1; // 1 << 0 = 1
                     let process = &mut self.processes[*idx];
                     if is_last {
                         process.indent = -next_indent;
@@ -962,7 +977,7 @@ impl ProcessList {
                     }
                     process.tree_depth = 1;
                     process.is_visible = true;
-                    
+
                     // Recursively process children
                     let child_indent = if is_last { 0 } else { next_indent };
                     let child_show = process.show_children;
@@ -970,42 +985,51 @@ impl ProcessList {
                 }
             }
         }
-        
+
         // Store the display order
         self.tree_display_order = display_list;
     }
-    
+
     /// Recursively build tree branch
-    fn build_tree_branch(&mut self, parent_id: i32, level: u32, indent: i32, show: bool, display_list: &mut Vec<i32>) {
+    fn build_tree_branch(
+        &mut self,
+        parent_id: i32,
+        level: u32,
+        indent: i32,
+        show: bool,
+        display_list: &mut Vec<i32>,
+    ) {
         // Find all children of this parent (matching C htop Row_isChildOf check)
-        let children: Vec<(usize, i32)> = self.processes.iter()
+        let children: Vec<(usize, i32)> = self
+            .processes
+            .iter()
             .enumerate()
             .filter(|(_, p)| p.ppid == parent_id && p.pid != parent_id)
             .map(|(i, p)| (i, p.pid))
             .collect();
-        
+
         if children.is_empty() {
             return;
         }
-        
+
         let last_idx = children.len() - 1;
-        
+
         for (i, (idx, pid)) in children.iter().enumerate() {
             let is_last = i == last_idx;
-            
+
             // Add to display list first (like C htop line 127)
             display_list.push(*pid);
-            
+
             // Calculate indent bits (matches C htop Table.c line 129)
             let next_indent = indent | (1i32 << std::cmp::min(level, 30));
-            
+
             // Recursive call (like C htop line 130)
             // Pass next_indent to children if this is NOT the last item, otherwise pass current indent
             let child_indent = if is_last { indent } else { next_indent };
             let process = &self.processes[*idx];
             let child_show = show && process.show_children;
             self.build_tree_branch(*pid, level + 1, child_indent, child_show, display_list);
-            
+
             // NOW set indent on this process (like C htop lines 131-134)
             let process = &mut self.processes[*idx];
             if is_last {
@@ -1013,19 +1037,19 @@ impl ProcessList {
             } else {
                 process.indent = next_indent;
             }
-            
+
             process.tree_depth = (level + 1) as i32;
             process.is_visible = show;
         }
     }
-    
+
     /// Expand all tree branches
     pub fn expand_all(&mut self) {
         for process in &mut self.processes {
             process.show_children = true;
         }
     }
-    
+
     /// Collapse all tree branches (except roots)
     pub fn collapse_all(&mut self) {
         for process in &mut self.processes {
@@ -1034,24 +1058,24 @@ impl ProcessList {
             }
         }
     }
-    
+
     /// Toggle tag on a process
     pub fn toggle_tag(&mut self, pid: i32) {
         if let Some(process) = self.get_mut(pid) {
             process.tagged = !process.tagged;
         }
     }
-    
+
     /// Tag a process and all its descendants
     pub fn tag_with_children(&mut self, pid: i32) {
         // First tag the process itself
         if let Some(process) = self.get_mut(pid) {
             process.tagged = true;
         }
-        
+
         // Collect all descendant PIDs
         let descendants: Vec<i32> = self.collect_descendants(pid);
-        
+
         // Tag all descendants
         for desc_pid in descendants {
             if let Some(process) = self.get_mut(desc_pid) {
@@ -1059,15 +1083,17 @@ impl ProcessList {
             }
         }
     }
-    
+
     /// Collect all descendant PIDs of a process
     fn collect_descendants(&self, pid: i32) -> Vec<i32> {
         let mut descendants = Vec::new();
-        let mut to_visit: Vec<i32> = self.processes.iter()
+        let mut to_visit: Vec<i32> = self
+            .processes
+            .iter()
             .filter(|p| p.ppid == pid && p.pid != pid)
             .map(|p| p.pid)
             .collect();
-        
+
         while let Some(current) = to_visit.pop() {
             descendants.push(current);
             // Add children of current
@@ -1077,52 +1103,55 @@ impl ProcessList {
                 }
             }
         }
-        
+
         descendants
     }
-    
+
     /// Untag all processes
     pub fn untag_all(&mut self) {
         for process in &mut self.processes {
             process.tagged = false;
         }
     }
-    
+
     /// Get all tagged PIDs
     pub fn get_tagged(&self) -> Vec<i32> {
-        self.processes.iter()
+        self.processes
+            .iter()
             .filter(|p| p.tagged)
             .map(|p| p.pid)
             .collect()
     }
-    
+
     /// Expand a specific tree node
     pub fn expand_tree(&mut self, pid: i32) {
         if let Some(process) = self.get_mut(pid) {
             process.show_children = true;
         }
     }
-    
+
     /// Collapse a specific tree node
     pub fn collapse_tree(&mut self, pid: i32) {
         if let Some(process) = self.get_mut(pid) {
             process.show_children = false;
         }
     }
-    
+
     /// Toggle all tree nodes (if any collapsed, expand all; otherwise collapse all)
     pub fn toggle_all_tree(&mut self) {
         // Check if any non-root process has show_children = false
-        let any_collapsed = self.processes.iter()
+        let any_collapsed = self
+            .processes
+            .iter()
             .any(|p| p.tree_depth >= 0 && !p.show_children);
-        
+
         if any_collapsed {
             self.expand_all();
         } else {
             self.collapse_all();
         }
     }
-    
+
     /// Sort processes by field
     pub fn sort(&mut self, field: ProcessField, descending: bool) {
         self.sort_by(field, !descending);
@@ -1136,75 +1165,77 @@ mod tests {
     #[test]
     fn test_tree_building() {
         let mut pl = ProcessList::new();
-        
+
         // Create a simple tree: 1 (root) -> 2, 5; 2 -> 3, 4
         let mut p1 = Process::new(1);
         p1.ppid = 0;
         p1.comm = Some("root".to_string());
         pl.add(p1);
-        
+
         let mut p2 = Process::new(2);
         p2.ppid = 1;
         p2.comm = Some("child1".to_string());
         pl.add(p2);
-        
+
         let mut p3 = Process::new(3);
         p3.ppid = 2;
         p3.comm = Some("grandchild1".to_string());
         pl.add(p3);
-        
+
         let mut p4 = Process::new(4);
         p4.ppid = 2;
         p4.comm = Some("grandchild2".to_string());
         pl.add(p4);
-        
+
         let mut p5 = Process::new(5);
         p5.ppid = 1;
         p5.comm = Some("child2".to_string());
         pl.add(p5);
-        
+
         pl.build_tree();
-        
+
         println!("tree_display_order: {:?}", pl.tree_display_order);
         for pid in &pl.tree_display_order {
             let p = pl.get(*pid).unwrap();
-            println!("  PID {} (ppid={}) indent={} depth={} is_root={} is_visible={}", 
-                     p.pid, p.ppid, p.indent, p.tree_depth, p.is_root, p.is_visible);
+            println!(
+                "  PID {} (ppid={}) indent={} depth={} is_root={} is_visible={}",
+                p.pid, p.ppid, p.indent, p.tree_depth, p.is_root, p.is_visible
+            );
         }
-        
+
         // Expected tree structure:
         // 1 (root, indent=0, depth=0)
         //   2 (child, indent=1, depth=1)
-        //     3 (grandchild, indent=3, depth=2)  
+        //     3 (grandchild, indent=3, depth=2)
         //     4 (last grandchild, indent=-3, depth=2)
         //   5 (last child, indent=-1, depth=1)
-        
+
         assert_eq!(pl.tree_display_order, vec![1, 2, 3, 4, 5]);
-        
+
         // Check root
         let p1 = pl.get(1).unwrap();
         assert_eq!(p1.indent, 0);
         assert_eq!(p1.tree_depth, 0);
         assert!(p1.is_root);
-        
+
         // Check first child (not last)
         let p2 = pl.get(2).unwrap();
         assert_eq!(p2.indent, 1);
         assert_eq!(p2.tree_depth, 1);
-        
+
         // Check grandchild (not last)
         let p3 = pl.get(3).unwrap();
-        assert_eq!(p3.indent, 3);  // 1 | (1 << 1) = 3
+        assert_eq!(p3.indent, 3); // 1 | (1 << 1) = 3
         assert_eq!(p3.tree_depth, 2);
-        
+
         // Check last grandchild
         let p4 = pl.get(4).unwrap();
-        assert_eq!(p4.indent, -3);  // negative indicates last
+        assert_eq!(p4.indent, -3); // negative indicates last
         assert_eq!(p4.tree_depth, 2);
-        
+
         // Check last child
         let p5 = pl.get(5).unwrap();
-        assert_eq!(p5.indent, -1);  // negative indicates last
+        assert_eq!(p5.indent, -1); // negative indicates last
         assert_eq!(p5.tree_depth, 1);
     }
 
@@ -1213,83 +1244,99 @@ mod tests {
         // Simulate macOS-like scenario:
         // 1 (launchd, ppid=0) -> many direct children, some with their own children
         let mut pl = ProcessList::new();
-        
+
         // launchd (PID 1)
         let mut p1 = Process::new(1);
         p1.ppid = 0;
         p1.comm = Some("launchd".to_string());
         pl.add(p1);
-        
+
         // Direct children of launchd
         let mut p100 = Process::new(100);
         p100.ppid = 1;
         p100.comm = Some("logd".to_string());
         pl.add(p100);
-        
+
         // Slack main (direct child of launchd)
         let mut p5259 = Process::new(5259);
         p5259.ppid = 1;
         p5259.comm = Some("Slack".to_string());
         pl.add(p5259);
-        
+
         // Slack helpers (children of Slack main)
         let mut p5268 = Process::new(5268);
         p5268.ppid = 5259;
         p5268.comm = Some("Slack Helper (GPU)".to_string());
         pl.add(p5268);
-        
+
         let mut p5269 = Process::new(5269);
         p5269.ppid = 5259;
         p5269.comm = Some("Slack Helper".to_string());
         pl.add(p5269);
-        
+
         let mut p5270 = Process::new(5270);
         p5270.ppid = 5259;
         p5270.comm = Some("Slack Helper (Renderer)".to_string());
         pl.add(p5270);
-        
+
         // Another direct child of launchd (after Slack in PID order)
         let mut p6000 = Process::new(6000);
         p6000.ppid = 1;
         p6000.comm = Some("other".to_string());
         pl.add(p6000);
-        
+
         pl.build_tree();
-        
+
         println!("\nMacOS-like tree:");
         println!("tree_display_order: {:?}", pl.tree_display_order);
         for pid in &pl.tree_display_order {
             let p = pl.get(*pid).unwrap();
             let indent_str = "  ".repeat(p.tree_depth as usize);
-            println!("{}PID {} ({}) indent={} depth={} is_root={}", 
-                     indent_str, p.pid, p.comm.as_deref().unwrap_or("?"),
-                     p.indent, p.tree_depth, p.is_root);
+            println!(
+                "{}PID {} ({}) indent={} depth={} is_root={}",
+                indent_str,
+                p.pid,
+                p.comm.as_deref().unwrap_or("?"),
+                p.indent,
+                p.tree_depth,
+                p.is_root
+            );
         }
-        
+
         // Verify tree structure
         // launchd should be root
         let launchd = pl.get(1).unwrap();
         assert!(launchd.is_root);
         assert_eq!(launchd.indent, 0);
-        
+
         // Slack main should be a child of launchd (depth 1)
         let slack = pl.get(5259).unwrap();
         assert!(!slack.is_root);
         assert_eq!(slack.tree_depth, 1);
-        assert!(slack.indent != 0, "Slack main should have indent != 0, got {}", slack.indent);
-        
+        assert!(
+            slack.indent != 0,
+            "Slack main should have indent != 0, got {}",
+            slack.indent
+        );
+
         // Slack helpers should be children of Slack (depth 2)
         let helper_gpu = pl.get(5268).unwrap();
         assert_eq!(helper_gpu.tree_depth, 2);
-        assert!(helper_gpu.indent != 0, "Slack Helper GPU should have indent != 0");
-        
+        assert!(
+            helper_gpu.indent != 0,
+            "Slack Helper GPU should have indent != 0"
+        );
+
         let helper = pl.get(5269).unwrap();
         assert_eq!(helper.tree_depth, 2);
-        
+
         let helper_renderer = pl.get(5270).unwrap();
         assert_eq!(helper_renderer.tree_depth, 2);
         // Last child should have negative indent
-        assert!(helper_renderer.indent < 0, "Last Slack helper should have negative indent");
+        assert!(
+            helper_renderer.indent < 0,
+            "Last Slack helper should have negative indent"
+        );
     }
 
     #[test]
@@ -1297,64 +1344,73 @@ mod tests {
         // Simulate macOS scenario where we can't see PID 1 (launchd)
         // but processes have ppid = 1
         let mut pl = ProcessList::new();
-        
+
         // NO PID 1 - we don't have permission to see it
-        
+
         // Direct children of launchd (ppid=1)
         let mut p100 = Process::new(100);
         p100.ppid = 1;
         p100.comm = Some("logd".to_string());
         pl.add(p100);
-        
+
         let mut p200 = Process::new(200);
         p200.ppid = 1;
         p200.comm = Some("configd".to_string());
         pl.add(p200);
-        
+
         // Process with child
         let mut p5259 = Process::new(5259);
         p5259.ppid = 1;
         p5259.comm = Some("Slack".to_string());
         pl.add(p5259);
-        
+
         // Slack's children
         let mut p5268 = Process::new(5268);
         p5268.ppid = 5259;
         p5268.comm = Some("Slack Helper".to_string());
         pl.add(p5268);
-        
+
         let mut p5269 = Process::new(5269);
         p5269.ppid = 5259;
         p5269.comm = Some("Slack Helper 2".to_string());
         pl.add(p5269);
-        
+
         pl.build_tree();
-        
+
         println!("\nTree without PID 1:");
         println!("tree_display_order: {:?}", pl.tree_display_order);
         for pid in &pl.tree_display_order {
             let p = pl.get(*pid).unwrap();
             let indent_str = "  ".repeat(p.tree_depth as usize);
-            println!("{}PID {} ({}) indent={} depth={} is_root={}", 
-                     indent_str, p.pid, p.comm.as_deref().unwrap_or("?"),
-                     p.indent, p.tree_depth, p.is_root);
+            println!(
+                "{}PID {} ({}) indent={} depth={} is_root={}",
+                indent_str,
+                p.pid,
+                p.comm.as_deref().unwrap_or("?"),
+                p.indent,
+                p.tree_depth,
+                p.is_root
+            );
         }
-        
+
         // Processes with ppid=1 should be treated as top-level children (depth 1)
         // since PID 1 doesn't exist in our list
         let logd = pl.get(100).unwrap();
         assert!(!logd.is_root, "logd should NOT be marked as root");
         assert_eq!(logd.tree_depth, 1, "logd should be at depth 1");
         assert!(logd.indent != 0, "logd should have non-zero indent");
-        
+
         let slack = pl.get(5259).unwrap();
         assert!(!slack.is_root, "Slack should NOT be marked as root");
         assert_eq!(slack.tree_depth, 1, "Slack should be at depth 1");
         assert!(slack.indent != 0, "Slack should have non-zero indent");
-        
+
         // Slack's children should be at depth 2
         let helper = pl.get(5268).unwrap();
         assert_eq!(helper.tree_depth, 2, "Slack helper should be at depth 2");
-        assert!(helper.indent != 0, "Slack helper should have non-zero indent");
+        assert!(
+            helper.indent != 0,
+            "Slack helper should have non-zero indent"
+        );
     }
 }
