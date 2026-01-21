@@ -198,6 +198,7 @@ impl CpuMeter {
         x: i32,
         y: i32,
         width: i32,
+        count_from_one: bool,
     ) {
         let values = vec![
             (cpu.user_percent, ColorElement::CpuNormal),
@@ -219,7 +220,9 @@ impl CpuMeter {
             + cpu.guest_percent
             + cpu.iowait_percent;
 
-        Self::draw_cpu_bar_internal(crt, &format!("{}", cpu_idx), &values, total, x, y, width);
+        // Apply count_cpus_from_one setting (like C htop Settings_cpuId macro)
+        let display_id = if count_from_one { cpu_idx + 1 } else { cpu_idx };
+        Self::draw_cpu_bar_internal(crt, &format!("{}", display_id), &values, total, x, y, width);
     }
 }
 
@@ -272,7 +275,7 @@ impl Meter for CpuMeter {
         ((num_cpus + self.columns - 1) / self.columns) as i32
     }
 
-    fn draw(&self, crt: &Crt, machine: &Machine, _settings: &Settings, x: i32, y: i32, width: i32) {
+    fn draw(&self, crt: &Crt, machine: &Machine, settings: &Settings, x: i32, y: i32, width: i32) {
         match self.mode {
             MeterMode::Bar => {
                 match self.selection {
@@ -298,7 +301,15 @@ impl Meter for CpuMeter {
                                 let d = if col > diff { diff } else { col };
                                 let col_x = x + (col as i32 * col_width) + d as i32;
                                 let row_y = y + row as i32;
-                                self.draw_cpu_bar(crt, cpu, cpu_idx, col_x, row_y, col_width);
+                                self.draw_cpu_bar(
+                                    crt,
+                                    cpu,
+                                    cpu_idx,
+                                    col_x,
+                                    row_y,
+                                    col_width,
+                                    settings.count_cpus_from_one,
+                                );
                             }
                         }
                     }
@@ -306,7 +317,15 @@ impl Meter for CpuMeter {
                         // Single CPU or average - draw one bar
                         let caption = match self.selection {
                             CpuSelection::Average => "Avg".to_string(),
-                            CpuSelection::Cpu(n) => format!("{}", n),
+                            CpuSelection::Cpu(n) => {
+                                // Apply count_cpus_from_one setting
+                                let display_id = if settings.count_cpus_from_one {
+                                    n + 1
+                                } else {
+                                    n
+                                };
+                                format!("{}", display_id)
+                            }
                             _ => "CPU".to_string(),
                         };
 
