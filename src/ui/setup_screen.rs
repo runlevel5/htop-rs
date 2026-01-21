@@ -3131,10 +3131,10 @@ impl SetupScreen {
 
                 // Recalculate header height (may change if layout or headerMargin changed)
                 let new_height = header.calculate_height();
-                if new_height != header_height {
-                    header_height = new_height;
-                    self.layout(crt, header_height, settings.screen_tabs);
-                }
+                // Always relayout when settings change, since header layout might have changed
+                // even if height stays the same (e.g., when meters are redistributed)
+                header_height = new_height;
+                self.layout(crt, header_height, settings.screen_tabs);
             }
 
             if result == HandlerResult::BreakLoop {

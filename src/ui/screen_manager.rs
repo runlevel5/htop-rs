@@ -426,6 +426,8 @@ impl ScreenManager {
             }
             KEY_F2 => {
                 self.show_setup(crt, machine);
+                // Relayout in case header layout changed (meters moved/reorganized)
+                self.layout(crt);
                 return HandlerResult::Redraw;
             }
             KEY_F5 | 0x74 => {
@@ -555,6 +557,8 @@ impl ScreenManager {
             0x43 | 0x53 => {
                 // 'C' or 'S' - setup (same as F2)
                 self.show_setup(crt, machine);
+                // Relayout in case header layout changed (meters moved/reorganized)
+                self.layout(crt);
                 return HandlerResult::Redraw;
             }
             0x46 => {
