@@ -8,7 +8,7 @@
 
 use ncurses::*;
 
-use super::crt::{ColorElement, KEY_F10, KEY_F7, KEY_F8};
+use super::crt::{ColorElement, KEY_F10, KEY_F4, KEY_F7, KEY_F8, KEY_F9};
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::panel::{HandlerResult, Panel};
@@ -25,6 +25,9 @@ const KEY_SPACE: i32 = b' ' as i32;
 const KEY_MINUS: i32 = b'-' as i32;
 const KEY_PLUS: i32 = b'+' as i32;
 const KEY_Q: i32 = b'q' as i32;
+const KEY_T: i32 = b't' as i32;
+const KEY_LBRACKET: i32 = b'[' as i32;
+const KEY_RBRACKET: i32 = b']' as i32;
 
 /// Setup screen categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1589,18 +1592,34 @@ impl SetupScreen {
                 }
             }
 
-            // Space - cycle meter style (Bar/Text/Graph/Led)
-            KEY_SPACE => {
+            // Space, 't', F4 - cycle meter style (Bar/Text/Graph/Led)
+            KEY_SPACE | KEY_T | KEY_F4 => {
                 if !is_available_panel {
                     self.cycle_meter_style(settings, header);
                     return HandlerResult::Handled;
                 }
             }
 
-            // Delete - remove meter from column
-            KEY_DC => {
+            // Delete, F9 - remove meter from column
+            KEY_DC | KEY_F9 => {
                 if !is_available_panel {
                     self.delete_selected_meter(settings, header);
+                    return HandlerResult::Handled;
+                }
+            }
+
+            // '[', '-', F7 - move meter up
+            KEY_LBRACKET | KEY_MINUS | KEY_F7 => {
+                if !is_available_panel {
+                    self.move_meter_up(settings, header);
+                    return HandlerResult::Handled;
+                }
+            }
+
+            // ']', '+', F8 - move meter down
+            KEY_RBRACKET | KEY_PLUS | KEY_F8 => {
+                if !is_available_panel {
+                    self.move_meter_down(settings, header);
                     return HandlerResult::Handled;
                 }
             }
