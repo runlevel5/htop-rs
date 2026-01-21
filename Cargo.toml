@@ -11,7 +11,7 @@ categories = ["command-line-utilities", "os"]
 
 [dependencies]
 # ncurses bindings with wide character support
-ncurses = "6.0"
+ncurses = { version = "6.0", features = ["wide"] }
 
 # Command line argument parsing
 clap = { version = "4.4", features = ["derive"] }
