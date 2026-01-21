@@ -243,8 +243,17 @@ impl Crt {
     pub fn new(settings: &Settings) -> anyhow::Result<Self> {
         // Initialize locale for UTF-8 support (must be done before initscr)
         // This is required for ncurses to properly handle wide/Unicode characters
+        // Match C htop: check LC_CTYPE/LC_ALL env vars, or use "" to get system default
         unsafe {
-            libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr() as *const libc::c_char);
+            let lc_ctype = std::env::var("LC_CTYPE").ok()
+                .or_else(|| std::env::var("LC_ALL").ok());
+            
+            if let Some(lc) = lc_ctype {
+                let c_str = std::ffi::CString::new(lc).unwrap_or_default();
+                libc::setlocale(libc::LC_CTYPE, c_str.as_ptr());
+            } else {
+                libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr() as *const libc::c_char);
+            }
         }
         
         // Initialize ncurses
@@ -295,7 +304,27 @@ impl Crt {
 
     /// Check if UTF-8 is supported
     fn check_utf8_support() -> bool {
-        // Check locale
+        // Use nl_langinfo(CODESET) like C htop does - this is the most reliable method
+        #[cfg(unix)]
+        {
+            use std::ffi::CStr;
+            
+            // Try nl_langinfo first (matches C htop behavior)
+            let codeset = unsafe {
+                let ptr = libc::nl_langinfo(libc::CODESET);
+                if !ptr.is_null() {
+                    CStr::from_ptr(ptr).to_string_lossy().to_string()
+                } else {
+                    String::new()
+                }
+            };
+            
+            if codeset.to_uppercase() == "UTF-8" || codeset.to_uppercase() == "UTF8" {
+                return true;
+            }
+        }
+        
+        // Fallback: check locale environment variables
         if let Ok(lang) = std::env::var("LANG") {
             if lang.to_lowercase().contains("utf") {
                 return true;
