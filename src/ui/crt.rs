@@ -168,6 +168,7 @@ pub const KEY_WHEELDOWN: i32 = KEY_F0 + 31;
 pub const KEY_RECLICK: i32 = KEY_F0 + 32;
 pub const KEY_RIGHTCLICK: i32 = KEY_F0 + 33;
 pub const KEY_SHIFT_TAB: i32 = KEY_F0 + 34;
+pub const KEY_HEADER_CLICK: i32 = KEY_F0 + 35;
 pub const KEY_DEL_MAC: i32 = 127;
 
 /// Mouse event data
@@ -236,6 +237,8 @@ pub struct Crt {
     screen_height: i32,
     delay: u32,
     mouse_enabled: bool,
+    /// Last mouse event (stored for position lookup)
+    last_mouse_event: Option<MouseEvent>,
 }
 
 impl Crt {
@@ -293,6 +296,7 @@ impl Crt {
             screen_height: 0,
             delay: settings.delay,
             mouse_enabled: settings.enable_mouse,
+            last_mouse_event: None,
         };
 
         crt.set_colors(settings.color_scheme);
@@ -566,8 +570,8 @@ impl Crt {
         }
     }
     
-    /// Get mouse event after KEY_MOUSE was returned
-    pub fn get_mouse_event(&self) -> Option<MouseEvent> {
+    /// Get mouse event after KEY_MOUSE was returned and store it
+    pub fn get_mouse_event(&mut self) -> Option<MouseEvent> {
         if !self.mouse_enabled {
             return None;
         }
@@ -582,19 +586,27 @@ impl Crt {
         
         let result = getmouse(&mut mevent);
         if result == OK {
-            Some(MouseEvent {
+            let event = MouseEvent {
                 x: mevent.x,
                 y: mevent.y,
                 bstate: mevent.bstate as u64,
-            })
+            };
+            self.last_mouse_event = Some(event);
+            Some(event)
         } else {
             None
         }
     }
     
+    /// Get the last stored mouse event
+    pub fn last_mouse_event(&self) -> Option<MouseEvent> {
+        self.last_mouse_event
+    }
+    
     /// Process a mouse event and convert to a key code
     /// This is called when KEY_MOUSE is received
-    pub fn process_mouse_event(&self, screen_height: i32) -> Option<i32> {
+    /// panel_y is the y position of the panel header row
+    pub fn process_mouse_event(&mut self, screen_height: i32, panel_y: Option<i32>) -> Option<i32> {
         if let Some(event) = self.get_mouse_event() {
             if event.is_wheel_up() {
                 return Some(KEY_WHEELUP);
@@ -611,6 +623,12 @@ impl Crt {
                     let button_num = event.x / button_width;
                     if button_num < 10 {
                         return Some(KEY_F1 + button_num);
+                    }
+                }
+                // Check if click is on panel header
+                if let Some(py) = panel_y {
+                    if event.y == py {
+                        return Some(KEY_HEADER_CLICK);
                     }
                 }
                 // Return KEY_MOUSE for other left clicks (panel handling)

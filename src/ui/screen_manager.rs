@@ -10,7 +10,7 @@ use ncurses::CURSOR_VISIBILITY;
 
 use crate::core::{Machine, ProcessField, Settings};
 use crate::platform;
-use super::crt::{ColorElement, KEY_F1, KEY_F2, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_WHEELUP, KEY_WHEELDOWN, KEY_SHIFT_TAB};
+use super::crt::{ColorElement, KEY_F1, KEY_F2, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_WHEELUP, KEY_WHEELDOWN, KEY_SHIFT_TAB, KEY_HEADER_CLICK};
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::main_panel::MainPanel;
@@ -362,7 +362,13 @@ impl ScreenManager {
             if let Some(k) = key {
                 if k == KEY_MOUSE {
                     // Process mouse event and convert to key code
-                    key = crt.process_mouse_event(crt.height());
+                    // Pass the panel's header y position for header click detection
+                    let panel_y = if self.main_panel.show_header {
+                        Some(self.main_panel.panel_y())
+                    } else {
+                        None
+                    };
+                    key = crt.process_mouse_event(crt.height(), panel_y);
                 }
             }
 
@@ -451,6 +457,33 @@ impl ScreenManager {
                 let amount = crt.scroll_wheel_amount();
                 for _ in 0..amount {
                     self.main_panel.on_key(KEY_DOWN, machine);
+                }
+                return HandlerResult::Handled;
+            }
+            KEY_HEADER_CLICK => {
+                // Handle click on header row - change sort field or invert order
+                if let Some(event) = crt.last_mouse_event() {
+                    if let Some(field) = self.main_panel.field_at_x(event.x) {
+                        // In tree view with treeViewAlwaysByPID, disable tree view first
+                        if self.settings.tree_view && self.settings.tree_view_always_by_pid {
+                            self.settings.tree_view = false;
+                            self.main_panel.tree_view = false;
+                            machine.sort_descending = false;
+                            self.settings.sort_descending = false;
+                            machine.sort_key = field;
+                            self.settings.sort_key = Some(field);
+                        } else if field == machine.sort_key {
+                            // Clicking on current sort column inverts the order
+                            machine.sort_descending = !machine.sort_descending;
+                            self.settings.sort_descending = machine.sort_descending;
+                        } else {
+                            // Clicking on different column changes the sort field
+                            machine.sort_key = field;
+                            self.settings.sort_key = Some(field);
+                        }
+                        self.settings.changed = true;
+                        machine.processes.sort(machine.sort_key, machine.sort_descending);
+                    }
                 }
                 return HandlerResult::Handled;
             }

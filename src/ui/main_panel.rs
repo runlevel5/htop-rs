@@ -204,6 +204,33 @@ impl MainPanel {
         self.needs_redraw = true;
     }
 
+    /// Get the panel's y position (header row)
+    pub fn panel_y(&self) -> i32 {
+        self.y
+    }
+
+    /// Get the field at a given x position in the header
+    /// This is used for header click handling
+    pub fn field_at_x(&self, x: i32) -> Option<ProcessField> {
+        // Account for panel's x offset and horizontal scroll
+        let rel_x = x - self.x + self.scroll_h;
+        if rel_x < 0 {
+            return None;
+        }
+        
+        let mut current_x = 0;
+        for field in &self.fields {
+            let title_len = field.title().len() as i32;
+            if rel_x >= current_x && rel_x < current_x + title_len {
+                return Some(*field);
+            }
+            current_x += title_len;
+        }
+        
+        // Default to Command if clicked past all fields
+        Some(ProcessField::Command)
+    }
+
     /// Resize the panel
     pub fn resize(&mut self, w: i32, h: i32) {
         self.w = w;
