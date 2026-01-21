@@ -8,13 +8,16 @@
 
 use ncurses::*;
 
-use super::crt::{ColorElement, KEY_F10, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9};
+use super::crt::{ColorElement, KEY_F10, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9};
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::panel::{HandlerResult, Panel};
 use super::rich_string::RichString;
 use super::Crt;
-use crate::core::{ColorScheme, HeaderLayout, Machine, MeterConfig, MeterMode, Settings};
+use crate::core::{
+    ColorScheme, HeaderLayout, Machine, MeterConfig, MeterMode, ProcessField, ScreenSettings,
+    Settings,
+};
 
 // Key constants for pattern matching
 const KEY_ESC: i32 = 27;
@@ -32,6 +35,12 @@ const KEY_R: i32 = b'r' as i32;
 const KEY_R_UPPER: i32 = b'R' as i32;
 const KEY_LBRACKET: i32 = b'[' as i32;
 const KEY_RBRACKET: i32 = b']' as i32;
+const KEY_BACKSPACE_ASCII: i32 = 127;
+const KEY_CTRL_R: i32 = 18; // Ctrl+R
+const KEY_CTRL_N: i32 = 14; // Ctrl+N
+
+/// Maximum length for screen names (matching C htop SCREEN_NAME_LEN)
+const SCREEN_NAME_LEN: usize = 20;
 
 /// Setup screen categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,6 +497,33 @@ pub struct SetupScreen {
     meters_available_scroll: i32,
     /// Whether in moving mode (meter is "grabbed" and can be moved with arrows)
     meters_moving: bool,
+    // === Screens panel state ===
+    /// Function bar for Screens panel
+    screens_bar: FunctionBar,
+    /// Function bar for Active Columns panel
+    columns_bar: FunctionBar,
+    /// Function bar for Available Columns panel
+    available_columns_bar: FunctionBar,
+    /// Which panel has focus in Screens category (0=screens, 1=columns, 2=available)
+    screens_panel_focus: usize,
+    /// Selection index for screens list
+    screens_selection: usize,
+    /// Selection index for active columns
+    columns_selection: usize,
+    /// Selection index for available columns
+    available_columns_selection: usize,
+    /// Scroll position for available columns
+    available_columns_scroll: i32,
+    /// Whether in moving mode for screens list
+    screens_moving: bool,
+    /// Whether in moving mode for columns list
+    columns_moving: bool,
+    /// Whether renaming a screen
+    screens_renaming: bool,
+    /// Buffer for renaming
+    screens_rename_buffer: String,
+    /// Cursor position in rename buffer
+    screens_rename_cursor: usize,
 }
 
 impl SetupScreen {
@@ -580,6 +616,51 @@ impl SetupScreen {
             ("Done", "Esc"),
         ]);
 
+        // Screens panel function bar (matching C htop ScreensFunctions)
+        // C htop: {"      ", "Rename", "      ", "      ", "New   ", "      ", "MoveUp", "MoveDn", "Remove", "Done  "}
+        let screens_bar = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("Rename", "F2"),
+            ("", ""),
+            ("", ""),
+            ("New", "F5"),
+            ("", ""),
+            ("MoveUp", "F7"),
+            ("MoveDn", "F8"),
+            ("Remove", "F9"),
+            ("Done", "F10"),
+        ]);
+
+        // Active Columns panel function bar (matching C htop ColumnsFunctions)
+        // C htop: {"      ", "      ", "      ", "      ", "      ", "      ", "MoveUp", "MoveDn", "Remove", "Done  "}
+        let columns_bar = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("MoveUp", "F7"),
+            ("MoveDn", "F8"),
+            ("Remove", "F9"),
+            ("Done", "F10"),
+        ]);
+
+        // Available Columns panel function bar (matching C htop AvailableColumnsFunctions)
+        // C htop: {"      ", "      ", "      ", "      ", "Add   ", "      ", "      ", "      ", "      ", "Done  "}
+        let available_columns_bar = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Add", "F5"),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Done", "F10"),
+        ]);
+
         SetupScreen {
             category: SetupCategory::DisplayOptions,
             category_index: 0,
@@ -601,6 +682,20 @@ impl SetupScreen {
             meters_available_selection: 0,
             meters_available_scroll: 0,
             meters_moving: false,
+            // Screens panel state
+            screens_bar,
+            columns_bar,
+            available_columns_bar,
+            screens_panel_focus: 0,
+            screens_selection: 0,
+            columns_selection: 0,
+            available_columns_selection: 0,
+            available_columns_scroll: 0,
+            screens_moving: false,
+            columns_moving: false,
+            screens_renaming: false,
+            screens_rename_buffer: String::new(),
+            screens_rename_cursor: 0,
         }
     }
 
@@ -1339,14 +1434,72 @@ impl SetupScreen {
         }
     }
 
-    fn draw_screens_panel(&self, crt: &Crt, _settings: &Settings) {
+    fn draw_screens_panel(&self, crt: &Crt, settings: &Settings) {
         let x = self.content_panel.x;
         let y = self.content_panel.y;
-        let w = self.content_panel.w;
+        let total_width = self.content_panel.w;
         let h = self.content_panel.h;
 
+        // C htop uses fixed width of 20 for screens panel, 20 for columns panel, rest for available
+        const SCREENS_PANEL_WIDTH: i32 = 20;
+        const COLUMNS_PANEL_WIDTH: i32 = 20;
+        let available_width = (total_width - SCREENS_PANEL_WIDTH - COLUMNS_PANEL_WIDTH).max(20);
+
+        // Determine which panel has focus
+        let focused_panel = if self.focus == 1 {
+            Some(self.screens_panel_focus)
+        } else {
+            None
+        };
+
+        // Draw Screens panel (leftmost)
+        self.draw_screens_list_panel(
+            crt,
+            settings,
+            x,
+            y,
+            SCREENS_PANEL_WIDTH,
+            h,
+            focused_panel == Some(0),
+        );
+
+        // Draw Active Columns panel (middle)
+        let columns_x = x + SCREENS_PANEL_WIDTH;
+        self.draw_active_columns_panel(
+            crt,
+            settings,
+            columns_x,
+            y,
+            COLUMNS_PANEL_WIDTH,
+            h,
+            focused_panel == Some(1),
+        );
+
+        // Draw Available Columns panel (rightmost)
+        let available_x = columns_x + COLUMNS_PANEL_WIDTH;
+        self.draw_available_columns_panel(
+            crt,
+            available_x,
+            y,
+            available_width,
+            h,
+            focused_panel == Some(2),
+        );
+    }
+
+    /// Draw the Screens list panel
+    fn draw_screens_list_panel(
+        &self,
+        crt: &Crt,
+        settings: &Settings,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        has_focus: bool,
+    ) {
         // Draw header
-        let header_attr = if self.focus == 1 {
+        let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
         } else {
             crt.color(ColorElement::PanelHeaderUnfocus)
@@ -1355,24 +1508,230 @@ impl SetupScreen {
         mv(y, x);
         attron(header_attr);
         let header = "Screens";
-        let _ = addstr(header);
-        for _ in header.len()..w as usize {
+        let header_display: String = header.chars().take(w as usize).collect();
+        let _ = addstr(&header_display);
+        for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
         attroff(header_attr);
 
-        // Placeholder
-        let text_attr = crt.color(ColorElement::Process);
-        mv(y + 1, x);
-        attron(text_attr);
-        let _ = addstr("(Screens configuration - not yet implemented)");
-        attroff(text_attr);
+        // Selection colors
+        let selection_attr = if has_focus {
+            if self.screens_moving {
+                crt.color(ColorElement::PanelSelectionFollow)
+            } else if self.screens_renaming {
+                crt.color(ColorElement::PanelEdit)
+            } else {
+                crt.color(ColorElement::PanelSelectionFocus)
+            }
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
+        let normal_attr = crt.color(ColorElement::Process);
 
-        // Fill remaining lines
-        for i in 2..h {
-            mv(y + i, x);
-            for _ in 0..w {
-                addch(' ' as u32);
+        // Draw screen items
+        let display_height = (h - 1) as usize;
+        for i in 0..display_height {
+            let screen_y = y + 1 + i as i32;
+            mv(screen_y, x);
+
+            if i < settings.screens.len() {
+                let screen = &settings.screens[i];
+                let is_selected = has_focus && i == self.screens_selection;
+
+                // Get display name (with renaming support)
+                let display = if is_selected && self.screens_renaming {
+                    // Show rename buffer with cursor
+                    format!("{}_", &self.screens_rename_buffer)
+                } else {
+                    screen.heading.clone()
+                };
+
+                let display_text: String = display.chars().take((w - 1) as usize).collect();
+
+                if is_selected {
+                    attron(selection_attr);
+                    let _ = addstr(&display_text);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                    attroff(selection_attr);
+                } else {
+                    attron(normal_attr);
+                    let _ = addstr(&display_text);
+                    attroff(normal_attr);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                }
+            } else {
+                // Empty row
+                for _ in 0..w {
+                    addch(' ' as u32);
+                }
+            }
+        }
+    }
+
+    /// Draw the Active Columns panel
+    fn draw_active_columns_panel(
+        &self,
+        crt: &Crt,
+        settings: &Settings,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        has_focus: bool,
+    ) {
+        // Draw header
+        let header_attr = if has_focus {
+            crt.color(ColorElement::PanelHeaderFocus)
+        } else {
+            crt.color(ColorElement::PanelHeaderUnfocus)
+        };
+
+        mv(y, x);
+        attron(header_attr);
+        let header = "Active Columns";
+        let header_display: String = header.chars().take(w as usize).collect();
+        let _ = addstr(&header_display);
+        for _ in header_display.len()..w as usize {
+            addch(' ' as u32);
+        }
+        attroff(header_attr);
+
+        // Selection colors
+        let selection_attr = if has_focus {
+            if self.columns_moving {
+                crt.color(ColorElement::PanelSelectionFollow)
+            } else {
+                crt.color(ColorElement::PanelSelectionFocus)
+            }
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
+        let normal_attr = crt.color(ColorElement::Process);
+
+        // Get current screen's fields
+        let fields = if self.screens_selection < settings.screens.len() {
+            &settings.screens[self.screens_selection].fields
+        } else if !settings.screens.is_empty() {
+            &settings.screens[0].fields
+        } else {
+            return;
+        };
+
+        // Draw column items
+        let display_height = (h - 1) as usize;
+        for i in 0..display_height {
+            let screen_y = y + 1 + i as i32;
+            mv(screen_y, x);
+
+            if i < fields.len() {
+                let field = fields[i];
+                let is_selected = has_focus && i == self.columns_selection;
+
+                let display = field.name().unwrap_or("?");
+                let display_text: String = display.chars().take((w - 1) as usize).collect();
+
+                if is_selected {
+                    attron(selection_attr);
+                    let _ = addstr(&display_text);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                    attroff(selection_attr);
+                } else {
+                    attron(normal_attr);
+                    let _ = addstr(&display_text);
+                    attroff(normal_attr);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                }
+            } else {
+                // Empty row
+                for _ in 0..w {
+                    addch(' ' as u32);
+                }
+            }
+        }
+    }
+
+    /// Draw the Available Columns panel
+    fn draw_available_columns_panel(
+        &self,
+        crt: &Crt,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        has_focus: bool,
+    ) {
+        // Draw header
+        let header_attr = if has_focus {
+            crt.color(ColorElement::PanelHeaderFocus)
+        } else {
+            crt.color(ColorElement::PanelHeaderUnfocus)
+        };
+
+        mv(y, x);
+        attron(header_attr);
+        let header = "Available Columns";
+        let header_display: String = header.chars().take(w as usize).collect();
+        let _ = addstr(&header_display);
+        for _ in header_display.len()..w as usize {
+            addch(' ' as u32);
+        }
+        attroff(header_attr);
+
+        // Selection colors
+        let selection_attr = if has_focus {
+            crt.color(ColorElement::PanelSelectionFocus)
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
+        let normal_attr = crt.color(ColorElement::Process);
+
+        // Get available fields
+        let available_fields = ProcessField::all();
+
+        // Draw column items
+        let display_height = (h - 1) as usize;
+        for i in 0..display_height {
+            let item_index = self.available_columns_scroll as usize + i;
+            let screen_y = y + 1 + i as i32;
+            mv(screen_y, x);
+
+            if item_index < available_fields.len() {
+                let field = available_fields[item_index];
+                let is_selected = has_focus && item_index == self.available_columns_selection;
+
+                // Show name with description
+                let display = format!("{} - {}", field.name().unwrap_or("?"), field.description());
+                let display_text: String = display.chars().take((w - 1) as usize).collect();
+
+                if is_selected {
+                    attron(selection_attr);
+                    let _ = addstr(&display_text);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                    attroff(selection_attr);
+                } else {
+                    attron(normal_attr);
+                    let _ = addstr(&display_text);
+                    attroff(normal_attr);
+                    for _ in display_text.chars().count()..w as usize {
+                        addch(' ' as u32);
+                    }
+                }
+            } else {
+                // Empty row
+                for _ in 0..w {
+                    addch(' ' as u32);
+                }
             }
         }
     }
@@ -1405,6 +1764,14 @@ impl SetupScreen {
                         &self.meters_bar
                     }
                 }
+                SetupCategory::Screens => {
+                    match self.screens_panel_focus {
+                        0 => &self.screens_bar,           // Screens panel
+                        1 => &self.columns_bar,           // Active Columns panel
+                        2 => &self.available_columns_bar, // Available Columns panel
+                        _ => &self.function_bar,
+                    }
+                }
                 _ => &self.function_bar,
             }
         } else {
@@ -1425,6 +1792,11 @@ impl SetupScreen {
         // Handle Meters category separately since it has different panel structure
         if self.category == SetupCategory::Meters && self.focus == 1 {
             return self.handle_meters_key(key, settings, header);
+        }
+
+        // Handle Screens category separately since it has different panel structure
+        if self.category == SetupCategory::Screens && self.focus == 1 {
+            return self.handle_screens_key(key, settings);
         }
 
         match key {
@@ -1708,6 +2080,438 @@ impl SetupScreen {
         }
 
         HandlerResult::Ignored
+    }
+
+    /// Handle key events for Screens category
+    /// Routes to appropriate handler based on current panel focus
+    fn handle_screens_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
+        // If renaming, handle that first
+        if self.screens_renaming {
+            return self.handle_screens_renaming_key(key, settings);
+        }
+
+        // Common navigation: Tab/Left/Right to switch panels
+        match key {
+            KEY_TAB | KEY_RIGHT => {
+                self.screens_panel_focus = (self.screens_panel_focus + 1) % 3;
+                // Clear moving states when switching panels
+                self.screens_moving = false;
+                self.columns_moving = false;
+                return HandlerResult::Handled;
+            }
+            KEY_LEFT => {
+                if self.screens_panel_focus == 0 {
+                    // Go back to categories panel
+                    self.focus = 0;
+                    self.screens_moving = false;
+                    self.columns_moving = false;
+                } else {
+                    self.screens_panel_focus = self.screens_panel_focus.saturating_sub(1);
+                    self.screens_moving = false;
+                    self.columns_moving = false;
+                }
+                return HandlerResult::Handled;
+            }
+            KEY_F10 | KEY_ESC => {
+                // Exit setup
+                return HandlerResult::BreakLoop;
+            }
+            _ => {}
+        }
+
+        // Route to panel-specific handler
+        match self.screens_panel_focus {
+            0 => self.handle_screens_list_key(key, settings),
+            1 => self.handle_columns_key(key, settings),
+            2 => self.handle_available_columns_key(key, settings),
+            _ => HandlerResult::Ignored,
+        }
+    }
+
+    /// Handle key events while renaming a screen
+    fn handle_screens_renaming_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
+        match key {
+            // Enter - confirm rename
+            KEY_ENTER | 10 | 13 => {
+                if !self.screens_rename_buffer.is_empty() {
+                    if self.screens_selection < settings.screens.len() {
+                        settings.screens[self.screens_selection].heading =
+                            self.screens_rename_buffer.clone();
+                        settings.changed = true;
+                        self.changed = true;
+                    }
+                }
+                self.screens_renaming = false;
+                self.screens_rename_buffer.clear();
+                return HandlerResult::Handled;
+            }
+            // Escape - cancel rename
+            KEY_ESC => {
+                self.screens_renaming = false;
+                self.screens_rename_buffer.clear();
+                return HandlerResult::Handled;
+            }
+            // Backspace - delete character
+            KEY_BACKSPACE | KEY_BACKSPACE_ASCII => {
+                if self.screens_rename_cursor > 0 {
+                    self.screens_rename_cursor -= 1;
+                    self.screens_rename_buffer
+                        .remove(self.screens_rename_cursor);
+                }
+                return HandlerResult::Handled;
+            }
+            // Delete - delete character at cursor
+            KEY_DC => {
+                if self.screens_rename_cursor < self.screens_rename_buffer.len() {
+                    self.screens_rename_buffer
+                        .remove(self.screens_rename_cursor);
+                }
+                return HandlerResult::Handled;
+            }
+            // Left arrow - move cursor left
+            KEY_LEFT => {
+                if self.screens_rename_cursor > 0 {
+                    self.screens_rename_cursor -= 1;
+                }
+                return HandlerResult::Handled;
+            }
+            // Right arrow - move cursor right
+            KEY_RIGHT => {
+                if self.screens_rename_cursor < self.screens_rename_buffer.len() {
+                    self.screens_rename_cursor += 1;
+                }
+                return HandlerResult::Handled;
+            }
+            // Home - move to beginning
+            KEY_HOME => {
+                self.screens_rename_cursor = 0;
+                return HandlerResult::Handled;
+            }
+            // End - move to end
+            KEY_END => {
+                self.screens_rename_cursor = self.screens_rename_buffer.len();
+                return HandlerResult::Handled;
+            }
+            _ => {
+                // Printable characters
+                if key >= 32 && key < 127 && self.screens_rename_buffer.len() < SCREEN_NAME_LEN {
+                    let ch = key as u8 as char;
+                    self.screens_rename_buffer
+                        .insert(self.screens_rename_cursor, ch);
+                    self.screens_rename_cursor += 1;
+                    return HandlerResult::Handled;
+                }
+            }
+        }
+        HandlerResult::Ignored
+    }
+
+    /// Handle key events for screens list panel (panel 0)
+    fn handle_screens_list_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
+        let num_screens = settings.screens.len();
+
+        match key {
+            // Navigation
+            KEY_UP => {
+                if self.screens_moving && self.screens_selection > 0 {
+                    // Move screen up
+                    self.move_screen_up(settings);
+                } else if self.screens_selection > 0 {
+                    self.screens_selection -= 1;
+                    // Reset columns selection when screen changes
+                    self.columns_selection = 0;
+                }
+                return HandlerResult::Handled;
+            }
+            KEY_DOWN => {
+                if self.screens_moving && self.screens_selection < num_screens.saturating_sub(1) {
+                    // Move screen down
+                    self.move_screen_down(settings);
+                } else if self.screens_selection < num_screens.saturating_sub(1) {
+                    self.screens_selection += 1;
+                    // Reset columns selection when screen changes
+                    self.columns_selection = 0;
+                }
+                return HandlerResult::Handled;
+            }
+            // Enter - toggle moving mode
+            KEY_ENTER | 10 | 13 => {
+                self.screens_moving = !self.screens_moving;
+                return HandlerResult::Handled;
+            }
+            // F2 / Ctrl+R - Rename
+            KEY_F2 | KEY_CTRL_R => {
+                if self.screens_selection < settings.screens.len() {
+                    self.screens_renaming = true;
+                    self.screens_rename_buffer =
+                        settings.screens[self.screens_selection].heading.clone();
+                    self.screens_rename_cursor = self.screens_rename_buffer.len();
+                }
+                return HandlerResult::Handled;
+            }
+            // F5 / Ctrl+N - New screen
+            KEY_F5 | KEY_CTRL_N => {
+                self.add_new_screen(settings);
+                return HandlerResult::Handled;
+            }
+            // F7 / [ / - - Move up
+            KEY_F7 | 91 | 45 => {
+                // [ = 91, - = 45
+                self.move_screen_up(settings);
+                return HandlerResult::Handled;
+            }
+            // F8 / ] / + - Move down
+            KEY_F8 | 93 | 43 => {
+                // ] = 93, + = 43
+                self.move_screen_down(settings);
+                return HandlerResult::Handled;
+            }
+            // F9 - Remove screen
+            KEY_F9 => {
+                self.remove_screen(settings);
+                return HandlerResult::Handled;
+            }
+            _ => {}
+        }
+        HandlerResult::Ignored
+    }
+
+    /// Handle key events for active columns panel (panel 1)
+    fn handle_columns_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
+        let num_fields = self.get_current_screen_fields_len(settings);
+
+        match key {
+            // Navigation
+            KEY_UP => {
+                if self.columns_moving && self.columns_selection > 0 {
+                    // Move column up
+                    self.move_column_up(settings);
+                } else if self.columns_selection > 0 {
+                    self.columns_selection -= 1;
+                }
+                return HandlerResult::Handled;
+            }
+            KEY_DOWN => {
+                if self.columns_moving && self.columns_selection < num_fields.saturating_sub(1) {
+                    // Move column down
+                    self.move_column_down(settings);
+                } else if self.columns_selection < num_fields.saturating_sub(1) {
+                    self.columns_selection += 1;
+                }
+                return HandlerResult::Handled;
+            }
+            // Enter - toggle moving mode
+            KEY_ENTER | 10 | 13 => {
+                self.columns_moving = !self.columns_moving;
+                return HandlerResult::Handled;
+            }
+            // F7 / [ / - - Move up
+            KEY_F7 | 91 | 45 => {
+                self.move_column_up(settings);
+                return HandlerResult::Handled;
+            }
+            // F8 / ] / + - Move down
+            KEY_F8 | 93 | 43 => {
+                self.move_column_down(settings);
+                return HandlerResult::Handled;
+            }
+            // F9 / Delete - Remove column
+            KEY_F9 | KEY_DC => {
+                self.remove_column(settings);
+                return HandlerResult::Handled;
+            }
+            _ => {}
+        }
+        HandlerResult::Ignored
+    }
+
+    /// Handle key events for available columns panel (panel 2)
+    fn handle_available_columns_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
+        let all_fields = ProcessField::all();
+        let num_available = all_fields.len();
+
+        match key {
+            // Navigation
+            KEY_UP => {
+                if self.available_columns_selection > 0 {
+                    self.available_columns_selection -= 1;
+                    // Adjust scroll
+                    if (self.available_columns_selection as i32) < self.available_columns_scroll {
+                        self.available_columns_scroll = self.available_columns_selection as i32;
+                    }
+                }
+                return HandlerResult::Handled;
+            }
+            KEY_DOWN => {
+                if self.available_columns_selection < num_available.saturating_sub(1) {
+                    self.available_columns_selection += 1;
+                    // Adjust scroll
+                    let display_height = (self.content_panel.h - 1) as i32;
+                    if (self.available_columns_selection as i32)
+                        >= self.available_columns_scroll + display_height
+                    {
+                        self.available_columns_scroll =
+                            self.available_columns_selection as i32 - display_height + 1;
+                    }
+                }
+                return HandlerResult::Handled;
+            }
+            // Enter / F5 - Add column
+            KEY_ENTER | 10 | 13 | KEY_F5 => {
+                self.add_column_to_active(settings);
+                return HandlerResult::Handled;
+            }
+            _ => {}
+        }
+        HandlerResult::Ignored
+    }
+
+    /// Get the number of fields in the currently selected screen
+    fn get_current_screen_fields_len(&self, settings: &Settings) -> usize {
+        if self.screens_selection < settings.screens.len() {
+            settings.screens[self.screens_selection].fields.len()
+        } else {
+            0
+        }
+    }
+
+    /// Add a new screen
+    fn add_new_screen(&mut self, settings: &mut Settings) {
+        let new_screen = ScreenSettings {
+            heading: "New".to_string(),
+            ..Default::default()
+        };
+        // Insert after current selection
+        let insert_pos = (self.screens_selection + 1).min(settings.screens.len());
+        settings.screens.insert(insert_pos, new_screen);
+        self.screens_selection = insert_pos;
+        self.columns_selection = 0;
+        settings.changed = true;
+        self.changed = true;
+
+        // Start renaming immediately
+        self.screens_renaming = true;
+        self.screens_rename_buffer = "New".to_string();
+        self.screens_rename_cursor = 3;
+    }
+
+    /// Move the selected screen up
+    fn move_screen_up(&mut self, settings: &mut Settings) {
+        if self.screens_selection > 0 && self.screens_selection < settings.screens.len() {
+            settings
+                .screens
+                .swap(self.screens_selection, self.screens_selection - 1);
+            self.screens_selection -= 1;
+            settings.changed = true;
+            self.changed = true;
+        }
+    }
+
+    /// Move the selected screen down
+    fn move_screen_down(&mut self, settings: &mut Settings) {
+        if self.screens_selection < settings.screens.len().saturating_sub(1) {
+            settings
+                .screens
+                .swap(self.screens_selection, self.screens_selection + 1);
+            self.screens_selection += 1;
+            settings.changed = true;
+            self.changed = true;
+        }
+    }
+
+    /// Remove the selected screen
+    fn remove_screen(&mut self, settings: &mut Settings) {
+        // Don't remove the last screen
+        if settings.screens.len() <= 1 {
+            return;
+        }
+        if self.screens_selection < settings.screens.len() {
+            settings.screens.remove(self.screens_selection);
+            if self.screens_selection >= settings.screens.len() {
+                self.screens_selection = settings.screens.len().saturating_sub(1);
+            }
+            // Reset columns selection
+            self.columns_selection = 0;
+            settings.changed = true;
+            self.changed = true;
+        }
+    }
+
+    /// Move the selected column up
+    fn move_column_up(&mut self, settings: &mut Settings) {
+        if self.screens_selection >= settings.screens.len() {
+            return;
+        }
+        let fields = &mut settings.screens[self.screens_selection].fields;
+        if self.columns_selection > 0 && self.columns_selection < fields.len() {
+            fields.swap(self.columns_selection, self.columns_selection - 1);
+            self.columns_selection -= 1;
+            settings.changed = true;
+            self.changed = true;
+        }
+    }
+
+    /// Move the selected column down
+    fn move_column_down(&mut self, settings: &mut Settings) {
+        if self.screens_selection >= settings.screens.len() {
+            return;
+        }
+        let fields = &mut settings.screens[self.screens_selection].fields;
+        if self.columns_selection < fields.len().saturating_sub(1) {
+            fields.swap(self.columns_selection, self.columns_selection + 1);
+            self.columns_selection += 1;
+            settings.changed = true;
+            self.changed = true;
+        }
+    }
+
+    /// Remove the selected column
+    fn remove_column(&mut self, settings: &mut Settings) {
+        if self.screens_selection >= settings.screens.len() {
+            return;
+        }
+        let fields = &mut settings.screens[self.screens_selection].fields;
+        // Don't remove the last column
+        if fields.len() <= 1 {
+            return;
+        }
+        if self.columns_selection < fields.len() {
+            fields.remove(self.columns_selection);
+            if self.columns_selection >= fields.len() {
+                self.columns_selection = fields.len().saturating_sub(1);
+            }
+            settings.changed = true;
+            self.changed = true;
+        }
+    }
+
+    /// Add the selected available column to the active columns
+    fn add_column_to_active(&mut self, settings: &mut Settings) {
+        if self.screens_selection >= settings.screens.len() {
+            return;
+        }
+        let all_fields = ProcessField::all();
+        if self.available_columns_selection >= all_fields.len() {
+            return;
+        }
+        let field = all_fields[self.available_columns_selection];
+
+        // Add after current selection in columns panel, or at end if none selected
+        let fields = &mut settings.screens[self.screens_selection].fields;
+        let insert_pos = if fields.is_empty() {
+            0
+        } else {
+            (self.columns_selection + 1).min(fields.len())
+        };
+        fields.insert(insert_pos, field);
+        self.columns_selection = insert_pos;
+        settings.changed = true;
+        self.changed = true;
+
+        // Enter moving mode so user can position the new column
+        self.columns_moving = true;
+        // Switch focus to columns panel
+        self.screens_panel_focus = 1;
     }
 
     /// Move meter selection up in current panel

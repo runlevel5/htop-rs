@@ -159,6 +159,7 @@ pub enum ColorElement {
     DynamicMagenta,
     DynamicYellow,
     DynamicWhite,
+    PanelEdit,
     LastColorElement,
 }
 
@@ -395,6 +396,7 @@ impl Crt {
         const PAIR_GREEN_GREEN: i16 = 14; // For active screen tab border
         const PAIR_BLACK_BLUE: i16 = 15; // For inactive screen tab text
         const PAIR_BLACK_YELLOW: i16 = 16; // For PanelSelectionFollow (filter/search following)
+        const PAIR_BLACK_WHITE: i16 = 17; // For PanelEdit (rename editing)
 
         init_pair(PAIR_DEFAULT, -1, -1);
         init_pair(PAIR_CYAN_BLACK, COLOR_CYAN, -1);
@@ -411,6 +413,7 @@ impl Crt {
         init_pair(PAIR_GREEN_GREEN, COLOR_GREEN, COLOR_GREEN);
         init_pair(PAIR_BLACK_BLUE, COLOR_BLACK, COLOR_BLUE);
         init_pair(PAIR_BLACK_YELLOW, COLOR_BLACK, COLOR_YELLOW);
+        init_pair(PAIR_BLACK_WHITE, COLOR_BLACK, COLOR_WHITE);
 
         // Gray/black pair: use color 8 (dark gray) if available, otherwise black
         // This matches C htop's ColorPairGrayBlack behavior
@@ -429,6 +432,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionFollow as usize] =
             COLOR_PAIR(PAIR_BLACK_YELLOW) | A_BOLD;
         self.colors[ColorElement::PanelSelectionUnfocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::PanelEdit as usize] = COLOR_PAIR(PAIR_BLACK_WHITE) | A_BOLD;
         self.colors[ColorElement::Process as usize] = COLOR_PAIR(PAIR_DEFAULT);
         self.colors[ColorElement::ProcessBasename as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD;
         self.colors[ColorElement::ProcessTree as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
