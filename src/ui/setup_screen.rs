@@ -8,7 +8,7 @@
 
 use ncurses::*;
 
-use super::crt::{ColorElement, KEY_F10, KEY_F4, KEY_F7, KEY_F8, KEY_F9};
+use super::crt::{ColorElement, KEY_F10, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9};
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::panel::{HandlerResult, Panel};
@@ -26,6 +26,10 @@ const KEY_MINUS: i32 = b'-' as i32;
 const KEY_PLUS: i32 = b'+' as i32;
 const KEY_Q: i32 = b'q' as i32;
 const KEY_T: i32 = b't' as i32;
+const KEY_L: i32 = b'l' as i32;
+const KEY_L_UPPER: i32 = b'L' as i32;
+const KEY_R: i32 = b'r' as i32;
+const KEY_R_UPPER: i32 = b'R' as i32;
 const KEY_LBRACKET: i32 = b'[' as i32;
 const KEY_RBRACKET: i32 = b']' as i32;
 
@@ -352,48 +356,54 @@ impl MeterInfo {
     }
 }
 
-/// List of all available meters (matching C htop Platform_meterTypes)
+/// List of all available meters (matching C htop Platform_meterTypes order)
+/// Note: C htop adds individual CPU meters at the end via AvailableMetersPanel_addCPUMeters
 pub const AVAILABLE_METERS: &[MeterInfo] = &[
-    MeterInfo::with_param("CPU", "CPU", "CPU usage for a specific core"),
+    // Regular meters in C htop Platform_meterTypes order (skipping index 0 which is CPUMeter)
+    MeterInfo::new("Clock", "Clock", "Current time"),
+    MeterInfo::new("Date", "Date", "Current date"),
+    MeterInfo::new("DateTime", "Date and Time", "Current date and time"),
+    MeterInfo::new("LoadAverage", "Load average", "System load averages"),
+    MeterInfo::new("Memory", "Memory", "Memory usage"),
+    MeterInfo::new("Swap", "Swap", "Swap usage"),
+    MeterInfo::new("Tasks", "Task counter", "Running/total tasks"),
+    MeterInfo::new("Battery", "Battery", "Battery charge level"),
+    MeterInfo::new("Hostname", "Hostname", "System hostname"),
+    MeterInfo::new("Uptime", "Uptime", "System uptime"),
+    // AllCPUs variants
     MeterInfo::new("AllCPUs", "CPUs (1/1)", "All CPUs in a single row"),
     MeterInfo::new("AllCPUs2", "CPUs (1/2)", "All CPUs in 2 rows"),
     MeterInfo::new("AllCPUs4", "CPUs (1/4)", "All CPUs in 4 rows"),
     MeterInfo::new("AllCPUs8", "CPUs (1/8)", "All CPUs in 8 rows"),
+    // Left/Right CPUs variants
     MeterInfo::new("LeftCPUs", "Left CPUs (1/1)", "Left half of CPUs (1 row)"),
-    MeterInfo::new("LeftCPUs2", "Left CPUs (1/2)", "Left half of CPUs (2 rows)"),
-    MeterInfo::new("LeftCPUs4", "Left CPUs (1/4)", "Left half of CPUs (4 rows)"),
-    MeterInfo::new("LeftCPUs8", "Left CPUs (1/8)", "Left half of CPUs (8 rows)"),
     MeterInfo::new(
         "RightCPUs",
         "Right CPUs (1/1)",
         "Right half of CPUs (1 row)",
     ),
+    MeterInfo::new("LeftCPUs2", "Left CPUs (1/2)", "Left half of CPUs (2 rows)"),
     MeterInfo::new(
         "RightCPUs2",
         "Right CPUs (1/2)",
         "Right half of CPUs (2 rows)",
     ),
+    MeterInfo::new("LeftCPUs4", "Left CPUs (1/4)", "Left half of CPUs (4 rows)"),
     MeterInfo::new(
         "RightCPUs4",
         "Right CPUs (1/4)",
         "Right half of CPUs (4 rows)",
     ),
+    MeterInfo::new("LeftCPUs8", "Left CPUs (1/8)", "Left half of CPUs (8 rows)"),
     MeterInfo::new(
         "RightCPUs8",
         "Right CPUs (1/8)",
         "Right half of CPUs (8 rows)",
     ),
-    MeterInfo::new("Memory", "Memory", "Memory usage"),
-    MeterInfo::new("Swap", "Swap", "Swap usage"),
-    MeterInfo::new("LoadAverage", "Load average", "System load averages"),
-    MeterInfo::new("Tasks", "Task counter", "Running/total tasks"),
-    MeterInfo::new("Uptime", "Uptime", "System uptime"),
-    MeterInfo::new("Battery", "Battery", "Battery charge level"),
-    MeterInfo::new("Hostname", "Hostname", "System hostname"),
-    MeterInfo::new("Clock", "Clock", "Current time"),
-    MeterInfo::new("Date", "Date", "Current date"),
-    MeterInfo::new("DateTime", "Date and Time", "Current date and time"),
+    // Blank meter
     MeterInfo::new("Blank", "Blank", "Empty spacer"),
+    // CPU meters at the end (like C htop AvailableMetersPanel_addCPUMeters)
+    MeterInfo::with_param("CPU", "CPU average", "CPU usage average"),
 ];
 
 /// Get the display name for a meter by its internal name
@@ -524,11 +534,13 @@ impl SetupScreen {
         ]);
 
         // Meters function bar (matching C htop MetersPanel)
+        // C htop: {"Style ", "Move  ", "                                       ", "Delete", "Done  "}
+        // Keys:   {"Space", "Enter", "  ", "Del", "F10"}
         let meters_bar = FunctionBar::new_with_labels(&[
             ("", ""),
             ("", ""),
             ("", ""),
-            ("Style", " "),
+            ("Style", "Space"),
             ("Move", "Enter"),
             ("", ""),
             ("", ""),
@@ -537,21 +549,24 @@ impl SetupScreen {
             ("Done", "F10"),
         ]);
 
-        // Meters moving mode function bar
+        // Meters moving mode function bar (matching C htop MetersMovingFunctions)
+        // C htop: {"Style ", "Lock  ", "Up    ", "Down  ", "Left  ", "Right ", "       ", "Delete", "Done  "}
+        // Keys:   {"Space", "Enter", "Up", "Dn", "<-", "->", "  ", "Del", "F10"}
         let meters_moving_bar = FunctionBar::new_with_labels(&[
             ("", ""),
             ("", ""),
             ("", ""),
-            ("Style", " "),
+            ("Style", "Space"),
             ("Lock", "Enter"),
             ("Up", "Up"),
             ("Down", "Dn"),
             ("Left", "<-"),
             ("Right", "->"),
-            ("Done", "F10"),
+            ("Delete", "Del"),
         ]);
 
         // Available meters function bar (matching C htop AvailableMetersPanel)
+        // C htop uses FunctionBar_newEnterEsc("Add   ", "Done   ")
         let meters_available_bar = FunctionBar::new_with_labels(&[
             ("", ""),
             ("", ""),
@@ -562,7 +577,7 @@ impl SetupScreen {
             ("", ""),
             ("", ""),
             ("", ""),
-            ("Done", "F10"),
+            ("Done", "Esc"),
         ]);
 
         SetupScreen {
@@ -1112,13 +1127,10 @@ impl SetupScreen {
         // Get number of columns from current layout
         let num_columns = settings.header_layout.num_columns();
 
-        // Calculate panel widths:
-        // - Each column panel gets equal space
-        // - Available meters panel gets the same width as a column
-        // Total panels = num_columns + 1 (available meters)
-        let num_panels = num_columns + 1;
-        let panel_width = total_width / num_panels as i32;
-        let remainder = total_width - (panel_width * num_panels as i32);
+        // C htop uses fixed width of 20 for each column panel, and remaining for available meters
+        const COLUMN_PANEL_WIDTH: i32 = 20;
+        let column_panels_width = COLUMN_PANEL_WIDTH * num_columns as i32;
+        let available_width = (total_width - column_panels_width).max(COLUMN_PANEL_WIDTH);
 
         // Determine which panel has focus
         // focus == 1 means we're in meters mode (not categories)
@@ -1129,30 +1141,23 @@ impl SetupScreen {
             None
         };
 
-        // Draw column panels
+        // Draw column panels (fixed width 20 each, like C htop)
         let mut cur_x = x;
         for col_idx in 0..num_columns {
-            let w = if col_idx == num_columns - 1 {
-                panel_width + remainder / 2 // Give extra space to last column
-            } else {
-                panel_width
-            };
-
             self.draw_meter_column_panel(
                 crt,
                 settings,
                 col_idx,
                 cur_x,
                 y,
-                w,
+                COLUMN_PANEL_WIDTH,
                 h,
                 focused_column == Some(col_idx),
             );
-            cur_x += w;
+            cur_x += COLUMN_PANEL_WIDTH;
         }
 
-        // Draw available meters panel (rightmost)
-        let available_width = panel_width + (remainder - remainder / 2);
+        // Draw available meters panel (takes remaining width, like C htop)
         self.draw_available_meters_panel(
             crt,
             cur_x,
@@ -1579,15 +1584,26 @@ impl SetupScreen {
                 return HandlerResult::BreakLoop;
             }
 
-            // Enter - toggle moving mode or add meter from available
-            KEY_ENTER_LF | KEY_ENTER_CR => {
+            // Enter, r, R, F6 - add meter to rightmost column (from available panel)
+            // or toggle moving mode (from column panel)
+            KEY_ENTER_LF | KEY_ENTER_CR | KEY_R | KEY_R_UPPER | KEY_F6 => {
                 if is_available_panel {
-                    // Add selected meter to current column
-                    self.add_meter_from_available(settings, header);
+                    // Add selected meter to rightmost column (like C htop)
+                    let rightmost = num_columns.saturating_sub(1);
+                    self.add_meter_to_column(settings, header, rightmost);
                     return HandlerResult::Handled;
-                } else {
-                    // Toggle moving mode
+                } else if key == KEY_ENTER_LF || key == KEY_ENTER_CR {
+                    // Toggle moving mode (only for Enter, not r/R/F6)
                     self.meters_moving = !self.meters_moving;
+                    return HandlerResult::Handled;
+                }
+            }
+
+            // l, L, F5 - add meter to leftmost column (from available panel)
+            KEY_L | KEY_L_UPPER | KEY_F5 => {
+                if is_available_panel {
+                    // Add selected meter to leftmost column (column 0)
+                    self.add_meter_to_column(settings, header, 0);
                     return HandlerResult::Handled;
                 }
             }
@@ -1751,21 +1767,20 @@ impl SetupScreen {
         }
     }
 
-    /// Add a meter from available meters to the first column
-    fn add_meter_from_available(&mut self, settings: &mut Settings, header: &mut Header) {
+    /// Add a meter from available meters to a specific column
+    /// If target_column is None, adds to column 0 (leftmost)
+    /// After adding, switches focus to that column and enters moving mode
+    fn add_meter_to_column(
+        &mut self,
+        settings: &mut Settings,
+        header: &mut Header,
+        target_column: usize,
+    ) {
         if self.meters_available_selection >= AVAILABLE_METERS.len() {
             return;
         }
 
         let meter_info = &AVAILABLE_METERS[self.meters_available_selection];
-
-        // Add to the first column (or could be current column - 1 if we want)
-        // C htop adds to the last focused column panel
-        let target_column = if self.meters_column_focus > 0 {
-            self.meters_column_focus - 1
-        } else {
-            0
-        };
 
         // Create meter config
         let config = MeterConfig {
@@ -1784,15 +1799,22 @@ impl SetupScreen {
         settings.changed = true;
         self.changed = true;
 
+        // Get the new meter's position
+        let new_position = settings.header_columns[target_column]
+            .len()
+            .saturating_sub(1);
+
         // Update selection in that column
         if let Some(sel) = self.meters_column_selection.get_mut(target_column) {
-            *sel = settings.header_columns[target_column]
-                .len()
-                .saturating_sub(1);
+            *sel = new_position;
         }
 
         // Repopulate header
         header.populate_from_settings(settings);
+
+        // Switch focus to the target column and enter moving mode (like C htop)
+        self.meters_column_focus = target_column;
+        self.meters_moving = true;
     }
 
     /// Delete the selected meter from current column
