@@ -662,10 +662,13 @@ impl ScreenManager {
         {
             // Get current nice value
             let current_nice = unsafe {
-                // Reset errno
-                *libc::__error() = 0;
+                // Clear errno by reading it (cross-platform approach)
+                let _ = std::io::Error::last_os_error();
                 let nice = libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t);
-                if *libc::__error() != 0 {
+                // Check if getpriority failed (returns -1 and sets errno)
+                // Note: -1 can be a valid nice value, so we need to check errno
+                let err = std::io::Error::last_os_error();
+                if nice == -1 && err.raw_os_error() != Some(0) {
                     return;
                 }
                 nice

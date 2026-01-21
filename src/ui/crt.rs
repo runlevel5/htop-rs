@@ -244,7 +244,7 @@ impl Crt {
         // Initialize locale for UTF-8 support (must be done before initscr)
         // This is required for ncurses to properly handle wide/Unicode characters
         unsafe {
-            libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr() as *const i8);
+            libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr() as *const libc::c_char);
         }
         
         // Initialize ncurses
