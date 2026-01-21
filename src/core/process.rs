@@ -225,7 +225,7 @@ impl ProcessField {
     pub fn title(self) -> &'static str {
         match self {
             ProcessField::Pid => "  PID ",
-            ProcessField::Command => "Command",
+            ProcessField::Command => "Command ",
             ProcessField::State => "S ",
             ProcessField::Ppid => " PPID ",
             ProcessField::Pgrp => " PGRP ",
