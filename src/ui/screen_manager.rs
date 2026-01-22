@@ -510,19 +510,23 @@ impl ScreenManager {
                 return HandlerResult::Redraw;
             }
             KEY_F7 | 0x5D => {
-                // F7 or ] - nice -
+                // F7 or ] - higher priority (nice -)
+                // Applies to tagged processes if any, otherwise selected process
                 if !self.settings.readonly {
-                    if let Some(pid) = self.main_panel.get_selected_pid(machine) {
-                        Self::change_priority(pid, -1);
+                    let ok = self.change_priority_for_processes(machine, -1);
+                    if !ok {
+                        beep();
                     }
                 }
                 return HandlerResult::Handled;
             }
             KEY_F8 | 0x5B => {
-                // F8 or [ - nice +
+                // F8 or [ - lower priority (nice +)
+                // Applies to tagged processes if any, otherwise selected process
                 if !self.settings.readonly {
-                    if let Some(pid) = self.main_panel.get_selected_pid(machine) {
-                        Self::change_priority(pid, 1);
+                    let ok = self.change_priority_for_processes(machine, 1);
+                    if !ok {
+                        beep();
                     }
                 }
                 return HandlerResult::Handled;
@@ -846,29 +850,76 @@ impl ScreenManager {
             .set_function(3, "F4", filter_label);
     }
 
-    /// Change process priority (nice)
-    fn change_priority(pid: i32, delta: i32) {
+    /// Change process priority (nice) for tagged processes or selected process
+    /// Returns true if at least one operation succeeded, false if all failed
+    fn change_priority_for_processes(&self, machine: &Machine, delta: i32) -> bool {
+        // Get tagged PIDs, or fall back to selected PID
+        let tagged = machine.processes.get_tagged();
+        let pids: Vec<i32> = if tagged.is_empty() {
+            // No tagged processes - use selected
+            self.main_panel
+                .get_selected_pid(machine)
+                .map(|p| vec![p])
+                .unwrap_or_default()
+        } else {
+            tagged
+        };
+
+        if pids.is_empty() {
+            return false;
+        }
+
+        let mut any_ok = false;
+        for pid in pids {
+            if Self::change_priority(pid, delta) {
+                any_ok = true;
+            }
+        }
+        any_ok
+    }
+
+    /// Change process priority (nice) for a single process
+    /// Returns true on success, false on failure
+    fn change_priority(pid: i32, delta: i32) -> bool {
         #[cfg(unix)]
         {
+            use std::io::Error;
+
             // Get current nice value
-            let current_nice = unsafe {
-                // Clear errno by reading it (cross-platform approach)
-                let _ = std::io::Error::last_os_error();
-                let nice = libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t);
-                // Check if getpriority failed (returns -1 and sets errno)
-                // Note: -1 can be a valid nice value, so we need to check errno
-                let err = std::io::Error::last_os_error();
-                if nice == -1 && err.raw_os_error() != Some(0) {
-                    return;
+            // Clear errno first, then call getpriority
+            // Note: -1 can be a valid nice value, so we check errno after
+            unsafe {
+                // Set errno to 0 before the call
+                #[cfg(target_os = "macos")]
+                {
+                    *libc::__error() = 0;
                 }
-                nice
-            };
+                #[cfg(target_os = "linux")]
+                {
+                    *libc::__errno_location() = 0;
+                }
+            }
+
+            let current_nice = unsafe { libc::getpriority(libc::PRIO_PROCESS, pid as libc::id_t) };
+
+            // Check if getpriority failed
+            let err = Error::last_os_error();
+            if current_nice == -1 && err.raw_os_error() != Some(0) {
+                return false;
+            }
 
             let new_nice = (current_nice + delta).clamp(-20, 19);
 
-            unsafe {
-                libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, new_nice);
-            }
+            let result =
+                unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, new_nice) };
+
+            result == 0
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = (pid, delta);
+            false
         }
     }
 
