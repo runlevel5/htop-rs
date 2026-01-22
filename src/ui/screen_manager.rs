@@ -2866,26 +2866,190 @@ impl ScreenManager {
     }
 
     /// Show strace output for process (like C htop TraceScreen)
-    /// On unsupported platforms (macOS, etc.), shows "Tracing unavailable" message
+    /// On Linux: forks strace and displays output live
+    /// On BSD: uses truss instead
+    /// On unsupported platforms: shows "Tracing unavailable" message
+    #[allow(unused_imports, unused_mut)]
     fn show_strace(&self, crt: &Crt, pid: i32, command: &str) {
-        // On unsupported platforms, show single line with message
-        // On Linux, this would run strace but for now show instructions
-        #[cfg(target_os = "linux")]
-        let lines: Vec<String> = vec![
-            format!("Run manually: strace -p {}", pid),
-            String::new(),
-            "(Interactive tracing requires running htop with elevated privileges)".to_string(),
-        ];
-        #[cfg(not(target_os = "linux"))]
-        let lines: Vec<String> = vec!["Tracing unavailable on not supported system.".to_string()];
+        use std::io::{BufRead, BufReader};
+        use std::process::{Child, Command, Stdio};
 
-        // State for the info screen
+        // Platform-specific tracer command
+        #[cfg(target_os = "linux")]
+        let tracer_result: Result<Child, std::io::Error> = Command::new("strace")
+            .args(["-T", "-tt", "-s", "512", "-p", &pid.to_string()])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()) // strace outputs to stderr
+            .spawn();
+
+        #[cfg(any(
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        let tracer_result: Result<Child, std::io::Error> = Command::new("truss")
+            .args(["-s", "512", "-p", &pid.to_string()])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        )))]
+        let tracer_result: Result<Child, std::io::Error> = Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Tracing unavailable",
+        ));
+
+        // Check if tracer started successfully
+        let mut tracer_child: Option<Child>;
+        let mut lines: Vec<String> = Vec::new();
+        let mut strace_alive: bool;
+        let error_message: Option<String>;
+
+        match tracer_result {
+            Ok(mut child) => {
+                // Set stderr to non-blocking for live reading
+                // strace outputs to stderr, not stdout
+                #[cfg(unix)]
+                {
+                    use std::os::unix::io::AsRawFd;
+                    if let Some(ref stderr) = child.stderr {
+                        let fd = stderr.as_raw_fd();
+                        unsafe {
+                            let flags = libc::fcntl(fd, libc::F_GETFL);
+                            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+                        }
+                    }
+                }
+                tracer_child = Some(child);
+                strace_alive = true;
+                error_message = None;
+            }
+            Err(e) => {
+                tracer_child = None;
+                strace_alive = false;
+                #[cfg(target_os = "linux")]
+                {
+                    error_message = Some(format!(
+                        "Could not execute 'strace': {}. Please make sure it is available in your $PATH.",
+                        e
+                    ));
+                }
+                #[cfg(any(
+                    target_os = "freebsd",
+                    target_os = "openbsd",
+                    target_os = "netbsd",
+                    target_os = "dragonfly"
+                ))]
+                {
+                    error_message = Some(format!(
+                        "Could not execute 'truss': {}. Please make sure it is available in your $PATH.",
+                        e
+                    ));
+                }
+                #[cfg(not(any(
+                    target_os = "linux",
+                    target_os = "freebsd",
+                    target_os = "openbsd",
+                    target_os = "netbsd",
+                    target_os = "dragonfly"
+                )))]
+                {
+                    let _ = e;
+                    error_message = Some("Tracing unavailable on this system.".to_string());
+                }
+            }
+        }
+
+        // Add error message as first line if any
+        if let Some(msg) = error_message {
+            lines.push(msg);
+        }
+
+        // State for the trace screen
         let mut selected = 0i32;
         let mut scroll_v = 0i32;
+        let mut tracing = true; // Whether to capture new lines
+        let mut follow = true; // Auto-scroll to bottom
+        let mut cont_line = false; // For handling partial lines
+        let mut partial_line = String::new();
+
+        // Disable ncurses delay for responsive input
+        crt.disable_delay();
 
         loop {
             let panel_height = crt.height() - 2; // Title + function bar
             let panel_y = 1; // After title
+
+            // Read new data from strace (non-blocking)
+            if strace_alive && tracing {
+                if let Some(ref mut child) = tracer_child {
+                    // Check if child is still running
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            // Child exited
+                            strace_alive = false;
+                        }
+                        Ok(None) => {
+                            // Still running, try to read output
+                            if let Some(ref mut stderr) = child.stderr {
+                                let mut reader = BufReader::new(stderr);
+                                let mut buffer = String::new();
+
+                                // Read available data (non-blocking due to O_NONBLOCK)
+                                loop {
+                                    buffer.clear();
+                                    match reader.read_line(&mut buffer) {
+                                        Ok(0) => break, // EOF or would block
+                                        Ok(_) => {
+                                            // Got a line (or partial line)
+                                            let line = if cont_line {
+                                                // Continue previous partial line
+                                                cont_line = false;
+                                                let full = partial_line.clone() + &buffer;
+                                                partial_line.clear();
+                                                full
+                                            } else {
+                                                buffer.clone()
+                                            };
+
+                                            // Check if line is complete (ends with newline)
+                                            if line.ends_with('\n') {
+                                                let trimmed = line.trim_end().to_string();
+                                                lines.push(trimmed);
+                                            } else {
+                                                // Partial line, save for next iteration
+                                                partial_line = line;
+                                                cont_line = true;
+                                            }
+                                        }
+                                        Err(ref e)
+                                            if e.kind() == std::io::ErrorKind::WouldBlock =>
+                                        {
+                                            break;
+                                        }
+                                        Err(_) => break,
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            strace_alive = false;
+                        }
+                    }
+                }
+
+                // Auto-scroll if following
+                if follow && !lines.is_empty() {
+                    selected = (lines.len() as i32 - 1).max(0);
+                }
+            }
 
             // Clamp selection and scroll
             let max_selected = (lines.len() as i32 - 1).max(0);
@@ -2941,42 +3105,81 @@ impl ScreenManager {
                 }
             }
 
-            // Draw function bar
+            // Draw function bar (matches C htop TraceScreen)
+            // F3=Search, F4=Filter, F8=AutoScroll, F9=Stop/Resume Tracing, Esc=Done
             let fb_y = crt.height() - 1;
-            let fb = FunctionBar::with_functions(vec![("Esc".to_string(), "Done   ".to_string())]);
+            let trace_label = if tracing {
+                "Stop Tracing   "
+            } else {
+                "Resume Tracing "
+            };
+            let scroll_label = if follow { "AutoScroll " } else { "Manual     " };
+            let fb = FunctionBar::with_functions(vec![
+                ("F8".to_string(), scroll_label.to_string()),
+                ("F9".to_string(), trace_label.to_string()),
+                ("Esc".to_string(), "Done   ".to_string()),
+            ]);
             fb.draw_simple(crt, fb_y);
 
             crt.refresh();
 
-            // Handle input
-            nodelay(stdscr(), false);
+            // Handle input (non-blocking)
             let ch = getch();
+
+            if ch == ERR {
+                // No input, small delay to avoid busy-waiting
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
 
             match ch {
                 27 | 113 => break, // Esc or 'q'
                 x if x == KEY_F10 => break,
+                KEY_F8 | 0x66 => {
+                    // F8 or 'f' - toggle auto-scroll/follow
+                    follow = !follow;
+                    if follow && !lines.is_empty() {
+                        selected = (lines.len() as i32 - 1).max(0);
+                    }
+                }
+                KEY_F9 | 0x74 => {
+                    // F9 or 't' - toggle tracing
+                    tracing = !tracing;
+                }
                 KEY_UP | 0x10 => {
+                    follow = false; // Manual navigation disables follow
                     if selected > 0 {
                         selected -= 1;
                     }
                 }
                 KEY_DOWN | 0x0E => {
+                    follow = false;
                     selected += 1;
                 }
                 KEY_PPAGE => {
+                    follow = false;
                     selected = (selected - panel_height).max(0);
                 }
                 KEY_NPAGE => {
+                    follow = false;
                     selected = (selected + panel_height).min(max_selected);
                 }
                 KEY_HOME => {
+                    follow = false;
                     selected = 0;
                 }
                 KEY_END => {
+                    follow = false;
                     selected = max_selected;
                 }
                 _ => {}
             }
+        }
+
+        // Cleanup: kill the tracer child process
+        if let Some(ref mut child) = tracer_child {
+            let _ = child.kill();
+            let _ = child.wait();
         }
 
         crt.enable_delay();

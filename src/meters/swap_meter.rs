@@ -1,6 +1,8 @@
 //! Swap Meter
 
-use super::{Meter, MeterMode};
+use std::cell::RefCell;
+
+use super::{draw_graph, draw_led, GraphData, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::bar_meter_char;
 use crate::ui::ColorElement;
@@ -11,17 +13,31 @@ use crate::ui::Crt;
 /// Displays swap usage exactly like C htop:
 /// Bar mode: "Swp[|||||||||     XXXM/YYYM]"
 /// The value text appears right-aligned INSIDE the bar
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SwapMeter {
     mode: MeterMode,
     used: f64,
     cache: f64,
     total: f64,
+    /// Graph data for historical display (RefCell for interior mutability)
+    graph_data: RefCell<GraphData>,
+}
+
+impl Default for SwapMeter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SwapMeter {
     pub fn new() -> Self {
-        SwapMeter::default()
+        SwapMeter {
+            mode: MeterMode::Bar,
+            used: 0.0,
+            cache: 0.0,
+            total: 0.0,
+            graph_data: RefCell::new(GraphData::new()),
+        }
     }
 
     /// Format memory value like C htop's Meter_humanUnit
@@ -181,12 +197,32 @@ impl Meter for SwapMeter {
                     Self::human_unit(self.total)
                 ));
             }
-            _ => {
-                let fallback = SwapMeter {
-                    mode: MeterMode::Bar,
-                    ..*self
+            MeterMode::Graph => {
+                // Calculate swap usage as percentage (normalized to 0.0-1.0)
+                let normalized = if self.total > 0.0 {
+                    self.used / self.total
+                } else {
+                    0.0
                 };
-                fallback.draw(crt, _machine, _settings, x, y, width);
+
+                // Record the value in graph data
+                {
+                    let mut graph_data = self.graph_data.borrow_mut();
+                    graph_data.record(normalized, _settings.delay * 100);
+                }
+
+                // Draw the graph
+                let graph_data = self.graph_data.borrow();
+                draw_graph(crt, x, y, width, self.height(), &graph_data, "Swp");
+            }
+            MeterMode::Led => {
+                // Format swap values for LED display
+                let text = format!(
+                    "{}/{}",
+                    Self::human_unit(self.used),
+                    Self::human_unit(self.total)
+                );
+                draw_led(crt, x, y, width, "Swp ", &text);
             }
         }
     }

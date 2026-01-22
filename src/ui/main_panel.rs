@@ -11,6 +11,11 @@ use super::row_print::{
 };
 use super::Crt;
 use crate::core::{Machine, Process, ProcessField, ProcessState, Settings};
+#[cfg(target_os = "linux")]
+use crate::platform::linux::{
+    ioprio_class, ioprio_data, IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE, IOPRIO_CLASS_NONE,
+    IOPRIO_CLASS_RT,
+};
 use ncurses::*;
 
 /// Distribution path prefixes to shadow (matches C htop Process.c CHECK_AND_MARK_DIST_PATH_PREFIXES)
@@ -61,6 +66,188 @@ fn get_dist_path_prefix_len(path: &str) -> Option<usize> {
     }
 
     None
+}
+
+/// Linux TASK_COMM_LEN is 16, so comm is truncated to 15 chars + NUL
+const TASK_COMM_LEN: usize = 16;
+
+/// Try to find comm within cmdline arguments
+/// Returns Some((start_offset, length)) if found, None otherwise
+///
+/// This matches C htop's findCommInCmdline() function:
+/// - Searches through cmdline tokens (space-separated in htop-rs, newline-separated in C htop)
+/// - For each token, extracts the basename (after last '/')
+/// - Compares against comm, handling the case where comm is truncated to 15 chars
+fn find_comm_in_cmdline_fn(
+    comm: &str,
+    cmdline: &str,
+    cmdline_basename_start: usize,
+) -> Option<(usize, usize)> {
+    let comm_len = comm.len();
+    if comm_len == 0 {
+        return None;
+    }
+
+    // Iterate through tokens in cmdline starting from basename position
+    // In htop-rs, cmdline uses spaces as separators (vs newlines in C htop)
+    let search_area = &cmdline[cmdline_basename_start..];
+
+    for token in search_area.split(' ') {
+        if token.is_empty() {
+            continue;
+        }
+
+        // Find the basename of this token (after last '/')
+        let token_basename = if let Some(slash_pos) = token.rfind('/') {
+            &token[slash_pos + 1..]
+        } else {
+            token
+        };
+
+        let token_len = token_basename.len();
+
+        // Check if this token matches comm
+        // Match conditions (from C htop):
+        // 1. Exact match: token_len == comm_len AND token starts with comm
+        // 2. Truncated comm: token_len > comm_len AND comm_len == TASK_COMM_LEN-1 AND token starts with comm
+        let matches = if token_len == comm_len {
+            token_basename == comm
+        } else if token_len > comm_len && comm_len == TASK_COMM_LEN - 1 {
+            // comm was truncated, check if token starts with it
+            token_basename.starts_with(comm)
+        } else {
+            false
+        };
+
+        if matches {
+            // Found it! Calculate the position in the original cmdline
+            // We need to find where this token_basename is in the original cmdline
+            let token_start_in_search = search_area.as_ptr() as usize - cmdline.as_ptr() as usize
+                + (token.as_ptr() as usize - search_area.as_ptr() as usize);
+            let basename_offset_in_token = if token.len() > token_basename.len() {
+                token.len() - token_basename.len()
+            } else {
+                0
+            };
+            let comm_start = token_start_in_search + basename_offset_in_token;
+
+            // Return position and the full basename length (not just comm_len)
+            // This matches C htop which highlights the entire basename
+            return Some((comm_start, token_len));
+        }
+    }
+
+    None
+}
+
+/// Match cmdline prefix with exe suffix to determine how much to strip
+/// Returns the number of bytes to strip from cmdline if they match, 0 otherwise
+///
+/// This matches C htop's matchCmdlinePrefixWithExeSuffix() function:
+/// - If cmdline starts with '/' (absolute path): must match the entire exe path
+/// - If cmdline is a relative path: matches basename and reverse-matches path suffix
+fn match_cmdline_prefix_with_exe_suffix(
+    cmdline: &str,
+    cmdline_basename_start: usize,
+    exe: &str,
+    exe_basename_offset: usize,
+) -> usize {
+    if cmdline.is_empty() || exe.is_empty() {
+        return 0;
+    }
+
+    let exe_basename_len = exe.len() - exe_basename_offset;
+
+    // Case 1: cmdline prefix is an absolute path - must match whole exe
+    if cmdline.starts_with('/') {
+        let match_len = exe.len(); // Full exe path length
+        if cmdline.len() >= match_len && cmdline.starts_with(exe) {
+            // Check delimiter after the match
+            if let Some(delim) = cmdline.chars().nth(match_len) {
+                if delim == ' ' || delim == '\0' {
+                    return match_len;
+                }
+            } else {
+                // cmdline exactly equals exe
+                return match_len;
+            }
+        }
+        return 0;
+    }
+
+    // Case 2: cmdline prefix is a relative path
+    // We need to match the basename and then reverse-match the path
+    let exe_basename = &exe[exe_basename_offset..];
+    let mut cmdline_base_offset = cmdline_basename_start;
+
+    loop {
+        // Check if we have enough room for the basename
+        let match_len = exe_basename_len + cmdline_base_offset;
+        if cmdline_base_offset < exe_basename_offset
+            && cmdline.len() >= cmdline_base_offset + exe_basename_len
+        {
+            let cmdline_segment =
+                &cmdline[cmdline_base_offset..cmdline_base_offset + exe_basename_len];
+            if cmdline_segment == exe_basename {
+                // Check delimiter
+                let delim_ok = if cmdline.len() > match_len {
+                    let delim = cmdline.chars().nth(match_len).unwrap_or(' ');
+                    delim == ' ' || delim == '\0'
+                } else {
+                    true // End of string is OK
+                };
+
+                if delim_ok {
+                    // Reverse match the cmdline prefix with exe suffix
+                    let mut i = cmdline_base_offset;
+                    let mut j = exe_basename_offset;
+
+                    while i >= 1 && j >= 1 {
+                        let c_char = cmdline.as_bytes().get(i - 1).copied();
+                        let e_char = exe.as_bytes().get(j - 1).copied();
+                        if c_char != e_char {
+                            break;
+                        }
+                        i -= 1;
+                        j -= 1;
+                    }
+
+                    // Full match if we consumed all of cmdline prefix and exe has '/' before remaining
+                    if i == 0 && j >= 1 {
+                        if let Some(b'/') = exe.as_bytes().get(j - 1) {
+                            return match_len;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try to find previous potential cmdline_base_offset
+        if cmdline_base_offset <= 2 {
+            return 0;
+        }
+
+        // Look for previous component (preceded by '/' and delimited by ' ')
+        let mut found_delim = false;
+        let bytes = cmdline.as_bytes();
+        let mut new_offset = cmdline_base_offset - 2;
+
+        while new_offset > 0 {
+            if found_delim {
+                if bytes.get(new_offset - 1) == Some(&b'/') {
+                    break;
+                }
+            } else if bytes.get(new_offset) == Some(&b' ') {
+                found_delim = true;
+            }
+            new_offset -= 1;
+        }
+
+        if !found_delim {
+            return 0;
+        }
+        cmdline_base_offset = new_offset;
+    }
 }
 
 /// Incremental mode type
@@ -450,6 +637,8 @@ impl MainPanel {
                 settings.show_merged_command,
                 settings.highlight_deleted_exe,
                 settings.shadow_dist_path_prefix,
+                settings.find_comm_in_cmdline,
+                settings.strip_exe_from_cmdline,
                 is_shadowed,
             );
         }
@@ -486,6 +675,8 @@ impl MainPanel {
         show_merged_command: bool,
         highlight_deleted_exe: bool,
         shadow_dist_path_prefix: bool,
+        find_comm_in_cmdline: bool,
+        strip_exe_from_cmdline: bool,
         is_shadowed: bool,
     ) {
         let process_color = crt.color(ColorElement::Process);
@@ -618,7 +809,8 @@ impl MainPanel {
                 // (basename + arguments), matching C htop behavior
                 //
                 // Settings that affect command display:
-                // - show_merged_command: prefix with comm (in magenta) if it differs from basename
+                // - show_merged_command: display exe, then comm if different, then remaining cmdline
+                // - strip_exe_from_cmdline: strip exe path from cmdline when merged command is shown
                 // - show_thread_names: for threads, show thread's own name instead of parent command
                 // - highlight_threads: use ProcessThread color for threads
                 // - highlight_base_name: highlight the basename portion
@@ -631,6 +823,22 @@ impl MainPanel {
                     crt.color(ColorElement::ProcessComm)
                 };
                 let separator_color = crt.color(ColorElement::FailedRead);
+
+                // Compute how much of cmdline matches exe (for strip_exe_from_cmdline)
+                let cmdline_strip_len = if show_merged_command && strip_exe_from_cmdline {
+                    if let (Some(ref exe), Some(ref cmdline)) = (&process.exe, &process.cmdline) {
+                        match_cmdline_prefix_with_exe_suffix(
+                            cmdline,
+                            process.cmdline_basename_start,
+                            exe,
+                            process.exe_basename_offset,
+                        )
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
 
                 // Determine the command text to display
                 // C htop logic for showThreadNames:
@@ -713,24 +921,77 @@ impl MainPanel {
 
                 // Check if we should show merged command prefix (comm differs from basename)
                 // This matches C htop's behavior: when showMergedCommand is enabled and comm
-                // differs from the cmdline basename, prefix with "comm│"
+                // differs from the cmdline basename, we need to determine how to display comm:
+                // 1. If comm matches the exe basename, highlight it there (haveCommInExe)
+                // 2. Else if find_comm_in_cmdline is enabled and comm is found in cmdline args,
+                //    highlight it there (haveCommInCmdline)
+                // 3. Else show comm as a prefix with separator (comm│)
                 let mut show_comm_prefix = false;
+                let mut comm_in_cmdline: Option<(usize, usize)> = None; // (start, len) if found
+
                 if show_merged_command && !is_shadowed {
                     if let Some(ref comm) = process.comm {
                         let basename = process.get_basename();
                         // TASK_COMM_LEN is 16 in Linux, so comm is truncated to 15 chars
                         // Compare up to the shorter of comm length or 15 chars
-                        let cmp_len = comm.len().min(15);
-                        if !basename.starts_with(&comm[..cmp_len])
-                            && basename.get(..cmp_len) != Some(&comm[..cmp_len])
-                        {
-                            // comm differs from basename - show it as prefix
-                            show_comm_prefix = true;
-                            str.append(comm, comm_color);
-                            str.append(crt.tree_str.vert, separator_color);
+                        let cmp_len = comm.len().min(TASK_COMM_LEN - 1);
+                        let have_comm_in_exe = basename.starts_with(&comm[..cmp_len])
+                            || basename.get(..cmp_len) == Some(&comm[..cmp_len]);
+
+                        if !have_comm_in_exe {
+                            // comm not in exe basename, try to find in cmdline if enabled
+                            if find_comm_in_cmdline {
+                                if let Some(ref cmdline) = process.cmdline {
+                                    // Adjust search start if we're stripping exe from cmdline
+                                    let search_start = if cmdline_strip_len > 0 {
+                                        cmdline_strip_len
+                                    } else {
+                                        process.cmdline_basename_start
+                                    };
+                                    comm_in_cmdline =
+                                        find_comm_in_cmdline_fn(comm, cmdline, search_start);
+                                    // Adjust position if we found it and we're stripping
+                                    if let Some((start, len)) = comm_in_cmdline {
+                                        if cmdline_strip_len > 0 && start >= cmdline_strip_len {
+                                            comm_in_cmdline =
+                                                Some((start - cmdline_strip_len, len));
+                                        }
+                                    }
+                                }
+                            }
+
+                            // If still not found, show as prefix
+                            if comm_in_cmdline.is_none() {
+                                show_comm_prefix = true;
+                                str.append(comm, comm_color);
+                                str.append(crt.tree_str.vert, separator_color);
+                            }
                         }
                     }
                 }
+
+                // When strip_exe_from_cmdline is active and we have a match,
+                // modify cmd to skip the matched portion
+                let cmd = if cmdline_strip_len > 0 && show_program_path {
+                    // Get the cmdline with the exe prefix stripped
+                    if let Some(ref cmdline) = process.cmdline {
+                        if cmdline_strip_len < cmdline.len() {
+                            // Skip leading space if present after stripping
+                            let stripped = &cmdline[cmdline_strip_len..];
+                            if stripped.starts_with(' ') {
+                                &stripped[1..]
+                            } else {
+                                stripped
+                            }
+                        } else {
+                            "" // Entire cmdline was stripped
+                        }
+                    } else {
+                        cmd
+                    }
+                } else {
+                    cmd
+                };
 
                 // Determine colors based on settings
                 // C htop logic: when highlightThreads is enabled, threads use PROCESS_THREAD
@@ -802,7 +1063,27 @@ impl MainPanel {
                                 str.append(basename, effective_thread_basename_color);
                                 let after = pos + basename.len();
                                 if after < cmd.len() {
-                                    str.append(&cmd[after..], thread_color);
+                                    // Check if comm_in_cmdline falls within the remaining portion
+                                    if let Some((comm_start, comm_len)) = comm_in_cmdline {
+                                        if comm_start >= after && comm_start + comm_len <= cmd.len()
+                                        {
+                                            str.append(&cmd[after..comm_start], thread_color);
+                                            str.append(
+                                                &cmd[comm_start..comm_start + comm_len],
+                                                comm_color,
+                                            );
+                                            if comm_start + comm_len < cmd.len() {
+                                                str.append(
+                                                    &cmd[comm_start + comm_len..],
+                                                    thread_color,
+                                                );
+                                            }
+                                        } else {
+                                            str.append(&cmd[after..], thread_color);
+                                        }
+                                    } else {
+                                        str.append(&cmd[after..], thread_color);
+                                    }
                                 }
                             } else {
                                 str.append(cmd, thread_color);
@@ -814,7 +1095,37 @@ impl MainPanel {
                                 str.append(basename, effective_thread_basename_color);
                                 let after = basename.len();
                                 if after < cmd.len() {
-                                    str.append(&cmd[after..], thread_color);
+                                    // Check if comm_in_cmdline falls within the arguments
+                                    if let Some((comm_start, comm_len)) = comm_in_cmdline {
+                                        let cmd_offset = process.cmdline_basename_start;
+                                        if comm_start >= cmd_offset {
+                                            let rel_comm_start = comm_start - cmd_offset;
+                                            if rel_comm_start >= after
+                                                && rel_comm_start + comm_len <= cmd.len()
+                                            {
+                                                str.append(
+                                                    &cmd[after..rel_comm_start],
+                                                    thread_color,
+                                                );
+                                                str.append(
+                                                    &cmd[rel_comm_start..rel_comm_start + comm_len],
+                                                    comm_color,
+                                                );
+                                                if rel_comm_start + comm_len < cmd.len() {
+                                                    str.append(
+                                                        &cmd[rel_comm_start + comm_len..],
+                                                        thread_color,
+                                                    );
+                                                }
+                                            } else {
+                                                str.append(&cmd[after..], thread_color);
+                                            }
+                                        } else {
+                                            str.append(&cmd[after..], thread_color);
+                                        }
+                                    } else {
+                                        str.append(&cmd[after..], thread_color);
+                                    }
                                 }
                             } else {
                                 str.append(cmd, effective_thread_basename_color);
@@ -826,6 +1137,7 @@ impl MainPanel {
                     }
                 } else if highlight_base_name || show_merged_command {
                     // Basename highlighting (enabled explicitly or via merged command mode)
+                    // Also handle comm highlighting if comm was found in cmdline
                     if show_program_path {
                         // Highlight basename portion when showing full path
                         let basename = process.get_basename();
@@ -853,7 +1165,27 @@ impl MainPanel {
                             str.append(basename, effective_basename_color);
                             let after = pos + basename.len();
                             if after < cmd.len() {
-                                str.append(&cmd[after..], base_color);
+                                // Check if comm_in_cmdline falls within the remaining portion
+                                if let Some((comm_start, comm_len)) = comm_in_cmdline {
+                                    // comm_start is in the full cmdline, we need to check if it's after basename
+                                    // The cmd we're displaying might be the full cmdline or part of it
+                                    // Since show_program_path is true, cmd is the full command
+                                    if comm_start >= after && comm_start + comm_len <= cmd.len() {
+                                        // Comm is in the arguments after basename
+                                        str.append(&cmd[after..comm_start], base_color);
+                                        str.append(
+                                            &cmd[comm_start..comm_start + comm_len],
+                                            comm_color,
+                                        );
+                                        if comm_start + comm_len < cmd.len() {
+                                            str.append(&cmd[comm_start + comm_len..], base_color);
+                                        }
+                                    } else {
+                                        str.append(&cmd[after..], base_color);
+                                    }
+                                } else {
+                                    str.append(&cmd[after..], base_color);
+                                }
                             }
                         } else {
                             str.append(cmd, base_color);
@@ -866,7 +1198,39 @@ impl MainPanel {
                             str.append(basename, effective_basename_color);
                             let after = basename.len();
                             if after < cmd.len() {
-                                str.append(&cmd[after..], base_color);
+                                // Check if comm_in_cmdline falls within the arguments
+                                // Note: comm_in_cmdline positions are in the FULL cmdline, not in cmd
+                                // We need to translate the position
+                                if let Some((comm_start, comm_len)) = comm_in_cmdline {
+                                    // cmd starts from cmdline_basename_start in the full cmdline
+                                    // So we need to adjust comm_start relative to cmd
+                                    let cmd_offset = process.cmdline_basename_start;
+                                    if comm_start >= cmd_offset {
+                                        let rel_comm_start = comm_start - cmd_offset;
+                                        if rel_comm_start >= after
+                                            && rel_comm_start + comm_len <= cmd.len()
+                                        {
+                                            // Comm is in the arguments after basename
+                                            str.append(&cmd[after..rel_comm_start], base_color);
+                                            str.append(
+                                                &cmd[rel_comm_start..rel_comm_start + comm_len],
+                                                comm_color,
+                                            );
+                                            if rel_comm_start + comm_len < cmd.len() {
+                                                str.append(
+                                                    &cmd[rel_comm_start + comm_len..],
+                                                    base_color,
+                                                );
+                                            }
+                                        } else {
+                                            str.append(&cmd[after..], base_color);
+                                        }
+                                    } else {
+                                        str.append(&cmd[after..], base_color);
+                                    }
+                                } else {
+                                    str.append(&cmd[after..], base_color);
+                                }
                             }
                         } else {
                             // Fallback: just show entire command highlighted
@@ -900,8 +1264,55 @@ impl MainPanel {
                 print_left_aligned(str, attr, tty, 8);
             }
             ProcessField::IOPriority => {
-                // IO priority: show "?" for now (needs ioprio syscall)
-                str.append("?? ", shadow_color);
+                // IO priority: display class and data
+                // Format: Bn (Best-effort level n), Rn (Realtime level n), id (Idle)
+                // When IOPRIO_CLASS_NONE, derive from nice value: B((nice+20)/5)
+                #[cfg(target_os = "linux")]
+                {
+                    let ioprio = process.io_priority;
+                    if ioprio < 0 {
+                        // Could not read IO priority (permission denied or error)
+                        str.append("?? ", shadow_color);
+                    } else {
+                        let klass = ioprio_class(ioprio);
+                        if klass == IOPRIO_CLASS_NONE {
+                            // No explicit IO priority set - derive from nice
+                            // See note in C htop: when NONE, the kernel uses
+                            // (nice+20)/5 to derive the best-effort level
+                            let derived = (process.nice + 20) / 5;
+                            str.append(&format!("B{} ", derived), base_color);
+                        } else if klass == IOPRIO_CLASS_BE {
+                            // Best-effort class
+                            let data = ioprio_data(ioprio);
+                            str.append(&format!("B{} ", data), base_color);
+                        } else if klass == IOPRIO_CLASS_RT {
+                            // Realtime class - high priority color
+                            let data = ioprio_data(ioprio);
+                            let attr = if is_shadowed {
+                                shadow_color
+                            } else {
+                                crt.color(ColorElement::ProcessHighPriority)
+                            };
+                            str.append(&format!("R{} ", data), attr);
+                        } else if klass == IOPRIO_CLASS_IDLE {
+                            // Idle class - low priority color
+                            let attr = if is_shadowed {
+                                shadow_color
+                            } else {
+                                crt.color(ColorElement::ProcessLowPriority)
+                            };
+                            str.append("id ", attr);
+                        } else {
+                            // Unknown class
+                            str.append("?? ", shadow_color);
+                        }
+                    }
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    // IO priority not available on non-Linux
+                    str.append("?? ", shadow_color);
+                }
             }
             ProcessField::IORate => {
                 // Total I/O rate (read + write combined)

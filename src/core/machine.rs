@@ -176,6 +176,27 @@ pub struct Machine {
     pub cpus: Vec<CpuData>,
     pub avg_cpu: CpuData, // Average/combined CPU stats
 
+    // Disk IO statistics
+    pub disk_io_read_bytes: u64,    // Total bytes read (cumulative)
+    pub disk_io_write_bytes: u64,   // Total bytes written (cumulative)
+    pub disk_io_ms_time_spend: u64, // Total ms spent on IO (cumulative)
+    pub disk_io_num_disks: u64,     // Number of disks
+    pub disk_io_read_rate: f64,     // Bytes per second
+    pub disk_io_write_rate: f64,    // Bytes per second
+    pub disk_io_utilization: f64,   // Percentage utilization (across all disks)
+    pub disk_io_last_update: u64,   // Last update time in ms
+
+    // Network IO statistics
+    pub net_io_bytes_received: u64, // Total bytes received (cumulative)
+    pub net_io_bytes_transmitted: u64, // Total bytes transmitted (cumulative)
+    pub net_io_packets_received: u64, // Total packets received (cumulative)
+    pub net_io_packets_transmitted: u64, // Total packets transmitted (cumulative)
+    pub net_io_receive_rate: f64,   // Bytes per second
+    pub net_io_transmit_rate: f64,  // Bytes per second
+    pub net_io_receive_packets: u64, // Packets per second (rate)
+    pub net_io_transmit_packets: u64, // Packets per second (rate)
+    pub net_io_last_update: u64,    // Last update time in ms
+
     // Users
     pub users_table: UsersTable,
     pub htop_user_id: u32,
@@ -236,6 +257,23 @@ impl Machine {
             existing_cpus: 1,
             cpus: Vec::new(),
             avg_cpu: CpuData::new(),
+            disk_io_read_bytes: 0,
+            disk_io_write_bytes: 0,
+            disk_io_ms_time_spend: 0,
+            disk_io_num_disks: 0,
+            disk_io_read_rate: 0.0,
+            disk_io_write_rate: 0.0,
+            disk_io_utilization: 0.0,
+            disk_io_last_update: 0,
+            net_io_bytes_received: 0,
+            net_io_bytes_transmitted: 0,
+            net_io_packets_received: 0,
+            net_io_packets_transmitted: 0,
+            net_io_receive_rate: 0.0,
+            net_io_transmit_rate: 0.0,
+            net_io_receive_packets: 0,
+            net_io_transmit_packets: 0,
+            net_io_last_update: 0,
             users_table: UsersTable::new(),
             htop_user_id,
             max_user_id: 0,

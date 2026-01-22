@@ -83,9 +83,11 @@ impl Header {
 
         for (col_idx, column_config) in settings.header_columns.iter().enumerate() {
             for meter_config in column_config {
-                if let Some(meter) =
+                if let Some(mut meter) =
                     MeterType::create_from_name(&meter_config.name, meter_config.param)
                 {
+                    // Apply the mode from config
+                    meter.set_mode(meter_config.mode.into());
                     if col_idx < self.columns.len() {
                         self.columns[col_idx].push(meter);
                     }

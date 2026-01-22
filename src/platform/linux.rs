@@ -11,6 +11,87 @@ use std::time::Duration;
 
 use crate::core::{CpuData, Machine, Process, ProcessState};
 
+// IO Priority constants (from linux/ioprio.h)
+pub const IOPRIO_CLASS_NONE: i32 = 0;
+pub const IOPRIO_CLASS_RT: i32 = 1; // Real-time
+pub const IOPRIO_CLASS_BE: i32 = 2; // Best-effort
+pub const IOPRIO_CLASS_IDLE: i32 = 3; // Idle
+
+const IOPRIO_CLASS_SHIFT: i32 = 13;
+const IOPRIO_PRIO_MASK: i32 = (1 << IOPRIO_CLASS_SHIFT) - 1;
+
+/// IOPRIO_WHO_PROCESS: get/set IO priority for a process
+const IOPRIO_WHO_PROCESS: i32 = 1;
+
+/// Extract the IO priority class from an ioprio value
+#[inline]
+pub fn ioprio_class(ioprio: i32) -> i32 {
+    ioprio >> IOPRIO_CLASS_SHIFT
+}
+
+/// Extract the IO priority data (level within class) from an ioprio value
+#[inline]
+pub fn ioprio_data(ioprio: i32) -> i32 {
+    ioprio & IOPRIO_PRIO_MASK
+}
+
+/// Get IO priority for a process using ioprio_get syscall
+/// Returns the IO priority value, or -1 on error
+pub fn get_io_priority(pid: i32) -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        // SYS_ioprio_get is 252 on x86_64, 290 on i386
+        // Use libc::SYS_ioprio_get if available, otherwise use the constant
+        #[cfg(target_arch = "x86_64")]
+        const SYS_IOPRIO_GET: libc::c_long = 252;
+        #[cfg(target_arch = "x86")]
+        const SYS_IOPRIO_GET: libc::c_long = 290;
+        #[cfg(target_arch = "aarch64")]
+        const SYS_IOPRIO_GET: libc::c_long = 31;
+        #[cfg(target_arch = "arm")]
+        const SYS_IOPRIO_GET: libc::c_long = 315;
+
+        #[cfg(any(
+            target_arch = "x86_64",
+            target_arch = "x86",
+            target_arch = "aarch64",
+            target_arch = "arm"
+        ))]
+        {
+            let result = unsafe {
+                libc::syscall(
+                    SYS_IOPRIO_GET,
+                    IOPRIO_WHO_PROCESS as libc::c_int,
+                    pid as libc::c_int,
+                )
+            };
+            if result < 0 {
+                -1
+            } else {
+                result as i32
+            }
+        }
+
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            target_arch = "x86",
+            target_arch = "aarch64",
+            target_arch = "arm"
+        )))]
+        {
+            // Unsupported architecture
+            -1
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Not available on non-Linux
+        let _ = pid;
+        -1
+    }
+}
+
 /// Previous CPU times for calculating deltas
 static PREV_CPU_TIMES: Mutex<Option<Vec<CpuTime>>> = Mutex::new(None);
 static PREV_TOTAL_CPU: Mutex<Option<CpuTime>> = Mutex::new(None);
@@ -351,15 +432,17 @@ pub fn scan_processes(machine: &mut Machine) {
             // Linux marks deleted executables with " (deleted)" suffix in /proc/PID/exe
             if let Ok(exe) = proc.exe() {
                 let exe_str = exe.to_string_lossy();
-                if exe_str.ends_with(" (deleted)") {
+                let (clean_path, deleted) = if exe_str.ends_with(" (deleted)") {
                     // Remove the " (deleted)" suffix from the path
-                    let clean_path = exe_str.trim_end_matches(" (deleted)").to_string();
-                    process.exe = Some(clean_path);
-                    process.exe_deleted = true;
+                    (exe_str.trim_end_matches(" (deleted)").to_string(), true)
                 } else {
-                    process.exe = Some(exe_str.to_string());
-                    process.exe_deleted = false;
-                }
+                    (exe_str.to_string(), false)
+                };
+
+                // Compute exe_basename_offset (position of basename in exe path)
+                process.exe_basename_offset = clean_path.rfind('/').map(|p| p + 1).unwrap_or(0);
+                process.exe = Some(clean_path);
+                process.exe_deleted = deleted;
             }
         }
 
@@ -425,6 +508,9 @@ pub fn scan_processes(machine: &mut Machine) {
                 process.oom_score = score;
             }
         }
+
+        // IO Priority (thread-specific data, read on every scan)
+        process.io_priority = get_io_priority(pid);
 
         // CGroup
         if let Ok(cgroups) = proc.cgroups() {
@@ -641,4 +727,229 @@ pub fn scan_cpu_frequency(machine: &mut Machine) {
 
     // Fall back to /proc/cpuinfo
     scan_cpu_frequency_from_cpuinfo(machine);
+}
+
+/// Minimum time between disk IO cache updates (in milliseconds)
+const DISK_IO_CACHE_DELAY_MS: u64 = 500;
+
+/// Scan disk IO statistics from /proc/diskstats
+/// This matches C htop's Platform_getDiskIO behavior
+pub fn scan_disk_io(machine: &mut Machine) {
+    use std::io::{BufRead, BufReader};
+
+    // Rate limiting: only update every DISK_IO_CACHE_DELAY_MS
+    let now_ms = machine.realtime_ms;
+    if machine.disk_io_last_update > 0
+        && now_ms < machine.disk_io_last_update + DISK_IO_CACHE_DELAY_MS
+    {
+        return;
+    }
+
+    let file = match std::fs::File::open("/proc/diskstats") {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+
+    let reader = BufReader::new(file);
+
+    let mut last_top_disk = String::new();
+    let mut read_sum: u64 = 0;
+    let mut write_sum: u64 = 0;
+    let mut time_spend_sum: u64 = 0;
+    let mut num_disks: u64 = 0;
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // /proc/diskstats format:
+        // major minor name reads_completed reads_merged sectors_read ms_reading
+        // writes_completed writes_merged sectors_written ms_writing ios_in_progress ms_io total_ms_weighted
+        // We need: name (field 2), sectors_read (field 5), sectors_written (field 9), ms_io (field 12)
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 14 {
+            continue;
+        }
+
+        let diskname = fields[2];
+
+        // Skip dm-*, loop*, md*, zram* devices (like C htop)
+        if diskname.starts_with("dm-")
+            || diskname.starts_with("loop")
+            || diskname.starts_with("md")
+            || diskname.starts_with("zram")
+        {
+            continue;
+        }
+
+        // Only count root disks - don't count IO from sda and sda1 twice
+        // This assumes disks are listed directly before any of their partitions
+        if !last_top_disk.is_empty() && diskname.starts_with(&last_top_disk) {
+            continue;
+        }
+
+        // Parse the values
+        let sectors_read: u64 = match fields[5].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let sectors_written: u64 = match fields[9].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let ms_io: u64 = match fields[12].parse() {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // Update last top disk
+        last_top_disk = diskname.to_string();
+
+        read_sum += sectors_read;
+        write_sum += sectors_written;
+        time_spend_sum += ms_io;
+        num_disks += 1;
+    }
+
+    // Multiply sectors by 512 to get bytes (standard sector size)
+    let total_bytes_read = read_sum * 512;
+    let total_bytes_written = write_sum * 512;
+
+    // Calculate rates if we have previous data
+    if machine.disk_io_last_update > 0 {
+        let elapsed_ms = now_ms.saturating_sub(machine.disk_io_last_update);
+        if elapsed_ms > 0 {
+            // Calculate read/write rates in bytes per second
+            let read_delta = total_bytes_read.saturating_sub(machine.disk_io_read_bytes);
+            let write_delta = total_bytes_written.saturating_sub(machine.disk_io_write_bytes);
+            let time_delta = time_spend_sum.saturating_sub(machine.disk_io_ms_time_spend);
+
+            // Rate = bytes_delta * 1000 / elapsed_ms (to get bytes/second)
+            machine.disk_io_read_rate = (read_delta as f64) * 1000.0 / (elapsed_ms as f64);
+            machine.disk_io_write_rate = (write_delta as f64) * 1000.0 / (elapsed_ms as f64);
+
+            // Utilization = 100 * ms_io_delta / elapsed_ms
+            // But we normalize by number of disks since utilization can exceed 100%
+            // when multiple disks are busy
+            machine.disk_io_utilization = (time_delta as f64) * 100.0 / (elapsed_ms as f64);
+        }
+    }
+
+    // Store current values for next iteration
+    machine.disk_io_read_bytes = total_bytes_read;
+    machine.disk_io_write_bytes = total_bytes_written;
+    machine.disk_io_ms_time_spend = time_spend_sum;
+    machine.disk_io_num_disks = num_disks;
+    machine.disk_io_last_update = now_ms;
+}
+
+/// Minimum time between network IO cache updates (in milliseconds)
+const NETWORK_IO_CACHE_DELAY_MS: u64 = 500;
+
+/// Scan network IO statistics from /proc/net/dev
+/// This matches C htop's Platform_getNetworkIO behavior
+pub fn scan_network_io(machine: &mut Machine) {
+    use std::io::{BufRead, BufReader};
+
+    // Rate limiting: only update every NETWORK_IO_CACHE_DELAY_MS
+    let now_ms = machine.realtime_ms;
+    if machine.net_io_last_update > 0
+        && now_ms < machine.net_io_last_update + NETWORK_IO_CACHE_DELAY_MS
+    {
+        return;
+    }
+
+    let file = match std::fs::File::open("/proc/net/dev") {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+
+    let reader = BufReader::new(file);
+
+    let mut bytes_received: u64 = 0;
+    let mut packets_received: u64 = 0;
+    let mut bytes_transmitted: u64 = 0;
+    let mut packets_transmitted: u64 = 0;
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // /proc/net/dev format:
+        // Inter-|   Receive                                                |  Transmit
+        //  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+        //    lo: 1234567   12345    0    0    0     0          0         0  1234567   12345    0    0    0     0       0          0
+        // We need: interface, rx_bytes, rx_packets, tx_bytes, tx_packets
+
+        // Skip header lines (lines without ':')
+        let line = line.trim();
+        if !line.contains(':') {
+            continue;
+        }
+
+        // Split on ':' to get interface name
+        let parts: Vec<&str> = line.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+
+        let interface = parts[0].trim();
+
+        // Skip loopback interface (like C htop)
+        if interface == "lo" {
+            continue;
+        }
+
+        // Parse the statistics
+        let stats: Vec<&str> = parts[1].split_whitespace().collect();
+        if stats.len() < 10 {
+            continue;
+        }
+
+        // Fields: rx_bytes rx_packets rx_errs rx_drop rx_fifo rx_frame rx_compressed rx_multicast
+        //         tx_bytes tx_packets tx_errs tx_drop tx_fifo tx_colls tx_carrier tx_compressed
+        let rx_bytes: u64 = stats[0].parse().unwrap_or(0);
+        let rx_packets: u64 = stats[1].parse().unwrap_or(0);
+        let tx_bytes: u64 = stats[8].parse().unwrap_or(0);
+        let tx_packets: u64 = stats[9].parse().unwrap_or(0);
+
+        bytes_received += rx_bytes;
+        packets_received += rx_packets;
+        bytes_transmitted += tx_bytes;
+        packets_transmitted += tx_packets;
+    }
+
+    // Calculate rates if we have previous data
+    if machine.net_io_last_update > 0 {
+        let elapsed_ms = now_ms.saturating_sub(machine.net_io_last_update);
+        if elapsed_ms > 0 {
+            // Calculate byte rates in bytes per second
+            let rx_bytes_delta = bytes_received.saturating_sub(machine.net_io_bytes_received);
+            let tx_bytes_delta = bytes_transmitted.saturating_sub(machine.net_io_bytes_transmitted);
+
+            // Calculate packet rates in packets per second
+            let rx_packets_delta = packets_received.saturating_sub(machine.net_io_packets_received);
+            let tx_packets_delta =
+                packets_transmitted.saturating_sub(machine.net_io_packets_transmitted);
+
+            // Rate = delta * 1000 / elapsed_ms (to get per-second rate)
+            machine.net_io_receive_rate = (rx_bytes_delta as f64) * 1000.0 / (elapsed_ms as f64);
+            machine.net_io_transmit_rate = (tx_bytes_delta as f64) * 1000.0 / (elapsed_ms as f64);
+            machine.net_io_receive_packets =
+                ((rx_packets_delta as f64) * 1000.0 / (elapsed_ms as f64)) as u64;
+            machine.net_io_transmit_packets =
+                ((tx_packets_delta as f64) * 1000.0 / (elapsed_ms as f64)) as u64;
+        }
+    }
+
+    // Store current values for next iteration
+    machine.net_io_bytes_received = bytes_received;
+    machine.net_io_bytes_transmitted = bytes_transmitted;
+    machine.net_io_packets_received = packets_received;
+    machine.net_io_packets_transmitted = packets_transmitted;
+    machine.net_io_last_update = now_ms;
 }

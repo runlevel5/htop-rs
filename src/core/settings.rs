@@ -594,6 +594,21 @@ impl Settings {
                     self.hide_function_bar = v.clamp(0, 2);
                 }
             }
+            "show_merged_command" => {
+                self.show_merged_command = value == "1";
+            }
+            "highlight_deleted_exe" => {
+                self.highlight_deleted_exe = value == "1";
+            }
+            "shadow_dist_path_prefix" => {
+                self.shadow_dist_path_prefix = value == "1";
+            }
+            "find_comm_in_cmdline" => {
+                self.find_comm_in_cmdline = value == "1";
+            }
+            "strip_exe_from_cmdline" => {
+                self.strip_exe_from_cmdline = value == "1";
+            }
             _ => {}
         }
     }
@@ -724,6 +739,31 @@ impl Settings {
             if self.update_process_names { 1 } else { 0 }
         )?;
         writeln!(file, "hide_function_bar={}", self.hide_function_bar)?;
+        writeln!(
+            file,
+            "show_merged_command={}",
+            if self.show_merged_command { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_deleted_exe={}",
+            if self.highlight_deleted_exe { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "shadow_dist_path_prefix={}",
+            if self.shadow_dist_path_prefix { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "find_comm_in_cmdline={}",
+            if self.find_comm_in_cmdline { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "strip_exe_from_cmdline={}",
+            if self.strip_exe_from_cmdline { 1 } else { 0 }
+        )?;
 
         Ok(())
     }

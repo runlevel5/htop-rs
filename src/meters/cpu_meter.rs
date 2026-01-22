@@ -1,6 +1,8 @@
 //! CPU Meter
 
-use super::{Meter, MeterMode};
+use std::cell::RefCell;
+
+use super::{draw_graph, GraphData, Meter, MeterMode, DEFAULT_GRAPH_HEIGHT};
 use crate::core::{Machine, Settings};
 use crate::ui::bar_meter_char;
 use crate::ui::ColorElement;
@@ -40,6 +42,8 @@ pub struct CpuMeter {
     frequency: f64,
     /// Number of CPUs (cached for height calculation)
     cpu_count: usize,
+    /// Graph data for historical display (RefCell for interior mutability)
+    graph_data: RefCell<GraphData>,
 }
 
 impl CpuMeter {
@@ -58,6 +62,7 @@ impl CpuMeter {
             iowait: 0.0,
             frequency: 0.0,
             cpu_count: 1,
+            graph_data: RefCell::new(GraphData::new()),
         }
     }
 
@@ -335,10 +340,15 @@ impl Meter for CpuMeter {
     }
 
     fn height(&self) -> i32 {
+        // Graph mode has fixed height regardless of CPU selection
+        if self.mode == MeterMode::Graph {
+            return DEFAULT_GRAPH_HEIGHT;
+        }
+
         let num_cpus = match self.selection {
             CpuSelection::All => self.cpu_count,
             CpuSelection::Left | CpuSelection::Right => (self.cpu_count + 1) / 2,
-            _ => return 1,
+            _ => return self.mode.default_height(),
         };
         // Divide by columns, rounding up
         ((num_cpus + self.columns - 1) / self.columns) as i32
@@ -492,8 +502,8 @@ impl Meter for CpuMeter {
                     super::draw_text(crt, x, y, "CPU:", &text);
                 }
             }
-            _ => {
-                // Graph/LED modes not implemented - fall back to text
+            MeterMode::Graph => {
+                // Calculate total CPU usage (normalized to 0.0-1.0)
                 let total = self.user
                     + self.nice
                     + self.system
@@ -506,8 +516,47 @@ impl Meter for CpuMeter {
                         0.0
                     }
                     + self.iowait;
+
+                // Normalize to 0.0-1.0 (CPU percentage is already 0-100)
+                let normalized = total / 100.0;
+
+                // Record the value in graph data
+                {
+                    let mut graph_data = self.graph_data.borrow_mut();
+                    graph_data.record(normalized, settings.delay * 100); // delay is in tenths of a second
+                }
+
+                // Draw the graph
+                let graph_data = self.graph_data.borrow();
+                let caption = match self.selection {
+                    CpuSelection::Average => "Avg",
+                    CpuSelection::Cpu(_n) => {
+                        // For individual CPU, we can't return a &str with dynamic content
+                        // Just use "CPU" for now (matches C htop behavior for graph)
+                        "CPU"
+                    }
+                    _ => "CPU",
+                };
+                draw_graph(crt, x, y, width, self.height(), &graph_data, caption);
+            }
+            MeterMode::Led => {
+                // Calculate total CPU usage
+                let total = self.user
+                    + self.nice
+                    + self.system
+                    + self.irq
+                    + self.softirq
+                    + self.steal
+                    + if settings.account_guest_in_cpu_meter || !settings.detailed_cpu_time {
+                        self.guest
+                    } else {
+                        0.0
+                    }
+                    + self.iowait;
+
+                // Format the text (matches C htop CPUMeter_display text buffer)
                 let text = format!("{:.1}%", total);
-                super::draw_text(crt, x, y, "CPU: ", &text);
+                super::draw_led(crt, x, y, width, "CPU ", &text);
             }
         }
     }

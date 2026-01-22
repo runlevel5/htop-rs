@@ -1,6 +1,8 @@
 //! Memory Meter
 
-use super::{Meter, MeterMode};
+use std::cell::RefCell;
+
+use super::{draw_graph, draw_led, GraphData, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::bar_meter_char;
 use crate::ui::ColorElement;
@@ -11,7 +13,7 @@ use crate::ui::Crt;
 /// Displays memory usage exactly like C htop:
 /// Bar mode: "Mem[|||||||||     XXXM/YYYM]"
 /// The value text appears right-aligned INSIDE the bar
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemoryMeter {
     mode: MeterMode,
     used: f64,
@@ -20,11 +22,28 @@ pub struct MemoryMeter {
     compressed: f64,
     cache: f64,
     total: f64,
+    /// Graph data for historical display (RefCell for interior mutability)
+    graph_data: RefCell<GraphData>,
+}
+
+impl Default for MemoryMeter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MemoryMeter {
     pub fn new() -> Self {
-        MemoryMeter::default()
+        MemoryMeter {
+            mode: MeterMode::Bar,
+            used: 0.0,
+            buffers: 0.0,
+            shared: 0.0,
+            compressed: 0.0,
+            cache: 0.0,
+            total: 0.0,
+            graph_data: RefCell::new(GraphData::new()),
+        }
     }
 
     /// Format memory value like C htop's Meter_humanUnit
@@ -199,13 +218,34 @@ impl Meter for MemoryMeter {
                 ));
                 attrset(crt.color(ColorElement::ResetColor));
             }
-            _ => {
-                // Fall back to bar mode for unsupported modes
-                let fallback = MemoryMeter {
-                    mode: MeterMode::Bar,
-                    ..*self
+            MeterMode::Graph => {
+                // Calculate memory usage as percentage (normalized to 0.0-1.0)
+                let display_used = self.used + self.shared.max(0.0) + self.compressed.max(0.0);
+                let normalized = if self.total > 0.0 {
+                    display_used / self.total
+                } else {
+                    0.0
                 };
-                fallback.draw(crt, _machine, settings, x, y, width);
+
+                // Record the value in graph data
+                {
+                    let mut graph_data = self.graph_data.borrow_mut();
+                    graph_data.record(normalized, settings.delay * 100);
+                }
+
+                // Draw the graph
+                let graph_data = self.graph_data.borrow();
+                draw_graph(crt, x, y, width, self.height(), &graph_data, "Mem");
+            }
+            MeterMode::Led => {
+                // Format memory values for LED display
+                let display_used = self.used + self.shared.max(0.0) + self.compressed.max(0.0);
+                let text = format!(
+                    "{}/{}",
+                    Self::human_unit(display_used),
+                    Self::human_unit(self.total)
+                );
+                draw_led(crt, x, y, width, "Mem ", &text);
             }
         }
     }

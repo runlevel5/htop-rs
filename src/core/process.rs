@@ -517,6 +517,9 @@ pub struct Process {
     // OOM
     pub oom_score: i32,
 
+    // IO Priority (Linux-specific, from ioprio_get syscall)
+    pub io_priority: i32,
+
     // Security
     pub sec_attr: Option<String>,
 
@@ -592,6 +595,7 @@ impl Process {
             ctxt_switches: 0,
             cgroup: None,
             oom_score: 0,
+            io_priority: -1, // -1 indicates not yet read
             sec_attr: None,
             merged_command: MergedCommand::default(),
             updated: false,
