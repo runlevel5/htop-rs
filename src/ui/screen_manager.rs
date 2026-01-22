@@ -1902,17 +1902,19 @@ impl ScreenManager {
 
     /// Show file locks for process (like C htop ProcessLocksScreen)
     fn show_file_locks(&self, crt: &Crt, pid: i32, command: &str) {
-        // Get file locks for the process
-        let locks_result = Self::get_process_locks(pid);
+        // Helper to read file locks (for refresh)
+        let read_locks = |pid: i32| -> Vec<String> {
+            match Self::get_process_locks(pid) {
+                Ok(locks) if locks.is_empty() => {
+                    vec!["No locks have been found for the selected process.".to_string()]
+                }
+                Ok(locks) => locks,
+                Err(msg) => vec![msg],
+            }
+        };
 
         // Build lines from locks data
-        let lines: Vec<String> = match locks_result {
-            Ok(locks) if locks.is_empty() => {
-                vec!["No locks have been found for the selected process.".to_string()]
-            }
-            Ok(locks) => locks,
-            Err(msg) => vec![msg],
-        };
+        let mut lines: Vec<String> = read_locks(pid);
 
         // Header matching C htop ProcessLocksScreen
         let header_str =
@@ -2116,7 +2118,13 @@ impl ScreenManager {
                     filter_active = true;
                 }
                 x if x == KEY_F5 => {
-                    clear();
+                    // F5 - refresh (re-read locks, preserve selection like C htop)
+                    let saved_selected = selected;
+                    lines = read_locks(pid);
+                    // Restore selection, clamped to new list size
+                    let max_idx = (lines.len() as i32 - 1).max(0);
+                    selected = saved_selected.min(max_idx);
+                    crt.clear();
                 }
                 0x0C => {
                     clear();
