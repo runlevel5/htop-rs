@@ -759,10 +759,15 @@ impl ScreenManager {
                 return HandlerResult::Handled;
             }
             0x73 => {
-                // 's' - trace syscalls with strace/dtruss
+                // 's' - trace syscalls with strace
                 if !self.settings.readonly {
                     if let Some(pid) = self.main_panel.get_selected_pid(machine) {
-                        self.show_strace(crt, pid);
+                        let command = machine
+                            .processes
+                            .get(pid)
+                            .map(|p| p.get_command().to_string())
+                            .unwrap_or_default();
+                        self.show_strace(crt, pid, &command);
                     }
                 }
                 return HandlerResult::Redraw;
@@ -2775,42 +2780,116 @@ impl ScreenManager {
 
     /// Show strace output for process (like C htop TraceScreen)
     /// On unsupported platforms (macOS, etc.), shows "Tracing unavailable" message
-    fn show_strace(&self, crt: &Crt, pid: i32) {
-        crt.clear();
-
-        let bold = crt.color(ColorElement::HelpBold);
-        let default_attr = crt.color(ColorElement::DefaultColor);
-
-        mv(0, 0);
-        attrset(bold);
-        let _ = addstr(&format!("Trace of process {}", pid));
-        attrset(A_NORMAL);
-
-        mv(2, 0);
-        attrset(default_attr);
-        // Match C htop: only Linux supports strace, others show "Tracing unavailable"
+    fn show_strace(&self, crt: &Crt, pid: i32, command: &str) {
+        // On unsupported platforms, show single line with message
+        // On Linux, this would run strace but for now show instructions
         #[cfg(target_os = "linux")]
-        {
-            let _ = addstr("Run manually: strace -p ");
-            let _ = addstr(&pid.to_string());
-            mv(4, 0);
-            let _ = addstr("(Interactive tracing requires running htop with elevated privileges)");
-        }
+        let lines: Vec<String> = vec![
+            format!("Run manually: strace -p {}", pid),
+            String::new(),
+            "(Interactive tracing requires running htop with elevated privileges)".to_string(),
+        ];
         #[cfg(not(target_os = "linux"))]
-        {
-            let _ = addstr("Tracing unavailable on not supported system.");
-            let _ = use_default_colors(); // suppress unused variable warning for pid
+        let lines: Vec<String> = vec!["Tracing unavailable on not supported system.".to_string()];
+
+        // State for the info screen
+        let mut selected = 0i32;
+        let mut scroll_v = 0i32;
+
+        loop {
+            let panel_height = crt.height() - 2; // Title + function bar
+            let panel_y = 1; // After title
+
+            // Clamp selection and scroll
+            let max_selected = (lines.len() as i32 - 1).max(0);
+            selected = selected.clamp(0, max_selected);
+
+            if selected < scroll_v {
+                scroll_v = selected;
+            } else if selected >= scroll_v + panel_height {
+                scroll_v = selected - panel_height + 1;
+            }
+            scroll_v = scroll_v.max(0);
+
+            // Draw title (like C htop InfoScreen_drawTitled)
+            let title_attr = crt.color(ColorElement::MeterText);
+            mv(0, 0);
+            attrset(title_attr);
+            let title = format!("Trace of process {} - {}", pid, command);
+            let title_display: String = title.chars().take(crt.width() as usize).collect();
+            hline(' ' as u32, crt.width());
+            let _ = addstr(&title_display);
+            attrset(crt.color(ColorElement::DefaultColor));
+
+            // Draw lines
+            let default_attr = crt.color(ColorElement::DefaultColor);
+            let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
+
+            for row in 0..panel_height {
+                let y = panel_y + row;
+                let line_idx = (scroll_v + row) as usize;
+
+                mv(y, 0);
+
+                if line_idx < lines.len() {
+                    let line = &lines[line_idx];
+                    let is_selected = (scroll_v + row) == selected;
+
+                    let attr = if is_selected {
+                        selection_attr
+                    } else {
+                        default_attr
+                    };
+                    attrset(attr);
+                    hline(' ' as u32, crt.width());
+                    let display_line: String = line.chars().take(crt.width() as usize).collect();
+                    let _ = addstr(&display_line);
+                    attrset(A_NORMAL);
+                } else {
+                    attrset(default_attr);
+                    hline(' ' as u32, crt.width());
+                    attrset(A_NORMAL);
+                }
+            }
+
+            // Draw function bar
+            let fb_y = crt.height() - 1;
+            let fb = FunctionBar::with_functions(vec![("Esc".to_string(), "Done   ".to_string())]);
+            fb.draw_simple(crt, fb_y);
+
+            crt.refresh();
+
+            // Handle input
+            nodelay(stdscr(), false);
+            let ch = getch();
+
+            match ch {
+                27 | 113 => break, // Esc or 'q'
+                x if x == KEY_F10 => break,
+                KEY_UP | 0x10 => {
+                    if selected > 0 {
+                        selected -= 1;
+                    }
+                }
+                KEY_DOWN | 0x0E => {
+                    selected += 1;
+                }
+                KEY_PPAGE => {
+                    selected = (selected - panel_height).max(0);
+                }
+                KEY_NPAGE => {
+                    selected = (selected + panel_height).min(max_selected);
+                }
+                KEY_HOME => {
+                    selected = 0;
+                }
+                KEY_END => {
+                    selected = max_selected;
+                }
+                _ => {}
+            }
         }
-        attrset(A_NORMAL);
 
-        mv(crt.height() - 1, 0);
-        attrset(bold);
-        let _ = addstr("Press any key to return.");
-        attrset(A_NORMAL);
-
-        crt.refresh();
-        nodelay(stdscr(), false);
-        getch();
         crt.enable_delay();
     }
 
