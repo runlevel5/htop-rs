@@ -843,9 +843,48 @@ impl ScreenManager {
             None => return,
         };
 
-        // Darwin signals list (from C htop darwin/Platform.c)
+        // Platform-specific signals list (from C htop Platform.c for each OS)
         // Format matches C htop: " N SIGNAME" with leading space for single digits
-        let signals: &[(&str, i32)] = &[
+        #[cfg(target_os = "linux")]
+        let base_signals: &[(&str, i32)] = &[
+            (" 0 Cancel", 0),
+            (" 1 SIGHUP", 1),
+            (" 2 SIGINT", 2),
+            (" 3 SIGQUIT", 3),
+            (" 4 SIGILL", 4),
+            (" 5 SIGTRAP", 5),
+            (" 6 SIGABRT", 6),
+            (" 6 SIGIOT", 6),
+            (" 7 SIGBUS", 7),
+            (" 8 SIGFPE", 8),
+            (" 9 SIGKILL", 9),
+            ("10 SIGUSR1", 10),
+            ("11 SIGSEGV", 11),
+            ("12 SIGUSR2", 12),
+            ("13 SIGPIPE", 13),
+            ("14 SIGALRM", 14),
+            ("15 SIGTERM", 15),
+            ("16 SIGSTKFLT", 16),
+            ("17 SIGCHLD", 17),
+            ("18 SIGCONT", 18),
+            ("19 SIGSTOP", 19),
+            ("20 SIGTSTP", 20),
+            ("21 SIGTTIN", 21),
+            ("22 SIGTTOU", 22),
+            ("23 SIGURG", 23),
+            ("24 SIGXCPU", 24),
+            ("25 SIGXFSZ", 25),
+            ("26 SIGVTALRM", 26),
+            ("27 SIGPROF", 27),
+            ("28 SIGWINCH", 28),
+            ("29 SIGIO", 29),
+            ("29 SIGPOLL", 29),
+            ("30 SIGPWR", 30),
+            ("31 SIGSYS", 31),
+        ];
+
+        #[cfg(target_os = "macos")]
+        let base_signals: &[(&str, i32)] = &[
             (" 0 Cancel", 0),
             (" 1 SIGHUP", 1),
             (" 2 SIGINT", 2),
@@ -881,9 +920,41 @@ impl ScreenManager {
             ("31 SIGUSR2", 31),
         ];
 
+        // Build signal list with optional real-time signals (Linux only)
+        #[allow(unused_mut)]
+        let mut signals: Vec<(String, i32)> = base_signals
+            .iter()
+            .map(|(name, num)| (name.to_string(), *num))
+            .collect();
+
+        // Add real-time signals on Linux (SIGRTMIN to SIGRTMAX)
+        // These are determined at runtime, typically 34-64 on Linux
+        #[cfg(target_os = "linux")]
+        {
+            // SIGRTMIN and SIGRTMAX are functions in glibc, not constants
+            // libc::SIGRTMIN() returns the minimum real-time signal number
+            // libc::SIGRTMAX() returns the maximum real-time signal number
+            let rtmin = libc::SIGRTMIN();
+            let rtmax = libc::SIGRTMAX();
+
+            // Safety check: only add if range is reasonable (C htop checks <= 100)
+            if rtmax - rtmin <= 100 {
+                for sig in rtmin..=rtmax {
+                    let n = sig - rtmin;
+                    let name = if n == 0 {
+                        format!("{:2} SIGRTMIN", sig)
+                    } else {
+                        format!("{:2} SIGRTMIN+{}", sig, n)
+                    };
+                    signals.push((name, sig));
+                }
+            }
+        }
+
         // Create signal panel (matches C htop SignalsPanel_new)
         // C htop uses width 14 in Action_pickFromVector
-        let signal_panel_width = 14i32;
+        // We use 15 to accommodate "64 SIGRTMIN+30" (14 chars) plus padding
+        let signal_panel_width = 15i32;
         let panel_y = self.main_panel.y;
         let panel_height = crt.height() - panel_y - 1; // Leave room for function bar
 
