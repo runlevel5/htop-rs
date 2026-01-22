@@ -208,6 +208,7 @@ pub struct Machine {
 
     // Settings copied from Settings for platform access
     pub update_process_names: bool,
+    pub show_cpu_frequency: bool,
 }
 
 impl Machine {
@@ -254,6 +255,7 @@ impl Machine {
             load_average: [0.0, 0.0, 0.0],
             boot_time: 0,
             update_process_names: false,
+            show_cpu_frequency: false,
         }
     }
 

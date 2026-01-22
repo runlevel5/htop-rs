@@ -334,6 +334,7 @@ impl ScreenManager {
     ) -> anyhow::Result<()> {
         // Copy settings to machine for platform access
         machine.update_process_names = self.settings.update_process_names;
+        machine.show_cpu_frequency = self.settings.show_cpu_frequency;
 
         // Initial scan BEFORE layout so we know actual CPU count for meter heights
         platform::scan(machine);
@@ -374,6 +375,7 @@ impl ScreenManager {
             if should_update {
                 // Update settings in machine before scan
                 machine.update_process_names = self.settings.update_process_names;
+                machine.show_cpu_frequency = self.settings.show_cpu_frequency;
 
                 // Perform platform scan to update system state
                 platform::scan(machine);

@@ -90,6 +90,22 @@ pub fn scan_cpu(machine: &mut Machine) {
     }
 }
 
+/// Scan CPU frequency (conditionally based on settings)
+pub fn scan_cpu_frequency(machine: &mut Machine) {
+    if !machine.show_cpu_frequency {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::scan_cpu_frequency(machine);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // macOS doesn't provide per-CPU frequency info
+        // Frequency is set to 0.0 (N/A) in darwin.rs
+    }
+}
+
 /// Get system information (hostname, kernel version, etc.)
 pub fn get_system_info(machine: &mut Machine) {
     #[cfg(target_os = "linux")]
@@ -105,6 +121,7 @@ pub fn get_system_info(machine: &mut Machine) {
 /// Perform a full system scan
 pub fn scan(machine: &mut Machine) {
     scan_cpu(machine);
+    scan_cpu_frequency(machine);
     scan_memory(machine);
     scan_processes(machine);
     get_system_info(machine);

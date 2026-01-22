@@ -327,25 +327,44 @@ pub fn scan_processes(machine: &mut Machine) {
             process.percent_mem = ((process.m_resident as f64 / total_mem_kb) * 100.0) as f32;
         }
 
-        // Get command name
-        process.comm = Some(stat.comm.clone());
+        // Only update process name/command if it's new or update_process_names is enabled
+        // (matches C htop Settings.updateProcessNames behavior)
+        // Don't re-read for zombie processes since their cmdline is empty
+        let should_update_names =
+            is_new || (machine.update_process_names && process.state != ProcessState::Zombie);
 
-        // Try to get full cmdline
-        if let Ok(cmdline) = proc.cmdline() {
-            if !cmdline.is_empty() {
-                let joined = cmdline.join(" ");
-                // basename_end is the length of the first argument
-                let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
-                process.update_cmdline(joined, basename_end);
+        if should_update_names {
+            // Get command name from stat (fast, always available)
+            process.comm = Some(stat.comm.clone());
+
+            // Try to get full cmdline
+            if let Ok(cmdline) = proc.cmdline() {
+                if !cmdline.is_empty() {
+                    let joined = cmdline.join(" ");
+                    // basename_end is the length of the first argument
+                    let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
+                    process.update_cmdline(joined, basename_end);
+                }
+            }
+
+            // Try to get exe path and check if deleted
+            // Linux marks deleted executables with " (deleted)" suffix in /proc/PID/exe
+            if let Ok(exe) = proc.exe() {
+                let exe_str = exe.to_string_lossy();
+                if exe_str.ends_with(" (deleted)") {
+                    // Remove the " (deleted)" suffix from the path
+                    let clean_path = exe_str.trim_end_matches(" (deleted)").to_string();
+                    process.exe = Some(clean_path);
+                    process.exe_deleted = true;
+                } else {
+                    process.exe = Some(exe_str.to_string());
+                    process.exe_deleted = false;
+                }
             }
         }
 
-        // Try to get exe path
-        if let Ok(exe) = proc.exe() {
-            process.exe = Some(exe.to_string_lossy().to_string());
-        }
-
-        // Try to get cwd
+        // Try to get cwd (not related to update_process_names, read on each scan)
+        // TODO: Could be optimized to only read when CWD column is displayed
         if let Ok(cwd) = proc.cwd() {
             process.cwd = Some(cwd.to_string_lossy().to_string());
         }
@@ -409,4 +428,153 @@ pub fn scan_processes(machine: &mut Machine) {
         process.updated = true;
         machine.processes.add(process);
     }
+}
+
+/// Scan CPU frequency from sysfs (preferred method)
+/// Returns the number of CPUs with frequency info found, or -1 on error/timeout
+fn scan_cpu_frequency_from_sysfs(machine: &mut Machine) -> i32 {
+    use std::time::Instant;
+
+    // Timeout mechanism: if reading CPU 0 takes too long (>500us), bail out
+    // and use fallback. This matches C htop behavior for slow AMD/Intel CPUs.
+    static TIMEOUT_COUNTER: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+    let timeout = TIMEOUT_COUNTER.load(std::sync::atomic::Ordering::Relaxed);
+    if timeout > 0 {
+        TIMEOUT_COUNTER.store(timeout - 1, std::sync::atomic::Ordering::Relaxed);
+        return -1;
+    }
+
+    let mut num_cpus_with_frequency = 0;
+    let mut total_frequency: f64 = 0.0;
+
+    for i in 0..machine.existing_cpus as usize {
+        if i >= machine.cpus.len() || !machine.cpus[i].online {
+            continue;
+        }
+
+        let path = format!("/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq", i);
+
+        let start = if i == 0 { Some(Instant::now()) } else { None };
+
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                if let Ok(freq_khz) = content.trim().parse::<u64>() {
+                    // Convert kHz to MHz
+                    let freq_mhz = freq_khz as f64 / 1000.0;
+                    machine.cpus[i].frequency = freq_mhz;
+                    num_cpus_with_frequency += 1;
+                    total_frequency += freq_mhz;
+                }
+            }
+            Err(_) => {
+                // File doesn't exist or can't be read
+                return -1;
+            }
+        }
+
+        // Check timing on first CPU
+        if let Some(start_time) = start {
+            let elapsed_us = start_time.elapsed().as_micros();
+            if elapsed_us > 500 {
+                // Too slow, set timeout for next 30 scans
+                TIMEOUT_COUNTER.store(30, std::sync::atomic::Ordering::Relaxed);
+                return -1;
+            }
+        }
+    }
+
+    // Set average frequency
+    if num_cpus_with_frequency > 0 {
+        machine.avg_cpu.frequency = total_frequency / num_cpus_with_frequency as f64;
+    }
+
+    num_cpus_with_frequency
+}
+
+/// Scan CPU frequency from /proc/cpuinfo (fallback method)
+fn scan_cpu_frequency_from_cpuinfo(machine: &mut Machine) {
+    let content = match std::fs::read_to_string("/proc/cpuinfo") {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let mut num_cpus_with_frequency = 0;
+    let mut total_frequency: f64 = 0.0;
+    let mut current_cpu: Option<usize> = None;
+
+    for line in content.lines() {
+        let line = line.trim();
+
+        if line.is_empty() {
+            current_cpu = None;
+            continue;
+        }
+
+        // Parse processor number
+        if line.starts_with("processor") {
+            if let Some(value) = line.split(':').nth(1) {
+                if let Ok(cpu_id) = value.trim().parse::<usize>() {
+                    current_cpu = Some(cpu_id);
+                }
+            }
+            continue;
+        }
+
+        // Parse cpu MHz (various formats for different architectures)
+        let frequency: Option<f64> = if line.starts_with("cpu MHz") {
+            // Standard x86: "cpu MHz : 3400.000"
+            line.split(':').nth(1).and_then(|v| v.trim().parse().ok())
+        } else if line.starts_with("CPU MHz") {
+            // LoongArch: "CPU MHz : 2500.000"
+            line.split(':').nth(1).and_then(|v| v.trim().parse().ok())
+        } else if line.starts_with("cpu MHz dynamic") {
+            // s390: "cpu MHz dynamic : 5200"
+            line.split(':').nth(1).and_then(|v| v.trim().parse().ok())
+        } else if line.starts_with("clock") && line.contains("MHz") {
+            // PowerPC: "clock : 3000.000MHz"
+            line.split(':')
+                .nth(1)
+                .and_then(|v| v.trim().trim_end_matches("MHz").parse().ok())
+        } else {
+            None
+        };
+
+        if let (Some(freq), Some(cpu_id)) = (frequency, current_cpu) {
+            if cpu_id < machine.cpus.len() {
+                // Only set if not already set by sysfs (sysfs takes precedence)
+                if machine.cpus[cpu_id].frequency <= 0.0 {
+                    machine.cpus[cpu_id].frequency = freq;
+                }
+                num_cpus_with_frequency += 1;
+                total_frequency += freq;
+            }
+        }
+    }
+
+    // Set average frequency if not already set
+    if num_cpus_with_frequency > 0 && machine.avg_cpu.frequency <= 0.0 {
+        machine.avg_cpu.frequency = total_frequency / num_cpus_with_frequency as f64;
+    }
+}
+
+/// Scan CPU frequency (main entry point)
+/// This matches C htop's LinuxMachine_scanCPUFrequency behavior:
+/// 1. Reset all frequencies to NaN (we use 0.0)
+/// 2. Try sysfs first (faster, more accurate)
+/// 3. Fall back to /proc/cpuinfo if sysfs fails
+pub fn scan_cpu_frequency(machine: &mut Machine) {
+    // Reset all frequencies
+    for cpu in &mut machine.cpus {
+        cpu.frequency = 0.0;
+    }
+    machine.avg_cpu.frequency = 0.0;
+
+    // Try sysfs first
+    if scan_cpu_frequency_from_sysfs(machine) >= 0 {
+        return;
+    }
+
+    // Fall back to /proc/cpuinfo
+    scan_cpu_frequency_from_cpuinfo(machine);
 }
