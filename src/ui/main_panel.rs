@@ -239,7 +239,7 @@ impl MainPanel {
     }
 
     /// Ensure the selected process is visible
-    fn ensure_visible(&mut self, process_count: i32) {
+    pub fn ensure_visible(&mut self, process_count: i32) {
         let visible_height = if self.show_header { self.h - 1 } else { self.h };
 
         if self.selected < self.scroll_v {

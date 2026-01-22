@@ -2112,6 +2112,7 @@ impl ScreenManager {
         let orig_main_w = self.main_panel.w;
         let orig_main_y = self.main_panel.y;
         let orig_main_h = self.main_panel.h;
+        let orig_main_scroll_v = self.main_panel.scroll_v;
 
         // Main panel starts after user panel
         self.main_panel.x = user_panel_width;
@@ -2216,6 +2217,9 @@ impl ScreenManager {
             self.main_panel.show_header = false;
             self.main_panel.y = panel_start_y + 1; // Start after our manually drawn header
             self.main_panel.h = panel_content_height as i32;
+            // Ensure selected row is visible with the smaller panel height
+            self.main_panel
+                .ensure_visible(machine.processes.len() as i32);
             self.main_panel.draw(crt, machine, &self.settings);
             self.main_panel.show_header = orig_show_header;
 
@@ -2319,6 +2323,7 @@ impl ScreenManager {
         self.main_panel.w = orig_main_w;
         self.main_panel.y = orig_main_y;
         self.main_panel.h = orig_main_h;
+        self.main_panel.scroll_v = orig_main_scroll_v;
 
         // Clear screen to trigger full redraw when returning to main view
         crt.clear();
