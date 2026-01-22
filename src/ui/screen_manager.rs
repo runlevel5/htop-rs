@@ -323,7 +323,8 @@ impl ScreenManager {
         // Update function bar labels based on current state
         self.update_function_bar_labels();
 
-        crt.clear();
+        // Note: We don't call crt.clear() here - ncurses handles differential updates.
+        // Only call clear() when needed (e.g., after dialogs, resize, etc.)
 
         // Draw header meters
         if !self.hide_meters {
@@ -366,6 +367,7 @@ impl ScreenManager {
     /// Handle resize
     fn handle_resize(&mut self, crt: &mut Crt) {
         crt.update_size();
+        crt.clear();
         self.layout(crt);
     }
 
