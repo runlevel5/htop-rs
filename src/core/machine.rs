@@ -211,6 +211,7 @@ pub struct Machine {
     // Sorting
     pub sort_key: ProcessField,
     pub sort_descending: bool,
+    pub needs_sort: bool, // Flag to defer sorting until render time
 
     // Running/thread counts
     pub running_tasks: u32,
@@ -283,6 +284,7 @@ impl Machine {
             pid_filter: None,
             sort_key: ProcessField::PercentCpu,
             sort_descending: true,
+            needs_sort: true,
             running_tasks: 0,
             total_tasks: 0,
             userland_threads: 0,
@@ -348,9 +350,17 @@ impl Machine {
         // This matches C htop where DarwinProcessTable_scan() accumulates these values
         // during process iteration rather than after.
 
-        // Sort processes
-        let ascending = !self.sort_descending;
-        self.processes.sort_by(self.sort_key, ascending);
+        // Sort processes only if needed (deferred sorting like C htop)
+        if self.needs_sort {
+            let ascending = !self.sort_descending;
+            self.processes.sort_by(self.sort_key, ascending);
+            self.needs_sort = false;
+        }
+    }
+
+    /// Request a sort on next update (deferred sorting)
+    pub fn request_sort(&mut self) {
+        self.needs_sort = true;
     }
 
     /// Get time delta in milliseconds since last scan

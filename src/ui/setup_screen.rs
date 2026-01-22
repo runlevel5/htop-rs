@@ -18,6 +18,7 @@ use crate::core::{
     ColorScheme, HeaderLayout, Machine, MeterConfig, MeterMode, ProcessField, ScreenSettings,
     Settings,
 };
+use crate::platform;
 
 // Key constants for pattern matching
 const KEY_ESC: i32 = 27;
@@ -3127,7 +3128,7 @@ impl SetupScreen {
         settings: &mut Settings,
         crt: &mut Crt,
         header: &mut Header,
-        machine: &Machine,
+        machine: &mut Machine,
     ) {
         // Get header height for layout
         let mut header_height = header.get_height();
@@ -3138,7 +3139,25 @@ impl SetupScreen {
         // Start with first interactive item selected
         self.skip_to_interactive(settings, true);
 
+        // Track last update time for periodic scanning (like C htop checkRecalculation)
+        // Use Instant::now() - delay to trigger immediate first scan
+        let delay = std::time::Duration::from_millis(settings.delay as u64 * 100);
+        let mut last_update = std::time::Instant::now() - delay;
+
         loop {
+            // Check if we need to scan for new data (like C htop checkRecalculation)
+            let elapsed = last_update.elapsed();
+            if elapsed >= delay {
+                // Scan machine for updated system data
+                platform::scan(machine);
+
+                // Always update header meters to avoid gaps in graph meters
+                // This matches C htop's checkRecalculation() which always calls Header_updateData()
+                header.update(machine);
+
+                last_update = std::time::Instant::now();
+            }
+
             // Draw
             self.draw(crt, settings, header, machine);
 

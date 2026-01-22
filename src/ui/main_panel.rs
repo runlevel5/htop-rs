@@ -497,25 +497,26 @@ impl MainPanel {
         &self,
         crt: &Crt,
         y: i32,
-        _settings: &Settings,
+        settings: &Settings,
         sort_key: ProcessField,
         sort_descending: bool,
     ) {
         let header_attr = crt.color(ColorElement::PanelHeaderFocus);
         let sort_attr = crt.color(ColorElement::PanelSelectionFocus);
 
-        // Determine the active sort key - in tree view, it's always PID
-        let active_sort_key = if self.tree_view {
-            ProcessField::Pid
+        // Get active sort key and direction matching C htop's ScreenSettings_getActiveSortKey
+        let screen = &settings.screens[settings.active_screen];
+        let (active_sort_key, ascending) = if self.tree_view {
+            if screen.tree_view_always_by_pid {
+                // In tree view with always-by-PID: sort is by PID ascending
+                (ProcessField::Pid, true)
+            } else {
+                // In tree view: use tree_sort_key
+                (screen.tree_sort_key, screen.tree_direction > 0)
+            }
         } else {
-            sort_key
-        };
-
-        // In tree view, sort is always ascending
-        let ascending = if self.tree_view {
-            true
-        } else {
-            !sort_descending
+            // Not in tree view: use regular sort key
+            (sort_key, !sort_descending)
         };
 
         // Fill the line with the header attribute (starting at self.x, not 0)
@@ -563,22 +564,23 @@ impl MainPanel {
     /// Build header string for display (used when drawing header separately)
     pub fn build_header_string(
         &self,
-        _settings: &Settings,
+        settings: &Settings,
         sort_key: ProcessField,
         sort_descending: bool,
     ) -> String {
-        // Determine the active sort key - in tree view, it's always PID
-        let active_sort_key = if self.tree_view {
-            ProcessField::Pid
+        // Get active sort key and direction matching C htop's ScreenSettings_getActiveSortKey
+        let screen = &settings.screens[settings.active_screen];
+        let (active_sort_key, ascending) = if self.tree_view {
+            if screen.tree_view_always_by_pid {
+                // In tree view with always-by-PID: sort is by PID ascending
+                (ProcessField::Pid, true)
+            } else {
+                // In tree view: use tree_sort_key
+                (screen.tree_sort_key, screen.tree_direction > 0)
+            }
         } else {
-            sort_key
-        };
-
-        // In tree view, sort is always ascending
-        let ascending = if self.tree_view {
-            true
-        } else {
-            !sort_descending
+            // Not in tree view: use regular sort key
+            (sort_key, !sort_descending)
         };
 
         let mut result = String::new();

@@ -59,7 +59,15 @@ pub struct ScreenManager {
     /// Function bar temporarily hidden (for hide_function_bar mode 1)
     /// In mode 1, the bar is hidden on ESC and shown again on any other key
     function_bar_hidden: bool,
+
+    /// Sort timeout counter (like C htop)
+    /// When user presses keys, reset to SORT_TIMEOUT_RESET
+    /// Decrements on idle, sorting only happens when this reaches 0
+    sort_timeout: u8,
 }
+
+/// Number of idle cycles before sorting is allowed after user interaction
+const SORT_TIMEOUT_RESET: u8 = 5;
 
 impl ScreenManager {
     /// Create a new screen manager
@@ -73,6 +81,7 @@ impl ScreenManager {
             paused: false,
             last_update: Instant::now(),
             function_bar_hidden: false,
+            sort_timeout: 0,
         }
     }
 
@@ -399,7 +408,13 @@ impl ScreenManager {
             if !self.settings.all_branches_collapsed {
                 machine.processes.expand_all();
             }
-            machine.processes.build_tree();
+            let screen = &self.settings.screens[self.settings.active_screen];
+            let (sort_key, ascending) = if screen.tree_view_always_by_pid {
+                (ProcessField::Pid, true)
+            } else {
+                (screen.tree_sort_key, screen.tree_direction > 0)
+            };
+            machine.processes.build_tree(sort_key, ascending);
         }
 
         loop {
@@ -423,12 +438,24 @@ impl ScreenManager {
                 machine.update_process_names = self.settings.update_process_names;
                 machine.show_cpu_frequency = self.settings.show_cpu_frequency;
 
+                // Only allow sorting when sort_timeout has elapsed (like C htop)
+                // This defers sorting during rapid user interaction
+                if self.sort_timeout == 0 || self.settings.tree_view {
+                    machine.needs_sort = true;
+                }
+
                 // Perform platform scan to update system state
                 platform::scan(machine);
 
                 // Build tree if in tree view mode
                 if self.settings.tree_view {
-                    machine.processes.build_tree();
+                    let screen = &self.settings.screens[self.settings.active_screen];
+                    let (sort_key, ascending) = if screen.tree_view_always_by_pid {
+                        (ProcessField::Pid, true)
+                    } else {
+                        (screen.tree_sort_key, screen.tree_direction > 0)
+                    };
+                    machine.processes.build_tree(sort_key, ascending);
                 }
 
                 // Update header meters with new data
@@ -463,6 +490,9 @@ impl ScreenManager {
             }
 
             if let Some(key) = key {
+                // User pressed a key - reset sort timeout to defer sorting
+                self.sort_timeout = SORT_TIMEOUT_RESET;
+
                 let result = self.handle_key(key, crt, machine);
 
                 match result {
@@ -473,6 +503,11 @@ impl ScreenManager {
                         self.draw(crt, machine);
                     }
                     _ => {}
+                }
+            } else {
+                // No key pressed (idle) - decrement sort timeout
+                if self.sort_timeout > 0 {
+                    self.sort_timeout -= 1;
                 }
             }
         }
@@ -579,29 +614,62 @@ impl ScreenManager {
             }
             KEY_HEADER_CLICK => {
                 // Handle click on header row - change sort field or invert order
+                // Matches C htop MainPanel_eventHandler header click handling
                 if let Some(event) = crt.last_mouse_event() {
                     if let Some(field) = self.main_panel.field_at_x(event.x) {
-                        // In tree view with treeViewAlwaysByPID, disable tree view first
-                        if self.settings.tree_view && self.settings.tree_view_always_by_pid {
+                        let screen = &mut self.settings.screens[self.settings.active_screen];
+
+                        if screen.tree_view && screen.tree_view_always_by_pid {
+                            // In tree view with treeViewAlwaysByPID: disable tree view first
+                            screen.tree_view = false;
+                            screen.direction = 1;
+                            screen.sort_key = field;
                             self.settings.tree_view = false;
                             self.main_panel.tree_view = false;
-                            machine.sort_descending = false;
-                            self.settings.sort_descending = false;
+                            machine.sort_descending = field.default_sort_desc();
                             machine.sort_key = field;
                             self.settings.sort_key = Some(field);
-                        } else if field == machine.sort_key {
-                            // Clicking on current sort column inverts the order
-                            machine.sort_descending = !machine.sort_descending;
                             self.settings.sort_descending = machine.sort_descending;
+                            machine.request_sort();
+                        } else if screen.tree_view {
+                            // In tree view (not always-by-PID): use tree_sort_key
+                            if field == screen.tree_sort_key {
+                                // Clicking on current tree sort column inverts the order
+                                screen.tree_direction = -screen.tree_direction;
+                                machine.sort_descending = screen.tree_direction < 0;
+                                self.settings.sort_descending = machine.sort_descending;
+                            } else {
+                                // Clicking on different column changes the tree sort field
+                                screen.tree_sort_key = field;
+                                screen.tree_direction = if field.default_sort_desc() { -1 } else { 1 };
+                                machine.sort_key = field;
+                                machine.sort_descending = field.default_sort_desc();
+                                self.settings.sort_key = Some(field);
+                                self.settings.sort_descending = machine.sort_descending;
+                            }
+                            // Rebuild tree with new sort settings
+                            let sort_key = screen.tree_sort_key;
+                            let ascending = screen.tree_direction > 0;
+                            machine.processes.build_tree(sort_key, ascending);
                         } else {
-                            // Clicking on different column changes the sort field
-                            machine.sort_key = field;
-                            self.settings.sort_key = Some(field);
+                            // Not in tree view: use regular sort_key
+                            if field == screen.sort_key {
+                                // Clicking on current sort column inverts the order
+                                screen.direction = -screen.direction;
+                                machine.sort_descending = screen.direction < 0;
+                                self.settings.sort_descending = machine.sort_descending;
+                            } else {
+                                // Clicking on different column changes the sort field
+                                screen.sort_key = field;
+                                screen.direction = if field.default_sort_desc() { -1 } else { 1 };
+                                machine.sort_key = field;
+                                machine.sort_descending = field.default_sort_desc();
+                                self.settings.sort_key = Some(field);
+                                self.settings.sort_descending = machine.sort_descending;
+                            }
+                            machine.request_sort();
                         }
                         self.settings.changed = true;
-                        machine
-                            .processes
-                            .sort(machine.sort_key, machine.sort_descending);
                     }
                 }
                 return HandlerResult::Handled;
@@ -626,7 +694,13 @@ impl ScreenManager {
                 if self.settings.tree_view {
                     if let Some(pid) = self.main_panel.get_selected_pid(machine) {
                         machine.processes.expand_tree(pid);
-                        machine.processes.build_tree();
+                        let screen = &self.settings.screens[self.settings.active_screen];
+                        let (sort_key, ascending) = if screen.tree_view_always_by_pid {
+                            (ProcessField::Pid, true)
+                        } else {
+                            (screen.tree_sort_key, screen.tree_direction > 0)
+                        };
+                        machine.processes.build_tree(sort_key, ascending);
                     }
                 }
                 return HandlerResult::Handled;
@@ -636,7 +710,13 @@ impl ScreenManager {
                 if self.settings.tree_view {
                     if let Some(pid) = self.main_panel.get_selected_pid(machine) {
                         machine.processes.collapse_tree(pid);
-                        machine.processes.build_tree();
+                        let screen = &self.settings.screens[self.settings.active_screen];
+                        let (sort_key, ascending) = if screen.tree_view_always_by_pid {
+                            (ProcessField::Pid, true)
+                        } else {
+                            (screen.tree_sort_key, screen.tree_direction > 0)
+                        };
+                        machine.processes.build_tree(sort_key, ascending);
                     }
                 }
                 return HandlerResult::Handled;
@@ -645,7 +725,13 @@ impl ScreenManager {
                 // '*' - toggle all tree nodes
                 if self.settings.tree_view {
                     machine.processes.toggle_all_tree();
-                    machine.processes.build_tree();
+                    let screen = &self.settings.screens[self.settings.active_screen];
+                    let (sort_key, ascending) = if screen.tree_view_always_by_pid {
+                        (ProcessField::Pid, true)
+                    } else {
+                        (screen.tree_sort_key, screen.tree_direction > 0)
+                    };
+                    machine.processes.build_tree(sort_key, ascending);
                 }
                 return HandlerResult::Handled;
             }
@@ -674,12 +760,21 @@ impl ScreenManager {
             }
             0x49 => {
                 // 'I' - invert sort order
-                machine.sort_descending = !machine.sort_descending;
-                self.settings.sort_descending = machine.sort_descending;
+                let screen = &mut self.settings.screens[self.settings.active_screen];
+                if self.settings.tree_view && !screen.tree_view_always_by_pid {
+                    // In tree view: toggle tree direction and rebuild tree
+                    screen.tree_direction = -screen.tree_direction;
+                    let sort_key = screen.tree_sort_key;
+                    let ascending = screen.tree_direction > 0;
+                    machine.processes.build_tree(sort_key, ascending);
+                } else {
+                    // In list view: toggle sort direction
+                    screen.direction = -screen.direction;
+                    machine.sort_descending = !machine.sort_descending;
+                    self.settings.sort_descending = machine.sort_descending;
+                    machine.request_sort();
+                }
                 self.settings.changed = true;
-                machine
-                    .processes
-                    .sort(machine.sort_key, machine.sort_descending);
                 return HandlerResult::Handled;
             }
             0x4B => {
@@ -692,36 +787,28 @@ impl ScreenManager {
                 // 'M' - sort by MEM%
                 machine.sort_key = ProcessField::PercentMem;
                 machine.sort_descending = true;
-                machine
-                    .processes
-                    .sort(machine.sort_key, machine.sort_descending);
+                machine.request_sort();
                 return HandlerResult::Handled;
             }
             0x4E => {
                 // 'N' - sort by PID
                 machine.sort_key = ProcessField::Pid;
                 machine.sort_descending = false;
-                machine
-                    .processes
-                    .sort(machine.sort_key, machine.sort_descending);
+                machine.request_sort();
                 return HandlerResult::Handled;
             }
             0x50 => {
                 // 'P' - sort by CPU%
                 machine.sort_key = ProcessField::PercentCpu;
                 machine.sort_descending = true;
-                machine
-                    .processes
-                    .sort(machine.sort_key, machine.sort_descending);
+                machine.request_sort();
                 return HandlerResult::Handled;
             }
             0x54 => {
                 // 'T' - sort by TIME
                 machine.sort_key = ProcessField::Time;
                 machine.sort_descending = true;
-                machine
-                    .processes
-                    .sort(machine.sort_key, machine.sort_descending);
+                machine.request_sort();
                 return HandlerResult::Handled;
             }
             0x55 => {
@@ -894,6 +981,10 @@ impl ScreenManager {
         self.settings.tree_view = !self.settings.tree_view;
         self.main_panel.tree_view = self.settings.tree_view;
 
+        // Also update the screen settings to keep them in sync
+        let screen = &mut self.settings.screens[self.settings.active_screen];
+        screen.tree_view = self.settings.tree_view;
+
         if self.settings.tree_view {
             // Entering tree view
             if !self.settings.all_branches_collapsed {
@@ -901,7 +992,13 @@ impl ScreenManager {
                 machine.processes.expand_all();
             }
             // Build the tree structure
-            machine.processes.build_tree();
+            let screen = &self.settings.screens[self.settings.active_screen];
+            let (sort_key, ascending) = if screen.tree_view_always_by_pid {
+                (ProcessField::Pid, true)
+            } else {
+                (screen.tree_sort_key, screen.tree_direction > 0)
+            };
+            machine.processes.build_tree(sort_key, ascending);
         }
 
         // Mark settings as changed for saving
@@ -1363,6 +1460,9 @@ impl ScreenManager {
                 // In tree view (not always-by-PID): update treeSortKey
                 screen.tree_sort_key = field;
                 screen.tree_direction = if field.default_sort_desc() { -1 } else { 1 };
+                // Rebuild tree with new sort settings
+                let ascending = screen.tree_direction > 0;
+                machine.processes.build_tree(field, ascending);
             }
 
             // Also update machine sort settings for immediate effect
@@ -1629,7 +1729,7 @@ impl ScreenManager {
     }
 
     /// Show setup screen
-    fn show_setup(&mut self, crt: &mut Crt, machine: &Machine) {
+    fn show_setup(&mut self, crt: &mut Crt, machine: &mut Machine) {
         let mut setup_screen = super::setup_screen::SetupScreen::new();
         setup_screen.run(&mut self.settings, crt, &mut self.header, machine);
     }

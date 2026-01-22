@@ -936,7 +936,9 @@ impl ProcessList {
 
     /// Build tree structure - sets indent and tree_depth for each process
     /// Also stores the display order in tree_display_order
-    pub fn build_tree(&mut self) {
+    /// sort_key: field to sort sibling processes by
+    /// ascending: if true, sort ascending; if false, sort descending
+    pub fn build_tree(&mut self, sort_key: ProcessField, ascending: bool) {
         // First, mark root processes and set all as visible
         let pids: std::collections::HashSet<i32> = self.processes.iter().map(|p| p.pid).collect();
 
@@ -954,12 +956,15 @@ impl ProcessList {
             process.is_visible = true; // Reset visibility
         }
 
-        // Sort by parent, then by comparison key (roots first)
+        // Sort by parent, then by sort_key (roots first)
         self.processes.sort_by(|a, b| {
             let a_parent = if a.is_root { 0 } else { a.ppid };
             let b_parent = if b.is_root { 0 } else { b.ppid };
             match a_parent.cmp(&b_parent) {
-                std::cmp::Ordering::Equal => a.pid.cmp(&b.pid),
+                std::cmp::Ordering::Equal => {
+                    let cmp = a.compare_by_field(b, sort_key);
+                    if ascending { cmp } else { cmp.reverse() }
+                }
                 other => other,
             }
         });
@@ -989,7 +994,7 @@ impl ProcessList {
             display_list.push(pid);
 
             let show_children = self.processes[idx].show_children;
-            self.build_tree_branch(pid, 0, 0, show_children, &mut display_list);
+            self.build_tree_branch(pid, 0, 0, show_children, sort_key, ascending, &mut display_list);
         }
 
         // If PID 1 is not in our list, handle its children specially
@@ -1027,7 +1032,7 @@ impl ProcessList {
                     // Recursively process children
                     let child_indent = if is_last { 0 } else { next_indent };
                     let child_show = process.show_children;
-                    self.build_tree_branch(*pid, 1, child_indent, child_show, &mut display_list);
+                    self.build_tree_branch(*pid, 1, child_indent, child_show, sort_key, ascending, &mut display_list);
                 }
             }
         }
@@ -1043,10 +1048,12 @@ impl ProcessList {
         level: u32,
         indent: i32,
         show: bool,
+        sort_key: ProcessField,
+        ascending: bool,
         display_list: &mut Vec<i32>,
     ) {
         // Find all children of this parent (matching C htop Row_isChildOf check)
-        let children: Vec<(usize, i32)> = self
+        let mut children: Vec<(usize, i32)> = self
             .processes
             .iter()
             .enumerate()
@@ -1057,6 +1064,16 @@ impl ProcessList {
         if children.is_empty() {
             return;
         }
+
+        // Sort children by the sort key
+        // Since we're sorting children which are already in self.processes,
+        // we need to compare by looking up the processes by index
+        children.sort_by(|(idx_a, _), (idx_b, _)| {
+            let a = &self.processes[*idx_a];
+            let b = &self.processes[*idx_b];
+            let cmp = a.compare_by_field(b, sort_key);
+            if ascending { cmp } else { cmp.reverse() }
+        });
 
         let last_idx = children.len() - 1;
 
@@ -1074,7 +1091,7 @@ impl ProcessList {
             let child_indent = if is_last { indent } else { next_indent };
             let process = &self.processes[*idx];
             let child_show = show && process.show_children;
-            self.build_tree_branch(*pid, level + 1, child_indent, child_show, display_list);
+            self.build_tree_branch(*pid, level + 1, child_indent, child_show, sort_key, ascending, display_list);
 
             // NOW set indent on this process (like C htop lines 131-134)
             let process = &mut self.processes[*idx];
@@ -1238,7 +1255,7 @@ mod tests {
         p5.comm = Some("child2".to_string());
         pl.add(p5);
 
-        pl.build_tree();
+        pl.build_tree(ProcessField::Pid, true);
 
         println!("tree_display_order: {:?}", pl.tree_display_order);
         for pid in &pl.tree_display_order {
@@ -1331,7 +1348,7 @@ mod tests {
         p6000.comm = Some("other".to_string());
         pl.add(p6000);
 
-        pl.build_tree();
+        pl.build_tree(ProcessField::Pid, true);
 
         println!("\nMacOS-like tree:");
         println!("tree_display_order: {:?}", pl.tree_display_order);
@@ -1421,7 +1438,7 @@ mod tests {
         p5269.comm = Some("Slack Helper 2".to_string());
         pl.add(p5269);
 
-        pl.build_tree();
+        pl.build_tree(ProcessField::Pid, true);
 
         println!("\nTree without PID 1:");
         println!("tree_display_order: {:?}", pl.tree_display_order);
