@@ -2497,7 +2497,8 @@ impl ScreenManager {
                     filter_active = true;
                 }
                 x if x == KEY_F5 => {
-                    // F5 - refresh
+                    // F5 - refresh (preserve selected index like C htop)
+                    let saved_selected = selected;
                     let new_data = Self::run_lsof(pid);
                     lines.clear();
                     match new_data {
@@ -2531,8 +2532,9 @@ impl ScreenManager {
                             lines.push(msg);
                         }
                     }
-                    selected = 0;
-                    scroll_v = 0;
+                    // Restore selection, clamped to new list size
+                    let max_idx = (lines.len() as i32 - 1).max(0);
+                    selected = saved_selected.min(max_idx);
                     crt.clear();
                 }
                 12 => {
