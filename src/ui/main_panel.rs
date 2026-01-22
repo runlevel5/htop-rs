@@ -398,6 +398,7 @@ impl MainPanel {
                 settings.highlight_base_name,
                 settings.show_thread_names,
                 settings.show_merged_command,
+                settings.highlight_deleted_exe,
                 is_shadowed,
             );
         }
@@ -432,11 +433,16 @@ impl MainPanel {
         highlight_base_name: bool,
         show_thread_names: bool,
         show_merged_command: bool,
+        highlight_deleted_exe: bool,
         is_shadowed: bool,
     ) {
         let process_color = crt.color(ColorElement::Process);
         let shadow_color = crt.color(ColorElement::ProcessShadow);
         let basename_color = crt.color(ColorElement::ProcessBasename);
+
+        // Colors for deleted exe highlighting (red for deleted exe, yellow for deleted lib)
+        let deleted_exe_color = crt.color(ColorElement::FailedRead);
+        let deleted_lib_color = crt.color(ColorElement::ProcessTag);
 
         // When is_shadowed is true, use shadow_color for all fields that would normally
         // use process_color (matches C htop behavior for shadow_other_users)
@@ -677,6 +683,34 @@ impl MainPanel {
                 // Determine colors based on settings
                 // C htop logic: when highlightThreads is enabled, threads use PROCESS_THREAD
                 // and PROCESS_THREAD_BASENAME colors instead of normal colors
+                //
+                // Deleted exe highlighting (when enabled) overrides basename colors:
+                // - Red (FailedRead) for processes whose executable has been deleted/replaced
+                // - Yellow (ProcessTag) for processes using deleted/replaced libraries
+                let effective_basename_color = if !is_shadowed && highlight_deleted_exe {
+                    if process.exe_deleted {
+                        deleted_exe_color
+                    } else if process.uses_deleted_lib {
+                        deleted_lib_color
+                    } else {
+                        basename_color
+                    }
+                } else {
+                    basename_color
+                };
+
+                let effective_thread_basename_color = if !is_shadowed && highlight_deleted_exe {
+                    if process.exe_deleted {
+                        deleted_exe_color
+                    } else if process.uses_deleted_lib {
+                        deleted_lib_color
+                    } else {
+                        crt.color(ColorElement::ProcessThreadBasename)
+                    }
+                } else {
+                    crt.color(ColorElement::ProcessThreadBasename)
+                };
+
                 if is_shadowed {
                     // Shadow overrides all other coloring for commands
                     str.append(cmd, shadow_color);
@@ -687,7 +721,6 @@ impl MainPanel {
                 } else if process.is_thread() && highlight_threads {
                     // Thread highlighting with basename support (matches C htop)
                     let thread_color = crt.color(ColorElement::ProcessThread);
-                    let thread_basename_color = crt.color(ColorElement::ProcessThreadBasename);
 
                     if highlight_base_name || show_merged_command {
                         // Highlight basename portion with thread basename color
@@ -697,7 +730,7 @@ impl MainPanel {
                                 if pos > 0 {
                                     str.append(&cmd[..pos], thread_color);
                                 }
-                                str.append(basename, thread_basename_color);
+                                str.append(basename, effective_thread_basename_color);
                                 let after = pos + basename.len();
                                 if after < cmd.len() {
                                     str.append(&cmd[after..], thread_color);
@@ -709,13 +742,13 @@ impl MainPanel {
                             // When not showing path, cmd starts with basename
                             let basename = process.get_basename();
                             if cmd.starts_with(basename) {
-                                str.append(basename, thread_basename_color);
+                                str.append(basename, effective_thread_basename_color);
                                 let after = basename.len();
                                 if after < cmd.len() {
                                     str.append(&cmd[after..], thread_color);
                                 }
                             } else {
-                                str.append(cmd, thread_basename_color);
+                                str.append(cmd, effective_thread_basename_color);
                             }
                         }
                     } else {
@@ -731,7 +764,7 @@ impl MainPanel {
                             if pos > 0 {
                                 str.append(&cmd[..pos], base_color);
                             }
-                            str.append(basename, basename_color);
+                            str.append(basename, effective_basename_color);
                             let after = pos + basename.len();
                             if after < cmd.len() {
                                 str.append(&cmd[after..], base_color);
@@ -744,14 +777,14 @@ impl MainPanel {
                         // Highlight the basename portion, then show arguments in normal color
                         let basename = process.get_basename();
                         if cmd.starts_with(basename) {
-                            str.append(basename, basename_color);
+                            str.append(basename, effective_basename_color);
                             let after = basename.len();
                             if after < cmd.len() {
                                 str.append(&cmd[after..], base_color);
                             }
                         } else {
                             // Fallback: just show entire command highlighted
-                            str.append(cmd, basename_color);
+                            str.append(cmd, effective_basename_color);
                         }
                     }
                 } else {

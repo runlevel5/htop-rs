@@ -411,6 +411,14 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
 
+        // Check for deleted libraries by scanning /proc/PID/maps
+        // Only check if exe is not deleted (if exe is deleted, no need to check libs)
+        // and only for non-kernel, non-userland threads
+        // C htop checks this periodically (~2 seconds) but we check on each scan for simplicity
+        if !process.exe_deleted && !process.is_kernel_thread && !process.is_userland_thread {
+            process.uses_deleted_lib = check_deleted_libs(pid);
+        }
+
         // OOM score
         if let Ok(oom) = std::fs::read_to_string(format!("/proc/{}/oom_score", pid)) {
             if let Ok(score) = oom.trim().parse::<i32>() {
@@ -428,6 +436,62 @@ pub fn scan_processes(machine: &mut Machine) {
         process.updated = true;
         machine.processes.add(process);
     }
+}
+
+/// Check if a process uses deleted libraries by scanning /proc/PID/maps
+/// Returns true if any executable memory-mapped file has " (deleted)" suffix
+fn check_deleted_libs(pid: i32) -> bool {
+    use std::io::{BufRead, BufReader};
+
+    let maps_path = format!("/proc/{}/maps", pid);
+    let file = match std::fs::File::open(&maps_path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // Maps format: address perms offset dev inode pathname
+        // Example: 7f1234-7f5678 r-xp 00000000 08:01 12345 /lib/libc.so.6 (deleted)
+        let parts: Vec<&str> = line.splitn(6, char::is_whitespace).collect();
+        if parts.len() < 6 {
+            continue;
+        }
+
+        // Check permissions (2nd field) for execute bit
+        let perms = parts[1];
+        if perms.len() < 3 || perms.chars().nth(2) != Some('x') {
+            continue;
+        }
+
+        // Get the pathname (6th field, may contain spaces)
+        let pathname = parts[5].trim();
+
+        // Skip non-path entries
+        if !pathname.starts_with('/') {
+            continue;
+        }
+
+        // Skip false positives (matches C htop behavior)
+        if pathname.starts_with("/memfd:") {
+            continue;
+        }
+        if pathname == "/dev/zero (deleted)" {
+            continue;
+        }
+
+        // Check for " (deleted)" suffix
+        if pathname.ends_with(" (deleted)") {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Scan CPU frequency from sysfs (preferred method)
