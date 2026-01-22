@@ -321,6 +321,47 @@ impl MainPanel {
         str.write_at_width(y, self.x, self.w as usize);
     }
 
+    /// Build header string for display (used when drawing header separately)
+    pub fn build_header_string(
+        &self,
+        _settings: &Settings,
+        sort_key: ProcessField,
+        sort_descending: bool,
+    ) -> String {
+        // Determine the active sort key - in tree view, it's always PID
+        let active_sort_key = if self.tree_view {
+            ProcessField::Pid
+        } else {
+            sort_key
+        };
+
+        // In tree view, sort is always ascending
+        let ascending = if self.tree_view {
+            true
+        } else {
+            !sort_descending
+        };
+
+        let mut result = String::new();
+
+        for field in &self.fields {
+            let title = field.title();
+            let is_sort_column = *field == active_sort_key;
+
+            // For string version, we just use the title without indicator
+            // (indicators are special characters that need proper rendering)
+            if is_sort_column && title.ends_with(' ') {
+                // Replace trailing space with sort indicator character
+                result.push_str(&title[..title.len() - 1]);
+                result.push(if ascending { '△' } else { '▽' });
+            } else {
+                result.push_str(title);
+            }
+        }
+
+        result
+    }
+
     /// Draw a single process line with C htop-compatible coloring
     fn draw_process(
         &self,

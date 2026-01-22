@@ -2065,6 +2065,7 @@ impl ScreenManager {
     }
 
     /// Show user selection menu (like C htop actionFilterByUser)
+    /// Displays a panel on the left side with the main process list on the right
     fn show_user_menu(&mut self, crt: &Crt, machine: &mut Machine) {
         // Collect unique users from processes
         let mut users: Vec<(u32, String)> = machine
@@ -2079,42 +2080,164 @@ impl ScreenManager {
         let mut menu_items: Vec<(Option<u32>, String)> = vec![(None, "All users".to_string())];
         menu_items.extend(users.into_iter().map(|(uid, name)| (Some(uid), name)));
 
-        crt.clear();
-
-        let bold = crt.color(ColorElement::HelpBold);
+        // Panel styling colors (matching C htop)
+        let panel_header_attr = crt.color(ColorElement::PanelHeaderFocus);
+        let header_unfocus_attr = crt.color(ColorElement::PanelHeaderUnfocus);
+        let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
         let default_attr = crt.color(ColorElement::DefaultColor);
-        let selected_attr = crt.color(ColorElement::PanelSelectionFocus);
+        let func_bar_attr = crt.color(ColorElement::FunctionBar);
+        let func_key_attr = crt.color(ColorElement::FunctionKey);
+        let reset_attr = crt.color(ColorElement::ResetColor);
+
+        // Calculate header height (meters)
+        let meters_height = if self.hide_meters {
+            0
+        } else {
+            self.header.calculate_height()
+        };
+
+        // Screen tabs take 1 line if enabled
+        let screen_tabs_height = if self.settings.screen_tabs { 1 } else { 0 };
+
+        // Panel starts after meters and screen tabs
+        let panel_start_y = meters_height + screen_tabs_height;
+
+        // User panel dimensions (matches C htop's x=19 for user panel)
+        let user_panel_width = 19i32;
+        let user_panel_x = 0i32;
+        let user_panel_header_text = "Show processes of:";
+
+        // Save main panel's original position and resize it for side-by-side display
+        let orig_main_x = self.main_panel.x;
+        let orig_main_w = self.main_panel.w;
+        let orig_main_y = self.main_panel.y;
+        let orig_main_h = self.main_panel.h;
+
+        // Main panel starts after user panel
+        self.main_panel.x = user_panel_width;
+        self.main_panel.w = crt.width() - user_panel_width;
 
         let mut selected = 0usize;
-        let max_visible = (crt.height() - 4) as usize;
+        // Panel height: from panel_start_y to function bar (leave 1 row for function bar)
+        // Subtract 1 more for the panel header row
+        let panel_content_height = (crt.height() - panel_start_y - 1 - 1) as usize;
         let mut scroll = 0usize;
 
         loop {
+            // Clear screen
             crt.clear();
 
-            mv(0, 0);
-            attrset(bold);
-            let _ = addstr("Show processes of:");
-            attrset(A_NORMAL);
+            // === Draw meters at the top ===
+            if !self.hide_meters {
+                self.header.draw(crt, machine, &self.settings);
+            }
 
-            // Draw menu items
-            for (i, (_, name)) in menu_items.iter().enumerate().skip(scroll).take(max_visible) {
-                mv(2 + (i - scroll) as i32, 2);
-                if i == selected {
-                    attrset(selected_attr);
-                    let _ = addstr(&format!(" {} ", name));
-                    attrset(A_NORMAL);
+            // === Draw screen tabs if enabled ===
+            if self.settings.screen_tabs {
+                self.draw_screen_tabs(crt);
+            }
+
+            // === Draw user selection panel on the left ===
+
+            // Draw user panel header
+            mv(panel_start_y, user_panel_x);
+            attrset(panel_header_attr);
+            // Fill header row with spaces, then draw header text
+            for _ in 0..user_panel_width {
+                let _ = addch(' ' as u32);
+            }
+            mv(panel_start_y, user_panel_x);
+            let _ = addstr(user_panel_header_text);
+            attrset(reset_attr);
+
+            // Draw user menu items starting after panel header
+            for i in 0..panel_content_height {
+                let item_idx = scroll + i;
+                let row_y = panel_start_y + 1 + i as i32;
+                mv(row_y, user_panel_x);
+
+                if item_idx < menu_items.len() {
+                    let (_, ref name) = menu_items[item_idx];
+                    let is_selected = item_idx == selected;
+
+                    if is_selected {
+                        attrset(selection_attr);
+                    } else {
+                        attrset(default_attr);
+                    }
+
+                    // Fill line with spaces first
+                    for _ in 0..user_panel_width {
+                        let _ = addch(' ' as u32);
+                    }
+                    // Draw item name (truncate if needed)
+                    mv(row_y, user_panel_x);
+                    let display_name: String =
+                        name.chars().take(user_panel_width as usize).collect();
+                    let _ = addstr(&display_name);
+
+                    attrset(reset_attr);
                 } else {
+                    // Empty row
                     attrset(default_attr);
-                    let _ = addstr(&format!(" {} ", name));
-                    attrset(A_NORMAL);
+                    for _ in 0..user_panel_width {
+                        let _ = addch(' ' as u32);
+                    }
+                    attrset(reset_attr);
                 }
             }
 
+            // === Draw main process panel on the right (unfocused) ===
+
+            // Draw main panel header
+            mv(panel_start_y, user_panel_width);
+            attrset(header_unfocus_attr);
+            // Fill the rest of the header row
+            for _ in user_panel_width..crt.width() {
+                let _ = addch(' ' as u32);
+            }
+            // Draw column headers
+            mv(panel_start_y, user_panel_width);
+            let header_str = self.main_panel.build_header_string(
+                &self.settings,
+                machine.sort_key,
+                machine.sort_descending,
+            );
+            let header_display: String = header_str
+                .chars()
+                .take((crt.width() - user_panel_width) as usize)
+                .collect();
+            let _ = addstr(&header_display);
+            attrset(reset_attr);
+
+            // Draw the main panel content (processes)
+            // Temporarily disable header drawing since we drew it above
+            let orig_show_header = self.main_panel.show_header;
+            self.main_panel.show_header = false;
+            self.main_panel.y = panel_start_y + 1; // Start after our manually drawn header
+            self.main_panel.h = panel_content_height as i32;
+            self.main_panel.draw(crt, machine, &self.settings);
+            self.main_panel.show_header = orig_show_header;
+
+            // === Draw function bar at bottom ===
             mv(crt.height() - 1, 0);
-            attrset(default_attr);
-            let _ = addstr("Enter: Select   Esc: Cancel");
-            attrset(A_NORMAL);
+            attrset(func_bar_attr);
+            // Fill entire bottom row
+            for _ in 0..crt.width() {
+                let _ = addch(' ' as u32);
+            }
+            mv(crt.height() - 1, 0);
+            // Draw "Enter" key
+            attrset(func_key_attr);
+            let _ = addstr("Enter");
+            attrset(func_bar_attr);
+            let _ = addstr("Show   ");
+            // Draw "Esc" key
+            attrset(func_key_attr);
+            let _ = addstr("Esc");
+            attrset(func_bar_attr);
+            let _ = addstr("Cancel ");
+            attrset(reset_attr);
 
             crt.refresh();
 
@@ -2139,22 +2262,42 @@ impl ScreenManager {
                 KEY_DOWN => {
                     if selected < menu_items.len() - 1 {
                         selected += 1;
-                        if selected >= scroll + max_visible {
-                            scroll = selected - max_visible + 1;
+                        if selected >= scroll + panel_content_height {
+                            scroll = selected - panel_content_height + 1;
                         }
                     }
                 }
                 KEY_WHEELUP => {
-                    // Scroll up by 10 (matches C htop CRT_scrollWheelVAmount)
                     let amount = 10usize;
                     selected = selected.saturating_sub(amount);
                     scroll = scroll.saturating_sub(amount);
                 }
                 KEY_WHEELDOWN => {
-                    // Scroll down by 10
                     let amount = 10usize;
                     let max_selected = menu_items.len().saturating_sub(1);
-                    let max_scroll = menu_items.len().saturating_sub(max_visible);
+                    let max_scroll = menu_items.len().saturating_sub(panel_content_height);
+                    selected = (selected + amount).min(max_selected);
+                    scroll = (scroll + amount).min(max_scroll);
+                }
+                KEY_HOME => {
+                    selected = 0;
+                    scroll = 0;
+                }
+                KEY_END => {
+                    selected = menu_items.len().saturating_sub(1);
+                    if selected >= panel_content_height {
+                        scroll = selected - panel_content_height + 1;
+                    }
+                }
+                KEY_PPAGE => {
+                    let amount = panel_content_height.saturating_sub(1);
+                    selected = selected.saturating_sub(amount);
+                    scroll = scroll.saturating_sub(amount);
+                }
+                KEY_NPAGE => {
+                    let amount = panel_content_height.saturating_sub(1);
+                    let max_selected = menu_items.len().saturating_sub(1);
+                    let max_scroll = menu_items.len().saturating_sub(panel_content_height);
                     selected = (selected + amount).min(max_selected);
                     scroll = (scroll + amount).min(max_scroll);
                 }
@@ -2171,6 +2314,14 @@ impl ScreenManager {
             }
         }
 
+        // Restore main panel's original position and size
+        self.main_panel.x = orig_main_x;
+        self.main_panel.w = orig_main_w;
+        self.main_panel.y = orig_main_y;
+        self.main_panel.h = orig_main_h;
+
+        // Clear screen to trigger full redraw when returning to main view
+        crt.clear();
         crt.enable_delay();
     }
 }
