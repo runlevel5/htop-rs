@@ -852,7 +852,7 @@ impl ScreenManager {
 
     /// Switch to a different screen tab
     /// direction: 1 for next, -1 for previous
-    fn switch_screen(&mut self, direction: i32, _machine: &mut Machine) {
+    fn switch_screen(&mut self, direction: i32, machine: &mut Machine) {
         let num_screens = self.settings.screens.len();
         if num_screens <= 1 {
             return;
@@ -876,6 +876,10 @@ impl ScreenManager {
         self.settings.sort_key = Some(screen.sort_key);
         self.settings.sort_descending = screen.direction < 0;
         self.settings.tree_view = screen.tree_view;
+
+        // Update machine sort settings for immediate effect
+        machine.sort_key = screen.sort_key;
+        machine.sort_descending = screen.direction < 0;
 
         // Rebuild labels for the new columns
         let has_filter = self.main_panel.filter.is_some();
@@ -1344,11 +1348,22 @@ impl ScreenManager {
         // Apply the selection
         if let Some(field) = selected_field {
             // Match C htop ScreenSettings_setSortKey behavior:
-            // Setting sort key in tree view exits tree view
-            if self.settings.tree_view {
-                self.settings.tree_view = false;
+            let screen = &mut self.settings.screens[self.settings.active_screen];
+
+            if screen.tree_view_always_by_pid || !screen.tree_view {
+                // Normal sort or tree-always-by-pid: update sortKey and direction
+                screen.sort_key = field;
+                screen.direction = if field.default_sort_desc() { -1 } else { 1 };
+                screen.tree_view = false;
                 self.main_panel.tree_view = false;
+                self.settings.tree_view = false;
+            } else {
+                // In tree view (not always-by-PID): update treeSortKey
+                screen.tree_sort_key = field;
+                screen.tree_direction = if field.default_sort_desc() { -1 } else { 1 };
             }
+
+            // Also update machine sort settings for immediate effect
             machine.sort_key = field;
             machine.sort_descending = field.default_sort_desc();
             self.settings.changed = true;
