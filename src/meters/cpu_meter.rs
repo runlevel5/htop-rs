@@ -212,6 +212,9 @@ impl CpuMeter {
             }
             pos += 1;
         }
+
+        // Reset color at the end
+        attrset(crt.color(ColorElement::ResetColor));
     }
 
     /// Draw a single CPU bar
