@@ -1701,7 +1701,9 @@ impl ScreenManager {
             } else if selected >= scroll_v + panel_height {
                 scroll_v = selected - panel_height + 1;
             }
-            scroll_v = scroll_v.max(0);
+            // Clamp scroll_v to valid range
+            let max_scroll = (filtered_indices.len() as i32 - panel_height).max(0);
+            scroll_v = scroll_v.clamp(0, max_scroll);
 
             // Draw title (like C htop InfoScreen_drawTitled)
             // "Environment of process %d - %s"
@@ -1969,7 +1971,9 @@ impl ScreenManager {
             } else if selected >= scroll_v + panel_height {
                 scroll_v = selected - panel_height + 1;
             }
-            scroll_v = scroll_v.max(0);
+            // Clamp scroll_v to valid range
+            let max_scroll = (filtered_indices.len() as i32 - panel_height).max(0);
+            scroll_v = scroll_v.clamp(0, max_scroll);
 
             // Draw title (like C htop InfoScreen_drawTitled)
             let title_attr = crt.color(ColorElement::MeterText);
@@ -2395,7 +2399,9 @@ impl ScreenManager {
             } else if selected >= scroll_v + panel_height {
                 scroll_v = selected - panel_height + 1;
             }
-            scroll_v = scroll_v.max(0);
+            // Clamp scroll_v to valid range
+            let max_scroll = (filtered_indices.len() as i32 - panel_height).max(0);
+            scroll_v = scroll_v.clamp(0, max_scroll);
 
             // Draw title
             let title_attr = crt.color(ColorElement::MeterText);
@@ -2816,7 +2822,9 @@ impl ScreenManager {
             } else if selected >= scroll_v + panel_height {
                 scroll_v = selected - panel_height + 1;
             }
-            scroll_v = scroll_v.max(0);
+            // Clamp scroll_v to valid range
+            let max_scroll = (lines.len() as i32 - panel_height).max(0);
+            scroll_v = scroll_v.clamp(0, max_scroll);
 
             // Draw title (like C htop InfoScreen_drawTitled)
             let title_attr = crt.color(ColorElement::MeterText);
@@ -2981,7 +2989,9 @@ impl ScreenManager {
             } else if selected >= scroll_v + panel_height {
                 scroll_v = selected - panel_height + 1;
             }
-            scroll_v = scroll_v.max(0);
+            // Clamp scroll_v to valid range
+            let max_scroll = (filtered_indices.len() as i32 - panel_height).max(0);
+            scroll_v = scroll_v.clamp(0, max_scroll);
 
             // Draw title (like C htop InfoScreen_drawTitled)
             let title_attr = crt.color(ColorElement::MeterText);
