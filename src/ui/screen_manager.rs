@@ -9,7 +9,7 @@ use ncurses::CURSOR_VISIBILITY;
 use ncurses::*;
 
 use super::crt::{
-    ColorElement, KEY_F1, KEY_F10, KEY_F2, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9,
+    ColorElement, KEY_F1, KEY_F10, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9,
     KEY_HEADER_CLICK, KEY_SHIFT_TAB, KEY_WHEELDOWN, KEY_WHEELUP,
 };
 use super::function_bar::FunctionBar;
@@ -19,6 +19,19 @@ use super::panel::{HandlerResult, Panel};
 use super::Crt;
 use crate::core::{Machine, ProcessField, Settings};
 use crate::platform;
+
+/// Parsed lsof file entry (from lsof -F output)
+#[derive(Default)]
+struct LsofFileEntry {
+    fd: String,        // File descriptor
+    file_type: String, // File type (REG, DIR, etc.)
+    mode: String,      // Access mode (r/w/u)
+    device: String,    // Device number
+    size: String,      // File size
+    offset: String,    // File offset
+    inode: String,     // Inode number
+    name: String,      // File name/path
+}
 
 /// Screen manager state
 pub struct ScreenManager {
@@ -707,7 +720,13 @@ impl ScreenManager {
                 // 'l' - list open files with lsof
                 if !self.settings.readonly {
                     if let Some(pid) = self.main_panel.get_selected_pid(machine) {
-                        self.show_lsof(crt, pid);
+                        // Get the command name for the title
+                        let command = machine
+                            .processes
+                            .get(pid)
+                            .map(|p| p.get_command().to_string())
+                            .unwrap_or_default();
+                        self.show_lsof(crt, pid, &command);
                     }
                 }
                 return HandlerResult::Redraw;
@@ -1504,55 +1523,495 @@ impl ScreenManager {
         crt.enable_delay();
     }
 
-    /// Show lsof output for process (like C htop actionLsof)
-    fn show_lsof(&self, crt: &Crt, pid: i32) {
-        crt.clear();
+    /// Show lsof output for process (like C htop OpenFilesScreen)
+    fn show_lsof(&self, crt: &Crt, pid: i32, command: &str) {
+        // Parse lsof output using -F (machine-readable format)
+        let lsof_data = Self::run_lsof(pid);
 
-        let bold = crt.color(ColorElement::HelpBold);
-        let default_attr = crt.color(ColorElement::DefaultColor);
+        // Create function bar: Search, Filter, Refresh, Done
+        let _function_bar = FunctionBar::with_functions(vec![
+            ("F3".to_string(), "Search ".to_string()),
+            ("F4".to_string(), "Filter ".to_string()),
+            ("F5".to_string(), "Refresh".to_string()),
+            ("Esc".to_string(), "Done   ".to_string()),
+        ]);
 
-        mv(0, 0);
-        attron(bold);
-        let _ = addstr(&format!("Open files for PID {} (lsof)", pid));
-        attroff(bold);
+        // Build lines from parsed data
+        let mut lines: Vec<String> = Vec::new();
+        let mut col_widths = [5usize, 7, 4, 6, 8, 8, 8]; // FD, TYPE, MODE, DEVICE, SIZE, OFFSET, NODE
 
-        // Run lsof
-        let output = {
-            use std::process::Command;
-            Command::new("lsof")
-                .args(["-p", &pid.to_string()])
-                .output()
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
+        match &lsof_data {
+            Ok(files) => {
+                // Calculate dynamic column widths
+                for file in files {
+                    col_widths[4] = col_widths[4].max(file.size.len());
+                    col_widths[5] = col_widths[5].max(file.offset.len());
+                    col_widths[6] = col_widths[6].max(file.inode.len());
+                }
+
+                // Build formatted lines
+                for file in files {
+                    let line = format!(
+                        "{:>5} {:7} {:4} {:>6} {:>width_s$} {:>width_o$} {:>width_i$}  {}",
+                        file.fd,
+                        file.file_type,
+                        file.mode,
+                        file.device,
+                        file.size,
+                        file.offset,
+                        file.inode,
+                        file.name,
+                        width_s = col_widths[4],
+                        width_o = col_widths[5],
+                        width_i = col_widths[6],
+                    );
+                    lines.push(line);
+                }
+            }
+            Err(msg) => {
+                lines.push(msg.clone());
+            }
+        }
+
+        // Build header with dynamic column widths
+        let header_str = format!(
+            "{:>5} {:7} {:4} {:>6} {:>width_s$} {:>width_o$} {:>width_i$}  {}",
+            "FD",
+            "TYPE",
+            "MODE",
+            "DEVICE",
+            "SIZE",
+            "OFFSET",
+            "NODE",
+            "NAME",
+            width_s = col_widths[4],
+            width_o = col_widths[5],
+            width_i = col_widths[6],
+        );
+
+        // State for the info screen
+        let mut selected = 0i32;
+        let mut scroll_v = 0i32;
+        let mut filter_text = String::new();
+        let mut search_text = String::new();
+        let mut filter_active = false;
+        let mut search_active = false;
+
+        // Get filtered lines
+        let get_filtered_lines = |lines: &[String], filter: &str| -> Vec<usize> {
+            if filter.is_empty() {
+                (0..lines.len()).collect()
+            } else {
+                let filter_lower = filter.to_lowercase();
+                lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, line)| line.to_lowercase().contains(&filter_lower))
+                    .map(|(i, _)| i)
+                    .collect()
+            }
         };
 
-        mv(2, 0);
-        attron(default_attr);
-        if let Some(lsof_out) = output {
-            for (i, line) in lsof_out
-                .lines()
-                .take((crt.height() - 4) as usize)
-                .enumerate()
-            {
-                mv(2 + i as i32, 0);
-                // Truncate long lines
-                let display_line: String = line.chars().take(crt.width() as usize).collect();
-                let _ = addstr(&display_line);
+        loop {
+            let filtered_indices = get_filtered_lines(&lines, &filter_text);
+            let panel_height = crt.height() - 3; // Title + header + function bar
+            let panel_y = 2; // After title and header
+
+            // Clamp selection and scroll
+            let max_selected = (filtered_indices.len() as i32 - 1).max(0);
+            selected = selected.clamp(0, max_selected);
+
+            if selected < scroll_v {
+                scroll_v = selected;
+            } else if selected >= scroll_v + panel_height {
+                scroll_v = selected - panel_height + 1;
             }
-        } else {
-            let _ = addstr("Unable to run lsof. Make sure it's installed.");
+            scroll_v = scroll_v.max(0);
+
+            // Draw title
+            let title_attr = crt.color(ColorElement::MeterText);
+            mv(0, 0);
+            attron(title_attr);
+            let title = format!("Snapshot of files open in process {} - {}", pid, command);
+            let title_display: String = title.chars().take(crt.width() as usize).collect();
+            hline(' ' as u32, crt.width());
+            let _ = addstr(&title_display);
+            attroff(title_attr);
+
+            // Draw header
+            let header_attr = crt.color(ColorElement::PanelHeaderFocus);
+            mv(1, 0);
+            attron(header_attr);
+            hline(' ' as u32, crt.width());
+            let header_display: String = header_str.chars().take(crt.width() as usize).collect();
+            let _ = addstr(&header_display);
+            attroff(header_attr);
+
+            // Draw lines
+            let default_attr = crt.color(ColorElement::DefaultColor);
+            let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
+
+            for row in 0..panel_height {
+                let y = panel_y + row;
+                let line_idx = (scroll_v + row) as usize;
+
+                mv(y, 0);
+
+                if line_idx < filtered_indices.len() {
+                    let actual_idx = filtered_indices[line_idx];
+                    let line = &lines[actual_idx];
+                    let is_selected = (scroll_v + row) == selected;
+
+                    let attr = if is_selected {
+                        selection_attr
+                    } else {
+                        default_attr
+                    };
+                    attron(attr);
+                    hline(' ' as u32, crt.width());
+                    let display_line: String = line.chars().take(crt.width() as usize).collect();
+                    let _ = addstr(&display_line);
+                    attroff(attr);
+                } else {
+                    attron(default_attr);
+                    hline(' ' as u32, crt.width());
+                    attroff(default_attr);
+                }
+            }
+
+            // Draw function bar or search/filter bar
+            let fb_y = crt.height() - 1;
+            mv(fb_y, 0);
+
+            if search_active || filter_active {
+                let bar_attr = crt.color(ColorElement::FunctionBar);
+                let key_attr = crt.color(ColorElement::FunctionKey);
+                attron(bar_attr);
+                hline(' ' as u32, crt.width());
+                attroff(bar_attr);
+                mv(fb_y, 0);
+
+                if search_active {
+                    attron(key_attr);
+                    let _ = addstr("Search: ");
+                    attroff(key_attr);
+                    attron(bar_attr);
+                    let _ = addstr(&search_text);
+                    attroff(bar_attr);
+                } else {
+                    attron(key_attr);
+                    let _ = addstr("Filter: ");
+                    attroff(key_attr);
+                    attron(bar_attr);
+                    let _ = addstr(&filter_text);
+                    attroff(bar_attr);
+                }
+            } else {
+                // Update F4 label based on filter state
+                let f4_label = if filter_text.is_empty() {
+                    "Filter "
+                } else {
+                    "FILTER "
+                };
+                let fb = FunctionBar::with_functions(vec![
+                    ("F3".to_string(), "Search ".to_string()),
+                    ("F4".to_string(), f4_label.to_string()),
+                    ("F5".to_string(), "Refresh".to_string()),
+                    ("Esc".to_string(), "Done   ".to_string()),
+                ]);
+                fb.draw_simple(crt, fb_y);
+            }
+
+            crt.refresh();
+
+            // Handle input
+            nodelay(stdscr(), false);
+            let ch = getch();
+
+            if search_active || filter_active {
+                match ch {
+                    27 => {
+                        // Escape - cancel search/filter
+                        if search_active {
+                            search_text.clear();
+                        }
+                        search_active = false;
+                        filter_active = false;
+                    }
+                    10 | KEY_ENTER => {
+                        // Enter - confirm and exit mode
+                        search_active = false;
+                        filter_active = false;
+                    }
+                    KEY_BACKSPACE | 127 | 8 => {
+                        if search_active && !search_text.is_empty() {
+                            search_text.pop();
+                        } else if filter_active && !filter_text.is_empty() {
+                            filter_text.pop();
+                        }
+                    }
+                    _ if ch >= 32 && ch < 127 => {
+                        // Printable character
+                        let c = char::from_u32(ch as u32).unwrap_or(' ');
+                        if search_active {
+                            search_text.push(c);
+                            // Incremental search - find next match
+                            let search_lower = search_text.to_lowercase();
+                            for (i, idx) in filtered_indices.iter().enumerate() {
+                                if lines[*idx].to_lowercase().contains(&search_lower) {
+                                    selected = i as i32;
+                                    break;
+                                }
+                            }
+                        } else if filter_active {
+                            filter_text.push(c);
+                            selected = 0;
+                            scroll_v = 0;
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            match ch {
+                27 => {
+                    // Escape - exit
+                    break;
+                }
+                x if x == KEY_F10 => {
+                    // F10 - exit
+                    break;
+                }
+                113 => {
+                    // 'q' - exit
+                    break;
+                }
+                x if x == KEY_F3 || x == 47 => {
+                    // F3 or '/' - search
+                    search_active = true;
+                    search_text.clear();
+                }
+                x if x == KEY_F4 || x == 92 => {
+                    // F4 or '\' - filter
+                    filter_active = true;
+                }
+                x if x == KEY_F5 => {
+                    // F5 - refresh
+                    let new_data = Self::run_lsof(pid);
+                    lines.clear();
+                    match new_data {
+                        Ok(files) => {
+                            // Recalculate column widths
+                            col_widths = [5, 7, 4, 6, 8, 8, 8];
+                            for file in &files {
+                                col_widths[4] = col_widths[4].max(file.size.len());
+                                col_widths[5] = col_widths[5].max(file.offset.len());
+                                col_widths[6] = col_widths[6].max(file.inode.len());
+                            }
+                            for file in files {
+                                let line = format!(
+                                    "{:>5} {:7} {:4} {:>6} {:>width_s$} {:>width_o$} {:>width_i$}  {}",
+                                    file.fd,
+                                    file.file_type,
+                                    file.mode,
+                                    file.device,
+                                    file.size,
+                                    file.offset,
+                                    file.inode,
+                                    file.name,
+                                    width_s = col_widths[4],
+                                    width_o = col_widths[5],
+                                    width_i = col_widths[6],
+                                );
+                                lines.push(line);
+                            }
+                        }
+                        Err(msg) => {
+                            lines.push(msg);
+                        }
+                    }
+                    selected = 0;
+                    scroll_v = 0;
+                    crt.clear();
+                }
+                12 => {
+                    // Ctrl+L - redraw
+                    crt.clear();
+                }
+                KEY_UP => {
+                    selected = (selected - 1).max(0);
+                }
+                KEY_DOWN => {
+                    selected = (selected + 1).min(max_selected);
+                }
+                KEY_PPAGE => {
+                    selected = (selected - panel_height).max(0);
+                }
+                KEY_NPAGE => {
+                    selected = (selected + panel_height).min(max_selected);
+                }
+                KEY_HOME => {
+                    selected = 0;
+                }
+                KEY_END => {
+                    selected = max_selected;
+                }
+                KEY_WHEELUP => {
+                    selected = (selected - 3).max(0);
+                }
+                KEY_WHEELDOWN => {
+                    selected = (selected + 3).min(max_selected);
+                }
+                _ => {}
+            }
         }
-        attroff(default_attr);
 
-        mv(crt.height() - 1, 0);
-        attron(bold);
-        let _ = addstr("Press any key to return.");
-        attroff(bold);
-
-        crt.refresh();
-        nodelay(stdscr(), false);
-        getch();
         crt.enable_delay();
+    }
+
+    /// Run lsof and parse output into structured data
+    fn run_lsof(pid: i32) -> Result<Vec<LsofFileEntry>, String> {
+        use std::process::Command;
+
+        // Run lsof with -F flag for machine-readable output
+        // -P: inhibit conversion of port numbers to port names
+        // -o: always print file offset
+        // -F: produce output suitable for processing
+        let output = Command::new("lsof")
+            .args(["-P", "-o", "-p", &pid.to_string(), "-F"])
+            .output();
+
+        let output = match output {
+            Ok(o) => o,
+            Err(_) => {
+                return Err(
+                    "Could not execute 'lsof'. Please make sure it is available in your $PATH."
+                        .to_string(),
+                )
+            }
+        };
+
+        if !output.status.success() {
+            let code = output.status.code().unwrap_or(1);
+            if code == 127 {
+                return Err(
+                    "Could not execute 'lsof'. Please make sure it is available in your $PATH."
+                        .to_string(),
+                );
+            }
+            return Err("Failed listing open files.".to_string());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // Parse lsof -F output format
+        // Fields are prefixed with a single character:
+        // f = file descriptor
+        // a = access mode (r/w/u)
+        // t = type
+        // D = device
+        // s = size
+        // o = offset
+        // i = inode
+        // n = name
+
+        let mut files: Vec<LsofFileEntry> = Vec::new();
+        let mut current_file: Option<LsofFileEntry> = None;
+        let mut has_size_field = false;
+
+        for line in stdout.lines() {
+            if line.is_empty() {
+                continue;
+            }
+
+            let cmd = line.chars().next().unwrap_or(' ');
+            let value = &line[1..];
+
+            match cmd {
+                'f' => {
+                    // New file entry - save previous if exists
+                    if let Some(file) = current_file.take() {
+                        files.push(file);
+                    }
+                    current_file = Some(LsofFileEntry {
+                        fd: value.to_string(),
+                        ..Default::default()
+                    });
+                }
+                'a' => {
+                    if let Some(ref mut file) = current_file {
+                        file.mode = value.to_string();
+                    }
+                }
+                't' => {
+                    if let Some(ref mut file) = current_file {
+                        file.file_type = value.to_string();
+                    }
+                }
+                'D' => {
+                    if let Some(ref mut file) = current_file {
+                        file.device = value.to_string();
+                    }
+                }
+                's' => {
+                    if let Some(ref mut file) = current_file {
+                        file.size = value.to_string();
+                        has_size_field = true;
+                    }
+                }
+                'o' => {
+                    if let Some(ref mut file) = current_file {
+                        // Remove "0t" prefix if present
+                        let offset = if value.starts_with("0t") {
+                            &value[2..]
+                        } else {
+                            value
+                        };
+                        file.offset = offset.to_string();
+                    }
+                }
+                'i' => {
+                    if let Some(ref mut file) = current_file {
+                        file.inode = value.to_string();
+                    }
+                }
+                'n' => {
+                    if let Some(ref mut file) = current_file {
+                        file.name = value.to_string();
+                    }
+                }
+                // Ignore other fields (p, c, u, g, R, etc.)
+                _ => {}
+            }
+        }
+
+        // Save last file
+        if let Some(file) = current_file {
+            files.push(file);
+        }
+
+        // On Linux, lsof -o -F omits SIZE, so get it from stat() if needed
+        #[cfg(target_os = "linux")]
+        if !has_size_field {
+            for file in &mut files {
+                if file.size.is_empty() {
+                    if let Ok(metadata) = std::fs::metadata(&file.name) {
+                        file.size = metadata.len().to_string();
+                    }
+                }
+            }
+        }
+
+        // Suppress unused variable warning on non-Linux
+        #[cfg(not(target_os = "linux"))]
+        let _ = has_size_field;
+
+        if files.is_empty() {
+            return Err("No open files found.".to_string());
+        }
+
+        Ok(files)
     }
 
     /// Show strace/dtruss output for process (like C htop actionStrace)
