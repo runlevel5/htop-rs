@@ -266,11 +266,12 @@ impl ScreenSettings {
                 ProcessField::Pid,
                 ProcessField::User,
                 ProcessField::IOPriority,
+                ProcessField::IORate,
                 ProcessField::IOReadRate,
                 ProcessField::IOWriteRate,
                 ProcessField::Command,
             ],
-            sort_key: ProcessField::IOReadRate,
+            sort_key: ProcessField::IORate,
             tree_sort_key: ProcessField::Pid,
             direction: -1, // descending
             tree_direction: 1,

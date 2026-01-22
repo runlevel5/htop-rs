@@ -6,7 +6,9 @@ use super::crt::{ColorElement, KEY_DEL_MAC, KEY_F10, KEY_F15, KEY_F3, KEY_F4};
 use super::function_bar::FunctionBar;
 use super::panel::HandlerResult;
 use super::rich_string::RichString;
-use super::row_print::{print_kbytes, print_left_aligned, print_percentage, print_time};
+use super::row_print::{
+    print_kbytes, print_left_aligned, print_percentage, print_rate, print_time,
+};
 use super::Crt;
 use crate::core::{Machine, Process, ProcessField, ProcessState, Settings};
 use ncurses::*;
@@ -704,6 +706,31 @@ impl MainPanel {
                     process_color
                 };
                 print_left_aligned(str, attr, tty, 8);
+            }
+            ProcessField::IOPriority => {
+                // IO priority: show "?" for now (needs ioprio syscall)
+                str.append("?? ", shadow_color);
+            }
+            ProcessField::IORate => {
+                // Total I/O rate (read + write combined)
+                let total_rate = process.io_read_rate + process.io_write_rate;
+                print_rate(str, total_rate, coloring && !is_shadowed, crt);
+            }
+            ProcessField::IOReadRate => {
+                // I/O read rate in bytes per second
+                print_rate(str, process.io_read_rate, coloring && !is_shadowed, crt);
+            }
+            ProcessField::IOWriteRate => {
+                // I/O write rate in bytes per second
+                print_rate(str, process.io_write_rate, coloring && !is_shadowed, crt);
+            }
+            ProcessField::IORead => {
+                // Total bytes read
+                print_kbytes(str, process.io_read_bytes, coloring && !is_shadowed, crt);
+            }
+            ProcessField::IOWrite => {
+                // Total bytes written
+                print_kbytes(str, process.io_write_bytes, coloring && !is_shadowed, crt);
             }
             _ => {
                 // Default: show placeholder

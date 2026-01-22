@@ -281,3 +281,88 @@ pub fn print_right_aligned_int(str: &mut RichString, attr: attr_t, value: i64, w
 pub fn print_right_aligned_uint(str: &mut RichString, attr: attr_t, value: u64, width: usize) {
     str.append(&format!("{:>width$} ", value, width = width), attr);
 }
+
+/// Unit sizes for rate formatting (1024-based)
+const ONE_K: f64 = 1024.0;
+const ONE_M: f64 = ONE_K * ONE_K;
+const ONE_G: f64 = ONE_M * ONE_K;
+const ONE_T: f64 = ONE_G * ONE_K;
+const ONE_P: f64 = ONE_T * ONE_K;
+
+/// Format I/O rate in bytes per second with appropriate unit prefix and coloring
+/// Matches C htop's Row_printRate exactly (12 columns width: "%7.2f X/s ")
+///
+/// Colors by magnitude:
+/// - < 0.005 or invalid: PROCESS_SHADOW
+/// - < 1K: PROCESS (B/s)
+/// - < 1M: PROCESS (K/s)
+/// - < 1G: PROCESS_MEGABYTES (M/s)
+/// - >= 1G: LARGE_NUMBER (G/s, T/s, P/s)
+pub fn print_rate(str: &mut RichString, rate: f64, coloring: bool, crt: &Crt) {
+    let process_color = crt.color(ColorElement::Process);
+    let megabytes_color = crt.color(ColorElement::ProcessMegabytes);
+    let large_number_color = crt.color(ColorElement::LargeNumber);
+    let shadow_color = crt.color(ColorElement::ProcessShadow);
+
+    // Handle invalid/negative values
+    if !rate.is_finite() || rate < 0.0 {
+        str.append("        N/A ", shadow_color);
+        return;
+    }
+
+    // Choose color based on magnitude (when coloring is enabled)
+    let (formatted, color) = if rate < 0.005 {
+        // Very small rate - shadow
+        (format!("{:>7.2} B/s ", rate), shadow_color)
+    } else if rate < ONE_K {
+        // Bytes per second
+        let c = if coloring {
+            process_color
+        } else {
+            process_color
+        };
+        (format!("{:>7.2} B/s ", rate), c)
+    } else if rate < ONE_M {
+        // Kilobytes per second
+        let c = if coloring {
+            process_color
+        } else {
+            process_color
+        };
+        (format!("{:>7.2} K/s ", rate / ONE_K), c)
+    } else if rate < ONE_G {
+        // Megabytes per second
+        let c = if coloring {
+            megabytes_color
+        } else {
+            process_color
+        };
+        (format!("{:>7.2} M/s ", rate / ONE_M), c)
+    } else if rate < ONE_T {
+        // Gigabytes per second
+        let c = if coloring {
+            large_number_color
+        } else {
+            process_color
+        };
+        (format!("{:>7.2} G/s ", rate / ONE_G), c)
+    } else if rate < ONE_P {
+        // Terabytes per second
+        let c = if coloring {
+            large_number_color
+        } else {
+            process_color
+        };
+        (format!("{:>7.2} T/s ", rate / ONE_T), c)
+    } else {
+        // Petabytes per second
+        let c = if coloring {
+            large_number_color
+        } else {
+            process_color
+        };
+        (format!("{:>7.2} P/s ", rate / ONE_P), c)
+    };
+
+    str.append(&formatted, color);
+}

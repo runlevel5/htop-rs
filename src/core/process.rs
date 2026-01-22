@@ -121,6 +121,7 @@ pub enum ProcessField {
     IOPriority,
     IORead,
     IOWrite,
+    IORate,
     IOReadRate,
     IOWriteRate,
     IOReadOps,
@@ -207,10 +208,11 @@ impl ProcessField {
             ProcessField::PercentCpu => "PERCENT_CPU",
             ProcessField::PercentMem => "PERCENT_MEM",
             ProcessField::IOPriority => "IO_PRIORITY",
-            ProcessField::IORead => "IO_READ_RATE",
-            ProcessField::IOWrite => "IO_WRITE_RATE",
-            ProcessField::IOReadRate => "IO_RATE",
-            ProcessField::IOWriteRate => "IO_RATE",
+            ProcessField::IORead => "RBYTES",
+            ProcessField::IOWrite => "WBYTES",
+            ProcessField::IORate => "IO_RATE",
+            ProcessField::IOReadRate => "IO_READ_RATE",
+            ProcessField::IOWriteRate => "IO_WRITE_RATE",
             ProcessField::IOReadOps => "IO_OPS",
             ProcessField::IOWriteOps => "IO_OPS",
             ProcessField::Ctxt => "CTXT",
@@ -257,8 +259,9 @@ impl ProcessField {
             ProcessField::PercentCpu => " CPU% ",
             ProcessField::PercentMem => "MEM% ",
             ProcessField::IOPriority => "IO ",
-            ProcessField::IORead => " IO_RD ",
-            ProcessField::IOWrite => " IO_WR ",
+            ProcessField::IORead => "  IO_R ",
+            ProcessField::IOWrite => "  IO_W ",
+            ProcessField::IORate => "  DISK R/W ",
             ProcessField::IOReadRate => " DISK READ ",
             ProcessField::IOWriteRate => "DISK WRITE ",
             ProcessField::IOReadOps => " IO_ROP ",
@@ -309,10 +312,11 @@ impl ProcessField {
             ProcessField::PercentCpu => "Percentage of CPU time",
             ProcessField::PercentMem => "Percentage of resident memory",
             ProcessField::IOPriority => "I/O priority",
-            ProcessField::IORead => "Bytes read",
-            ProcessField::IOWrite => "Bytes written",
-            ProcessField::IOReadRate => "Read bytes per second",
-            ProcessField::IOWriteRate => "Write bytes per second",
+            ProcessField::IORead => "Bytes of read(2) I/O for the process",
+            ProcessField::IOWrite => "Bytes of write(2) I/O for the process",
+            ProcessField::IORate => "Total I/O rate in bytes per second",
+            ProcessField::IOReadRate => "The I/O rate of read(2) in bytes per second",
+            ProcessField::IOWriteRate => "The I/O rate of write(2) in bytes per second",
             ProcessField::IOReadOps => "Read operations",
             ProcessField::IOWriteOps => "Write operations",
             ProcessField::Ctxt => "Context switches",
@@ -359,6 +363,10 @@ impl ProcessField {
             "CWD" => Some(ProcessField::Cwd),
             "CPU%" | "PERCENT_CPU" => Some(ProcessField::PercentCpu),
             "MEM%" | "PERCENT_MEM" => Some(ProcessField::PercentMem),
+            "IO_RATE" => Some(ProcessField::IORate),
+            "IO_READ_RATE" => Some(ProcessField::IOReadRate),
+            "IO_WRITE_RATE" => Some(ProcessField::IOWriteRate),
+            "IO_PRIORITY" => Some(ProcessField::IOPriority),
             _ => None,
         }
     }
@@ -376,6 +384,7 @@ impl ProcessField {
                 | ProcessField::Majflt
                 | ProcessField::IORead
                 | ProcessField::IOWrite
+                | ProcessField::IORate
                 | ProcessField::IOReadRate
                 | ProcessField::IOWriteRate
         )
