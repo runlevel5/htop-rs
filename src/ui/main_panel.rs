@@ -651,12 +651,49 @@ impl MainPanel {
                 }
 
                 // Determine colors based on settings
+                // C htop logic: when highlightThreads is enabled, threads use PROCESS_THREAD
+                // and PROCESS_THREAD_BASENAME colors instead of normal colors
                 if is_shadowed {
                     // Shadow overrides all other coloring for commands
                     str.append(cmd, shadow_color);
                 } else if process.is_thread() && highlight_threads {
-                    // Thread highlighting (only if enabled)
-                    str.append(cmd, crt.color(ColorElement::ProcessThread));
+                    // Thread highlighting with basename support (matches C htop)
+                    let thread_color = crt.color(ColorElement::ProcessThread);
+                    let thread_basename_color = crt.color(ColorElement::ProcessThreadBasename);
+
+                    if highlight_base_name || show_merged_command {
+                        // Highlight basename portion with thread basename color
+                        if show_program_path {
+                            let basename = process.get_basename();
+                            if let Some(pos) = cmd.find(basename) {
+                                if pos > 0 {
+                                    str.append(&cmd[..pos], thread_color);
+                                }
+                                str.append(basename, thread_basename_color);
+                                let after = pos + basename.len();
+                                if after < cmd.len() {
+                                    str.append(&cmd[after..], thread_color);
+                                }
+                            } else {
+                                str.append(cmd, thread_color);
+                            }
+                        } else {
+                            // When not showing path, cmd starts with basename
+                            let basename = process.get_basename();
+                            if cmd.starts_with(basename) {
+                                str.append(basename, thread_basename_color);
+                                let after = basename.len();
+                                if after < cmd.len() {
+                                    str.append(&cmd[after..], thread_color);
+                                }
+                            } else {
+                                str.append(cmd, thread_basename_color);
+                            }
+                        }
+                    } else {
+                        // No basename highlighting, just use thread color
+                        str.append(cmd, thread_color);
+                    }
                 } else if highlight_base_name || show_merged_command {
                     // Basename highlighting (enabled explicitly or via merged command mode)
                     if show_program_path {
