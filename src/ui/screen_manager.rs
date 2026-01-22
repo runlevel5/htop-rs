@@ -737,6 +737,12 @@ impl ScreenManager {
                 }
                 return HandlerResult::Redraw;
             }
+            0x6D => {
+                // 'm' - toggle merged command (like C htop actionToggleMergedCommand)
+                self.settings.show_merged_command = !self.settings.show_merged_command;
+                self.settings.changed = true;
+                return HandlerResult::Handled;
+            }
             0x70 => {
                 // 'p' - Toggle program path (like C htop actionToggleProgramPath)
                 self.settings.show_program_path = !self.settings.show_program_path;
@@ -1378,6 +1384,7 @@ impl ScreenManager {
             ("   F4 \\: ", "incremental name filtering", false),
             ("   F5 t: ", "tree view", false),
             ("      p: ", "toggle program path", false),
+            ("      m: ", "toggle merged command", false),
             ("      Z: ", "pause/resume process updates", false),
             ("      u: ", "show processes of a single user", false),
             ("      H: ", "hide/show user process threads", false),

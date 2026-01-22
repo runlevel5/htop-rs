@@ -395,6 +395,7 @@ impl MainPanel {
                 settings.highlight_threads,
                 settings.highlight_base_name,
                 settings.show_thread_names,
+                settings.show_merged_command,
                 is_shadowed,
             );
         }
@@ -422,6 +423,7 @@ impl MainPanel {
         highlight_threads: bool,
         highlight_base_name: bool,
         show_thread_names: bool,
+        show_merged_command: bool,
         is_shadowed: bool,
     ) {
         let process_color = crt.color(ColorElement::Process);
@@ -550,10 +552,19 @@ impl MainPanel {
                 // (basename + arguments), matching C htop behavior
                 //
                 // Settings that affect command display:
+                // - show_merged_command: prefix with comm (in magenta) if it differs from basename
                 // - show_thread_names: for threads, show thread's own name instead of parent command
                 // - highlight_threads: use ProcessThread color for threads
                 // - highlight_base_name: highlight the basename portion
                 // - is_shadowed: use shadow_color for other users' processes
+
+                // Get comm color (magenta for processes, thread variant for threads)
+                let comm_color = if process.is_thread() {
+                    crt.color(ColorElement::ProcessThreadComm)
+                } else {
+                    crt.color(ColorElement::ProcessComm)
+                };
+                let separator_color = crt.color(ColorElement::FailedRead);
 
                 // Determine the command text to display
                 let cmd = if show_thread_names && process.is_thread() {
@@ -610,6 +621,27 @@ impl MainPanel {
                     str.append(" ", tree_attr);
                 }
 
+                // Check if we should show merged command prefix (comm differs from basename)
+                // This matches C htop's behavior: when showMergedCommand is enabled and comm
+                // differs from the cmdline basename, prefix with "comm│"
+                let mut show_comm_prefix = false;
+                if show_merged_command && !is_shadowed {
+                    if let Some(ref comm) = process.comm {
+                        let basename = process.get_basename();
+                        // TASK_COMM_LEN is 16 in Linux, so comm is truncated to 15 chars
+                        // Compare up to the shorter of comm length or 15 chars
+                        let cmp_len = comm.len().min(15);
+                        if !basename.starts_with(&comm[..cmp_len])
+                            && basename.get(..cmp_len) != Some(&comm[..cmp_len])
+                        {
+                            // comm differs from basename - show it as prefix
+                            show_comm_prefix = true;
+                            str.append(comm, comm_color);
+                            str.append(crt.tree_str.vert, separator_color);
+                        }
+                    }
+                }
+
                 // Determine colors based on settings
                 if is_shadowed {
                     // Shadow overrides all other coloring for commands
@@ -617,8 +649,8 @@ impl MainPanel {
                 } else if process.is_thread() && highlight_threads {
                     // Thread highlighting (only if enabled)
                     str.append(cmd, crt.color(ColorElement::ProcessThread));
-                } else if highlight_base_name {
-                    // Basename highlighting (only if enabled)
+                } else if highlight_base_name || show_merged_command {
+                    // Basename highlighting (enabled explicitly or via merged command mode)
                     if show_program_path {
                         // Highlight basename portion when showing full path
                         let basename = process.get_basename();
@@ -654,6 +686,9 @@ impl MainPanel {
                     str.append(cmd, base_color);
                 }
                 str.append_char(' ', base_color);
+
+                // Suppress unused variable warning when comm prefix logic doesn't use it
+                let _ = show_comm_prefix;
             }
             ProcessField::Tty => {
                 let tty = process.tty_name.as_deref().unwrap_or("?");
