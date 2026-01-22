@@ -13,6 +13,56 @@ use super::Crt;
 use crate::core::{Machine, Process, ProcessField, ProcessState, Settings};
 use ncurses::*;
 
+/// Distribution path prefixes to shadow (matches C htop Process.c CHECK_AND_MARK_DIST_PATH_PREFIXES)
+/// These are common system paths that clutter the command display
+const DIST_PATH_PREFIXES: &[&str] = &[
+    "/bin/",
+    "/lib/",
+    "/lib32/",
+    "/lib64/",
+    "/libx32/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/lib/",
+    "/usr/lib32/",
+    "/usr/lib64/",
+    "/usr/libx32/",
+    "/usr/libexec/",
+    "/usr/sbin/",
+    "/usr/local/bin/",
+    "/usr/local/lib/",
+    "/usr/local/sbin/",
+    "/nix/store/",
+    "/run/current-system/",
+];
+
+/// Check if a path starts with a distribution path prefix and return the prefix length
+/// Returns Some(prefix_len) if matched, None otherwise
+fn get_dist_path_prefix_len(path: &str) -> Option<usize> {
+    // Quick check: must start with '/'
+    if !path.starts_with('/') {
+        return None;
+    }
+
+    // Check against known prefixes
+    for prefix in DIST_PATH_PREFIXES {
+        if path.starts_with(prefix) {
+            return Some(prefix.len());
+        }
+    }
+
+    // Special case for NixOS store paths: /nix/store/<hash>-<name>/
+    // The hash is 32 chars, so we need to find the next '/' after the package name
+    if path.starts_with("/nix/store/") {
+        // Find the end of the store path (after the package directory)
+        if let Some(pos) = path["/nix/store/".len()..].find('/') {
+            return Some("/nix/store/".len() + pos + 1);
+        }
+    }
+
+    None
+}
+
 /// Incremental mode type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncType {
@@ -399,6 +449,7 @@ impl MainPanel {
                 settings.show_thread_names,
                 settings.show_merged_command,
                 settings.highlight_deleted_exe,
+                settings.shadow_dist_path_prefix,
                 is_shadowed,
             );
         }
@@ -434,6 +485,7 @@ impl MainPanel {
         show_thread_names: bool,
         show_merged_command: bool,
         highlight_deleted_exe: bool,
+        shadow_dist_path_prefix: bool,
         is_shadowed: bool,
     ) {
         let process_color = crt.color(ColorElement::Process);
@@ -727,8 +779,25 @@ impl MainPanel {
                         if show_program_path {
                             let basename = process.get_basename();
                             if let Some(pos) = cmd.find(basename) {
+                                // Check for distribution path prefix to shadow
+                                let dist_prefix_len = if shadow_dist_path_prefix {
+                                    get_dist_path_prefix_len(cmd)
+                                } else {
+                                    None
+                                };
+
                                 if pos > 0 {
-                                    str.append(&cmd[..pos], thread_color);
+                                    if let Some(prefix_len) = dist_prefix_len {
+                                        // Shadow the dist path prefix, then normal color for rest of path
+                                        if prefix_len <= pos {
+                                            str.append(&cmd[..prefix_len], shadow_color);
+                                            str.append(&cmd[prefix_len..pos], thread_color);
+                                        } else {
+                                            str.append(&cmd[..pos], shadow_color);
+                                        }
+                                    } else {
+                                        str.append(&cmd[..pos], thread_color);
+                                    }
                                 }
                                 str.append(basename, effective_thread_basename_color);
                                 let after = pos + basename.len();
@@ -761,8 +830,25 @@ impl MainPanel {
                         // Highlight basename portion when showing full path
                         let basename = process.get_basename();
                         if let Some(pos) = cmd.find(basename) {
+                            // Check for distribution path prefix to shadow
+                            let dist_prefix_len = if shadow_dist_path_prefix {
+                                get_dist_path_prefix_len(cmd)
+                            } else {
+                                None
+                            };
+
                             if pos > 0 {
-                                str.append(&cmd[..pos], base_color);
+                                if let Some(prefix_len) = dist_prefix_len {
+                                    // Shadow the dist path prefix, then normal color for rest of path
+                                    if prefix_len <= pos {
+                                        str.append(&cmd[..prefix_len], shadow_color);
+                                        str.append(&cmd[prefix_len..pos], base_color);
+                                    } else {
+                                        str.append(&cmd[..pos], shadow_color);
+                                    }
+                                } else {
+                                    str.append(&cmd[..pos], base_color);
+                                }
                             }
                             str.append(basename, effective_basename_color);
                             let after = pos + basename.len();
@@ -786,6 +872,14 @@ impl MainPanel {
                             // Fallback: just show entire command highlighted
                             str.append(cmd, effective_basename_color);
                         }
+                    }
+                } else if show_program_path && shadow_dist_path_prefix {
+                    // No basename highlighting, but shadow dist path prefix
+                    if let Some(prefix_len) = get_dist_path_prefix_len(cmd) {
+                        str.append(&cmd[..prefix_len], shadow_color);
+                        str.append(&cmd[prefix_len..], base_color);
+                    } else {
+                        str.append(cmd, base_color);
                     }
                 } else {
                     // No special highlighting, use base color
