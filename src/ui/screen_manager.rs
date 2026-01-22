@@ -120,7 +120,7 @@ impl ScreenManager {
         self.main_panel.resize(width, panel_height);
     }
 
-    /// Draw screen tabs (like "[Main]" above the process panel)
+    /// Draw screen tabs (like "[Main] [I/O]" above the process panel)
     fn draw_screen_tabs(&self, crt: &Crt) {
         const SCREEN_TAB_MARGIN_LEFT: i32 = 2;
 
@@ -140,38 +140,63 @@ impl ScreenManager {
             return;
         }
 
-        // Get current screen heading
-        let heading = &self.settings.current_screen().heading;
+        // Colors for current and other tabs
+        let cur_border_attr = crt.color(ColorElement::ScreensCurBorder);
+        let cur_text_attr = crt.color(ColorElement::ScreensCurText);
+        let other_border_attr = crt.color(ColorElement::ScreensOthBorder);
+        let other_text_attr = crt.color(ColorElement::ScreensOthText);
 
-        // Draw the tab: [heading]
-        // Border color
-        let border_attr = crt.color(ColorElement::ScreensCurBorder);
-        let text_attr = crt.color(ColorElement::ScreensCurText);
+        // Draw all tabs
+        for (i, screen) in self.settings.screens.iter().enumerate() {
+            let is_current = i == self.settings.active_screen;
+            let heading = &screen.heading;
 
-        // Draw '[' - matches C htop: just set attr and draw, no reset between chars
-        attrset(border_attr);
-        mvaddch(y, x, '[' as u32);
-        x += 1;
+            let border_attr = if is_current {
+                cur_border_attr
+            } else {
+                other_border_attr
+            };
+            let text_attr = if is_current {
+                cur_text_attr
+            } else {
+                other_text_attr
+            };
 
-        if x >= max_x {
-            attrset(reset_color);
-            return;
+            // Draw '['
+            attrset(border_attr);
+            mvaddch(y, x, '[' as u32);
+            x += 1;
+
+            if x >= max_x {
+                attrset(reset_color);
+                return;
+            }
+
+            // Draw heading text
+            let name_width = heading.len().min((max_x - x) as usize);
+            attrset(text_attr);
+            let _ = mvaddnstr(y, x, heading, name_width as i32);
+            x += name_width as i32;
+
+            if x >= max_x {
+                attrset(reset_color);
+                return;
+            }
+
+            // Draw ']'
+            attrset(border_attr);
+            mvaddch(y, x, ']' as u32);
+            x += 1;
+
+            // Space between tabs
+            if i < self.settings.screens.len() - 1 {
+                x += 1;
+            }
+
+            if x >= max_x {
+                break;
+            }
         }
-
-        // Draw heading text
-        let name_width = heading.len().min((max_x - x) as usize);
-        attrset(text_attr);
-        let _ = mvaddnstr(y, x, heading, name_width as i32);
-        x += name_width as i32;
-
-        if x >= max_x {
-            attrset(reset_color);
-            return;
-        }
-
-        // Draw ']'
-        attrset(border_attr);
-        mvaddch(y, x, ']' as u32);
 
         // Only reset at the very end (matches C htop)
         attrset(reset_color);
@@ -803,13 +828,13 @@ impl ScreenManager {
             }
             0x09 => {
                 // Tab - switch to next screen tab
-                // Visual only for now - we only have one screen
-                return HandlerResult::Handled;
+                self.switch_screen(1, machine);
+                return HandlerResult::Redraw;
             }
             KEY_SHIFT_TAB => {
                 // Shift-Tab - switch to previous screen tab
-                // Visual only for now - we only have one screen
-                return HandlerResult::Handled;
+                self.switch_screen(-1, machine);
+                return HandlerResult::Redraw;
             }
             0x30..=0x39 => {
                 // '0'-'9' - incremental PID search
@@ -823,6 +848,38 @@ impl ScreenManager {
         let result = self.main_panel.on_key(key, machine);
 
         result
+    }
+
+    /// Switch to a different screen tab
+    /// direction: 1 for next, -1 for previous
+    fn switch_screen(&mut self, direction: i32, _machine: &mut Machine) {
+        let num_screens = self.settings.screens.len();
+        if num_screens <= 1 {
+            return;
+        }
+
+        let current = self.settings.active_screen as i32;
+        let new_screen = if direction > 0 {
+            ((current + 1) % num_screens as i32) as usize
+        } else {
+            ((current - 1 + num_screens as i32) % num_screens as i32) as usize
+        };
+
+        self.settings.active_screen = new_screen;
+
+        // Update main panel with new screen's fields
+        let screen = &self.settings.screens[new_screen];
+        self.main_panel.fields = screen.fields.clone();
+        self.main_panel.tree_view = screen.tree_view;
+
+        // Update global sort settings from the screen
+        self.settings.sort_key = Some(screen.sort_key);
+        self.settings.sort_descending = screen.direction < 0;
+        self.settings.tree_view = screen.tree_view;
+
+        // Rebuild labels for the new columns
+        let has_filter = self.main_panel.filter.is_some();
+        self.main_panel.update_labels(screen.tree_view, has_filter);
     }
 
     /// Toggle tree view - matches C htop actionToggleTreeView behavior

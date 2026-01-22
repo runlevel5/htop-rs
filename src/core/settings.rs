@@ -228,8 +228,9 @@ pub struct ScreenSettings {
     pub all_branches_collapsed: bool,
 }
 
-impl Default for ScreenSettings {
-    fn default() -> Self {
+impl ScreenSettings {
+    /// Create the default "Main" screen
+    pub fn main_screen() -> Self {
         ScreenSettings {
             heading: "Main".to_string(),
             fields: vec![
@@ -254,6 +255,54 @@ impl Default for ScreenSettings {
             tree_view_always_by_pid: false,
             all_branches_collapsed: false,
         }
+    }
+
+    /// Create the "I/O" screen (like C htop)
+    #[cfg(target_os = "linux")]
+    pub fn io_screen() -> Self {
+        ScreenSettings {
+            heading: "I/O".to_string(),
+            fields: vec![
+                ProcessField::Pid,
+                ProcessField::User,
+                ProcessField::IOPriority,
+                ProcessField::IOReadRate,
+                ProcessField::IOWriteRate,
+                ProcessField::Command,
+            ],
+            sort_key: ProcessField::IOReadRate,
+            tree_sort_key: ProcessField::Pid,
+            direction: -1, // descending
+            tree_direction: 1,
+            tree_view: false,
+            tree_view_always_by_pid: false,
+            all_branches_collapsed: false,
+        }
+    }
+
+    /// On non-Linux platforms, I/O screen is not available
+    #[cfg(not(target_os = "linux"))]
+    pub fn io_screen() -> Self {
+        // Return Main screen as fallback on non-Linux
+        Self::main_screen()
+    }
+
+    /// Get default screens for the platform
+    pub fn default_screens() -> Vec<Self> {
+        #[cfg(target_os = "linux")]
+        {
+            vec![Self::main_screen(), Self::io_screen()]
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            vec![Self::main_screen()]
+        }
+    }
+}
+
+impl Default for ScreenSettings {
+    fn default() -> Self {
+        Self::main_screen()
     }
 }
 
@@ -375,7 +424,7 @@ impl Settings {
             readonly: false,
             header_layout: HeaderLayout::TwoColumns5050,
             header_columns: vec![default_meters_left, default_meters_right],
-            screens: vec![ScreenSettings::default()],
+            screens: ScreenSettings::default_screens(),
             active_screen: 0,
             color_scheme: ColorScheme::Default,
             delay: 15, // 1.5 seconds
