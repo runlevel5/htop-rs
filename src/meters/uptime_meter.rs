@@ -77,13 +77,11 @@ impl Meter for UptimeMeter {
         let value_attr = crt.color(ColorElement::Uptime);
 
         mv(y, x);
-        attron(caption_attr);
+        attrset(caption_attr);
         let _ = addstr("Uptime: ");
-        attroff(caption_attr);
 
-        attron(value_attr);
+        attrset(value_attr);
         let _ = addstr(&self.format_uptime());
-        attroff(value_attr);
     }
 
     fn mode(&self) -> MeterMode {

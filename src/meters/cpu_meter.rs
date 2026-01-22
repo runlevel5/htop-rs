@@ -2,6 +2,7 @@
 
 use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
+use crate::ui::bar_meter_char;
 use crate::ui::ColorElement;
 use crate::ui::Crt;
 
@@ -131,9 +132,8 @@ impl CpuMeter {
         // Draw caption (exactly 3 chars)
         let caption_attr = crt.color(ColorElement::MeterText);
         mv(y, x);
-        attron(caption_attr);
+        attrset(caption_attr);
         let _ = addstr(&format!("{:>3}", caption));
-        attroff(caption_attr);
 
         // Bar area starts after caption
         let bar_x = x + 3;
@@ -145,10 +145,9 @@ impl CpuMeter {
 
         // Draw brackets
         let bracket_attr = crt.color(ColorElement::BarBorder);
-        attron(bracket_attr);
+        attrset(bracket_attr);
         mvaddch(y, bar_x, '[' as u32);
         mvaddch(y, bar_x + bar_width - 1, ']' as u32);
-        attroff(bracket_attr);
 
         // Inner bar width (between brackets)
         let inner_width = (bar_width - 2) as usize;
@@ -186,24 +185,24 @@ impl CpuMeter {
         // Draw the bar content with text overlaid
         mv(y, bar_x + 1);
         let mut pos = 0;
-        for (chars, color) in &bar_chars {
+        for (idx, (chars, color)) in bar_chars.iter().enumerate() {
             let attr = crt.color(*color);
-            attron(attr);
+            attrset(attr);
+            let bar_ch = bar_meter_char(crt.color_scheme, idx);
             for _ in 0..*chars {
                 if !text.is_empty() && pos >= padding && pos - padding < text_len {
-                    let ch = text.chars().nth(pos - padding).unwrap_or('|');
+                    let ch = text.chars().nth(pos - padding).unwrap_or(bar_ch);
                     addch(ch as u32);
                 } else {
-                    addch('|' as u32);
+                    addch(bar_ch as u32);
                 }
                 pos += 1;
             }
-            attroff(attr);
         }
 
         // Fill remaining with shadow (and text if extends into shadow)
         let shadow_attr = crt.color(ColorElement::BarShadow);
-        attron(shadow_attr);
+        attrset(shadow_attr);
         while pos < inner_width {
             if !text.is_empty() && pos >= padding && pos - padding < text_len {
                 let ch = text.chars().nth(pos - padding).unwrap_or(' ');
@@ -213,7 +212,6 @@ impl CpuMeter {
             }
             pos += 1;
         }
-        attroff(shadow_attr);
     }
 
     /// Draw a single CPU bar

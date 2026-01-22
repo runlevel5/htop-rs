@@ -58,24 +58,20 @@ impl Meter for LoadAverageMeter {
         mv(y, x);
 
         // "Load average: "
-        attron(caption_attr);
+        attrset(caption_attr);
         let _ = addstr("Load average: ");
-        attroff(caption_attr);
 
         // 1-minute load (with trailing space)
-        attron(load1_attr);
+        attrset(load1_attr);
         let _ = addstr(&format!("{:.2} ", self.load1));
-        attroff(load1_attr);
 
         // 5-minute load (with trailing space)
-        attron(load5_attr);
+        attrset(load5_attr);
         let _ = addstr(&format!("{:.2} ", self.load5));
-        attroff(load5_attr);
 
         // 15-minute load (with trailing space like C htop)
-        attron(load15_attr);
+        attrset(load15_attr);
         let _ = addstr(&format!("{:.2} ", self.load15));
-        attroff(load15_attr);
     }
 
     fn mode(&self) -> MeterMode {

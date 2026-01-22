@@ -190,22 +190,19 @@ impl Meter for BatteryMeter {
                     let value_attr = crt.color(ColorElement::MeterValueError);
 
                     mv(y, x);
-                    attron(caption_attr);
+                    attrset(caption_attr);
                     let _ = addstr("BAT");
-                    attroff(caption_attr);
 
-                    attron(value_attr);
+                    attrset(value_attr);
                     let _ = addstr(" N/A");
-                    attroff(value_attr);
                     return;
                 }
 
                 // Draw caption
                 let caption_attr = crt.color(ColorElement::MeterText);
                 mv(y, x);
-                attron(caption_attr);
+                attrset(caption_attr);
                 let _ = addstr("BAT");
-                attroff(caption_attr);
 
                 // Determine bar color based on percentage
                 let bar_color = if self.percent > 50.0 {
@@ -232,9 +229,8 @@ impl Meter for BatteryMeter {
                 if text_x > x + 4 {
                     let value_attr = crt.color(ColorElement::MeterValue);
                     mv(y, text_x);
-                    attron(value_attr);
+                    attrset(value_attr);
                     let _ = addstr(&text);
-                    attroff(value_attr);
                 }
             }
             _ => {
@@ -247,13 +243,11 @@ impl Meter for BatteryMeter {
                 };
 
                 mv(y, x);
-                attron(caption_attr);
+                attrset(caption_attr);
                 let _ = addstr("Battery: ");
-                attroff(caption_attr);
 
-                attron(value_attr);
+                attrset(value_attr);
                 let _ = addstr(&self.format_battery());
-                attroff(value_attr);
             }
         }
     }

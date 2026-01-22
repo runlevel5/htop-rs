@@ -138,23 +138,22 @@ impl MeterType {
 
 /// Draw a bar meter
 pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], total: f64) {
-    use crate::ui::ColorElement;
+    use crate::ui::{bar_meter_char, ColorElement};
     use ncurses::*;
 
     let bar_width = (width - 2) as usize; // Account for [ and ]
 
     // Draw brackets
     let bracket_attr = crt.color(ColorElement::BarBorder);
-    attron(bracket_attr);
+    attrset(bracket_attr);
     mvaddch(y, x, '[' as u32);
     mvaddch(y, x + width - 1, ']' as u32);
-    attroff(bracket_attr);
 
     // Calculate bar content
     let mut bar_pos = 0;
     mv(y, x + 1);
 
-    for (value, color) in values {
+    for (idx, (value, color)) in values.iter().enumerate() {
         let attr = crt.colors[*color as usize];
         let bar_chars = if total > 0.0 {
             ((value / total) * bar_width as f64).round() as usize
@@ -162,12 +161,12 @@ pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], to
             0
         };
 
-        attron(attr);
+        attrset(attr);
+        let bar_ch = bar_meter_char(crt.color_scheme, idx);
         for _ in 0..bar_chars.min(bar_width - bar_pos) {
-            addch('|' as u32);
+            addch(bar_ch as u32);
             bar_pos += 1;
         }
-        attroff(attr);
 
         if bar_pos >= bar_width {
             break;
@@ -176,12 +175,11 @@ pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], to
 
     // Fill remaining with shadow
     let shadow_attr = crt.color(ColorElement::MeterShadow);
-    attron(shadow_attr);
+    attrset(shadow_attr);
     while bar_pos < bar_width {
         addch(' ' as u32);
         bar_pos += 1;
     }
-    attroff(shadow_attr);
 }
 
 /// Draw a text meter
@@ -193,11 +191,9 @@ pub fn draw_text(crt: &Crt, x: i32, y: i32, caption: &str, text: &str) {
     let value_attr = crt.color(ColorElement::MeterValue);
 
     mv(y, x);
-    attron(caption_attr);
+    attrset(caption_attr);
     let _ = addstr(caption);
-    attroff(caption_attr);
 
-    attron(value_attr);
+    attrset(value_attr);
     let _ = addstr(text);
-    attroff(value_attr);
 }

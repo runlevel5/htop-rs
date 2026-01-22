@@ -127,6 +127,14 @@ impl ScreenManager {
         let y = self.main_panel.y - 1;
         let mut x = SCREEN_TAB_MARGIN_LEFT;
         let max_x = crt.width();
+        let reset_color = crt.color(ColorElement::ResetColor);
+
+        // Fill the entire tab row with the reset color background first
+        attrset(reset_color);
+        mv(y, 0);
+        for _ in 0..max_x {
+            addch(' ' as u32);
+        }
 
         if x >= max_x {
             return;
@@ -140,35 +148,33 @@ impl ScreenManager {
         let border_attr = crt.color(ColorElement::ScreensCurBorder);
         let text_attr = crt.color(ColorElement::ScreensCurText);
 
-        // Draw '['
-        attron(border_attr);
+        // Draw '[' - matches C htop: just set attr and draw, no reset between chars
+        attrset(border_attr);
         mvaddch(y, x, '[' as u32);
-        attroff(border_attr);
         x += 1;
 
         if x >= max_x {
-            attrset(crt.color(ColorElement::ResetColor));
+            attrset(reset_color);
             return;
         }
 
         // Draw heading text
         let name_width = heading.len().min((max_x - x) as usize);
-        attron(text_attr);
+        attrset(text_attr);
         let _ = mvaddnstr(y, x, heading, name_width as i32);
-        attroff(text_attr);
         x += name_width as i32;
 
         if x >= max_x {
-            attrset(crt.color(ColorElement::ResetColor));
+            attrset(reset_color);
             return;
         }
 
         // Draw ']'
-        attron(border_attr);
+        attrset(border_attr);
         mvaddch(y, x, ']' as u32);
-        attroff(border_attr);
 
-        attrset(crt.color(ColorElement::ResetColor));
+        // Only reset at the very end (matches C htop)
+        attrset(reset_color);
     }
 
     /// Draw the incremental search/filter bar at the bottom of the screen
@@ -180,11 +186,11 @@ impl ScreenManager {
 
         // Fill the entire line with function bar color first
         mv(y, 0);
-        attron(bar_color);
+        attrset(bar_color);
         for _ in 0..width {
             addch(' ' as u32);
         }
-        attroff(bar_color);
+        attrset(A_NORMAL);
 
         // Move back to start of line
         mv(y, 0);
@@ -192,39 +198,39 @@ impl ScreenManager {
         if self.main_panel.inc_search.is_filter() {
             // Filter mode: "Enter" "Done  " "Esc" "Clear " "  " " Filter: " [text]
             // Draw "Enter" key
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("Enter");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw "Done  " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr("Done  ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw "Esc" key
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("Esc");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw "Clear " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr("Clear ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw "  " spacer (acts as visual separator)
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("  ");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw " Filter: " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr(" Filter: ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw the filter text
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr(&self.main_panel.inc_search.text);
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Show cursor
             curs_set(CURSOR_VISIBILITY::CURSOR_VISIBLE);
@@ -238,49 +244,49 @@ impl ScreenManager {
             };
 
             // Draw "F3" key
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("F3");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw "Next  " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr("Next  ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw "S-F3" key (Shift-F3)
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("S-F3");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw "Prev   " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr("Prev   ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw "Esc" key
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("Esc");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw "Cancel " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr("Cancel ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw "  " spacer
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr("  ");
-            attroff(key_color);
+            attrset(A_NORMAL);
 
             // Draw " Search: " label
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr(" Search: ");
-            attroff(bar_color);
+            attrset(A_NORMAL);
 
             // Draw the search text (with failed search color if not found)
-            attron(text_attr);
+            attrset(text_attr);
             let _ = addstr(&self.main_panel.inc_search.text);
-            attroff(text_attr);
+            attrset(A_NORMAL);
 
             // Show cursor
             curs_set(CURSOR_VISIBILITY::CURSOR_VISIBLE);
@@ -1217,7 +1223,7 @@ impl ScreenManager {
         let bar_shadow = crt.color(ColorElement::BarShadow);
 
         // Fill screen with HELP_BOLD background (like C htop)
-        attron(bold);
+        attrset(bold);
         for i in 0..crt.height() - 1 {
             mv(i, 0);
             for _ in 0..crt.width() {
@@ -1228,7 +1234,7 @@ impl ScreenManager {
         let mut line = 0;
 
         // Title
-        attron(bold);
+        attrset(bold);
         mvaddstr(
             line,
             0,
@@ -1474,9 +1480,9 @@ impl ScreenManager {
         let default_attr = crt.color(ColorElement::DefaultColor);
 
         mv(0, 0);
-        attron(bold);
+        attrset(bold);
         let _ = addstr(&format!("Environment for PID {}", pid));
-        attroff(bold);
+        attrset(A_NORMAL);
 
         // Read environment from /proc on Linux, or use ps on macOS
         #[cfg(target_os = "macos")]
@@ -1501,7 +1507,7 @@ impl ScreenManager {
         let env_output: Option<String> = None;
 
         mv(2, 0);
-        attron(default_attr);
+        attrset(default_attr);
         if let Some(env) = env_output {
             for (i, line) in env.lines().take((crt.height() - 4) as usize).enumerate() {
                 mv(2 + i as i32, 0);
@@ -1510,12 +1516,12 @@ impl ScreenManager {
         } else {
             let _ = addstr("Unable to read process environment.");
         }
-        attroff(default_attr);
+        attrset(A_NORMAL);
 
         mv(crt.height() - 1, 0);
-        attron(bold);
+        attrset(bold);
         let _ = addstr("Press any key to return.");
-        attroff(bold);
+        attrset(A_NORMAL);
 
         crt.refresh();
         nodelay(stdscr(), false);
@@ -1631,21 +1637,21 @@ impl ScreenManager {
             // Draw title
             let title_attr = crt.color(ColorElement::MeterText);
             mv(0, 0);
-            attron(title_attr);
+            attrset(title_attr);
             let title = format!("Snapshot of files open in process {} - {}", pid, command);
             let title_display: String = title.chars().take(crt.width() as usize).collect();
             hline(' ' as u32, crt.width());
             let _ = addstr(&title_display);
-            attroff(title_attr);
+            attrset(A_NORMAL);
 
             // Draw header
             let header_attr = crt.color(ColorElement::PanelHeaderFocus);
             mv(1, 0);
-            attron(header_attr);
+            attrset(header_attr);
             hline(' ' as u32, crt.width());
             let header_display: String = header_str.chars().take(crt.width() as usize).collect();
             let _ = addstr(&header_display);
-            attroff(header_attr);
+            attrset(A_NORMAL);
 
             // Draw lines
             let default_attr = crt.color(ColorElement::DefaultColor);
@@ -1667,15 +1673,15 @@ impl ScreenManager {
                     } else {
                         default_attr
                     };
-                    attron(attr);
+                    attrset(attr);
                     hline(' ' as u32, crt.width());
                     let display_line: String = line.chars().take(crt.width() as usize).collect();
                     let _ = addstr(&display_line);
-                    attroff(attr);
+                    attrset(A_NORMAL);
                 } else {
-                    attron(default_attr);
+                    attrset(default_attr);
                     hline(' ' as u32, crt.width());
-                    attroff(default_attr);
+                    attrset(A_NORMAL);
                 }
             }
 
@@ -1686,25 +1692,25 @@ impl ScreenManager {
             if search_active || filter_active {
                 let bar_attr = crt.color(ColorElement::FunctionBar);
                 let key_attr = crt.color(ColorElement::FunctionKey);
-                attron(bar_attr);
+                attrset(bar_attr);
                 hline(' ' as u32, crt.width());
-                attroff(bar_attr);
+                attrset(A_NORMAL);
                 mv(fb_y, 0);
 
                 if search_active {
-                    attron(key_attr);
+                    attrset(key_attr);
                     let _ = addstr("Search: ");
-                    attroff(key_attr);
-                    attron(bar_attr);
+                    attrset(A_NORMAL);
+                    attrset(bar_attr);
                     let _ = addstr(&search_text);
-                    attroff(bar_attr);
+                    attrset(A_NORMAL);
                 } else {
-                    attron(key_attr);
+                    attrset(key_attr);
                     let _ = addstr("Filter: ");
-                    attroff(key_attr);
-                    attron(bar_attr);
+                    attrset(A_NORMAL);
+                    attrset(bar_attr);
                     let _ = addstr(&filter_text);
-                    attroff(bar_attr);
+                    attrset(A_NORMAL);
                 }
             } else {
                 // Update F4 label based on filter state
@@ -2022,7 +2028,7 @@ impl ScreenManager {
         let default_attr = crt.color(ColorElement::DefaultColor);
 
         mv(0, 0);
-        attron(bold);
+        attrset(bold);
         #[cfg(target_os = "macos")]
         let _ = addstr(&format!(
             "System calls for PID {} (dtruss - requires sudo)",
@@ -2030,10 +2036,10 @@ impl ScreenManager {
         ));
         #[cfg(not(target_os = "macos"))]
         let _ = addstr(&format!("System calls for PID {} (strace)", pid));
-        attroff(bold);
+        attrset(A_NORMAL);
 
         mv(2, 0);
-        attron(default_attr);
+        attrset(default_attr);
         #[cfg(target_os = "macos")]
         let _ = addstr("Run manually: sudo dtruss -p ");
         #[cfg(target_os = "linux")]
@@ -2045,12 +2051,12 @@ impl ScreenManager {
 
         mv(4, 0);
         let _ = addstr("(Interactive tracing requires running htop with elevated privileges)");
-        attroff(default_attr);
+        attrset(A_NORMAL);
 
         mv(crt.height() - 1, 0);
-        attron(bold);
+        attrset(bold);
         let _ = addstr("Press any key to return.");
-        attroff(bold);
+        attrset(A_NORMAL);
 
         crt.refresh();
         nodelay(stdscr(), false);
@@ -2087,28 +2093,28 @@ impl ScreenManager {
             crt.clear();
 
             mv(0, 0);
-            attron(bold);
+            attrset(bold);
             let _ = addstr("Show processes of:");
-            attroff(bold);
+            attrset(A_NORMAL);
 
             // Draw menu items
             for (i, (_, name)) in menu_items.iter().enumerate().skip(scroll).take(max_visible) {
                 mv(2 + (i - scroll) as i32, 2);
                 if i == selected {
-                    attron(selected_attr);
+                    attrset(selected_attr);
                     let _ = addstr(&format!(" {} ", name));
-                    attroff(selected_attr);
+                    attrset(A_NORMAL);
                 } else {
-                    attron(default_attr);
+                    attrset(default_attr);
                     let _ = addstr(&format!(" {} ", name));
-                    attroff(default_attr);
+                    attrset(A_NORMAL);
                 }
             }
 
             mv(crt.height() - 1, 0);
-            attron(default_attr);
+            attrset(default_attr);
             let _ = addstr("Enter: Select   Esc: Cancel");
-            attroff(default_attr);
+            attrset(A_NORMAL);
 
             crt.refresh();
 

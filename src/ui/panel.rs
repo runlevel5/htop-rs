@@ -279,21 +279,20 @@ impl Panel {
 
         // Fill header line
         mv(self.y, self.x);
-        attron(attr);
+        attrset(attr);
         for _ in 0..self.w {
             addch(' ' as u32);
         }
-        attroff(attr);
 
         // Draw header text
         if !self.header.is_empty() {
             mv(self.y, self.x);
-            attron(attr);
+            attrset(attr);
             let text = self.header.text();
             let display_text: String = text.chars().take(self.w as usize).collect();
             let _ = addstr(&display_text);
-            attroff(attr);
         }
+        attrset(A_NORMAL);
     }
 
     /// Draw the panel
@@ -328,7 +327,7 @@ impl Panel {
                 self.items[item_index].display(&mut buffer, is_selected);
 
                 // Draw with selection highlighting
-                attron(attr);
+                attrset(attr);
                 let text = buffer.text();
                 let display_text: String = text.chars().take(self.w as usize).collect();
                 let _ = addstr(&display_text);
@@ -338,7 +337,7 @@ impl Panel {
                 for _ in 0..padding {
                     addch(' ' as u32);
                 }
-                attroff(attr);
+                attrset(A_NORMAL);
             } else {
                 // Empty line
                 for _ in 0..self.w {

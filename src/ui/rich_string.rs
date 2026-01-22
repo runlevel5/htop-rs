@@ -101,6 +101,14 @@ impl RichString {
         }
     }
 
+    /// Set the attribute for ALL characters (matches C htop's RichString_setAttr)
+    /// This is used for selection highlighting to override all per-character colors
+    pub fn set_all_attr(&mut self, attr: attr_t) {
+        for rc in &mut self.chars {
+            rc.attr = attr;
+        }
+    }
+
     /// Get the plain text content
     pub fn text(&self) -> String {
         self.chars.iter().map(|rc| rc.ch).collect()
@@ -132,13 +140,12 @@ impl RichString {
         let mut current_attr = A_NORMAL;
 
         mv(y, x);
-        attron(current_attr);
+        attrset(current_attr);
 
         for rc in &self.chars {
             if rc.attr != current_attr {
-                attroff(current_attr);
                 current_attr = rc.attr;
-                attron(current_attr);
+                attrset(current_attr);
             }
             // Use addstr for proper Unicode support
             let mut buf = [0u8; 4];
@@ -146,14 +153,16 @@ impl RichString {
             let _ = addstr(s);
         }
 
-        attroff(current_attr);
+        attrset(A_NORMAL);
     }
 
     /// Write the string with truncation/padding to fit a width
     pub fn write_at_width(&self, y: i32, x: i32, width: usize) {
         mv(y, x);
+
+        // Use attrset instead of attron for proper color handling
         let mut current_attr = A_NORMAL;
-        attron(current_attr);
+        attrset(current_attr);
 
         let mut written = 0;
         for rc in &self.chars {
@@ -161,9 +170,36 @@ impl RichString {
                 break;
             }
             if rc.attr != current_attr {
-                attroff(current_attr);
                 current_attr = rc.attr;
-                attron(current_attr);
+                attrset(current_attr);
+            }
+            // Use addstr for proper Unicode support
+            let mut buf = [0u8; 4];
+            let s = rc.ch.encode_utf8(&mut buf);
+            let _ = addstr(s);
+            written += 1;
+        }
+
+        // Pad with spaces if needed (keep current_attr for background)
+        while written < width {
+            addch(' ' as u32);
+            written += 1;
+        }
+
+        attrset(A_NORMAL);
+    }
+
+    /// Write the string with a single override attribute for all characters
+    /// This is used for selection highlighting (matches C htop's behavior)
+    /// where RichString_setAttr overrides all per-character attributes
+    pub fn write_at_width_with_attr(&self, y: i32, x: i32, width: usize, attr: attr_t) {
+        mv(y, x);
+        attrset(attr);
+
+        let mut written = 0;
+        for rc in &self.chars {
+            if written >= width {
+                break;
             }
             // Use addstr for proper Unicode support
             let mut buf = [0u8; 4];
@@ -178,29 +214,26 @@ impl RichString {
             written += 1;
         }
 
-        attroff(current_attr);
+        attrset(A_NORMAL);
     }
 
     /// Draw the string at position with width, preserving per-character attributes
     /// This is similar to write_at_width but doesn't use a default attribute
     pub fn draw_at(&self, y: i32, x: i32, width: i32) {
         mv(y, x);
-        let mut current_attr: attr_t = 0;
-        let mut first = true;
+        let mut current_attr: attr_t = A_NORMAL;
         let width = width as usize;
+
+        attrset(current_attr);
 
         let mut written = 0;
         for rc in &self.chars {
             if written >= width {
                 break;
             }
-            if first || rc.attr != current_attr {
-                if !first {
-                    attroff(current_attr);
-                }
+            if rc.attr != current_attr {
                 current_attr = rc.attr;
-                attron(current_attr);
-                first = false;
+                attrset(current_attr);
             }
             // Use addstr for proper Unicode support
             let mut buf = [0u8; 4];
@@ -209,10 +242,8 @@ impl RichString {
             written += 1;
         }
 
-        // Pad with spaces if needed (using last attribute or normal)
-        if !first {
-            attroff(current_attr);
-        }
+        // Pad with spaces if needed (using normal attribute)
+        attrset(A_NORMAL);
         while written < width {
             addch(' ' as u32);
             written += 1;

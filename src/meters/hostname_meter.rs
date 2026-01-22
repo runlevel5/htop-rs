@@ -48,13 +48,11 @@ impl Meter for HostnameMeter {
         let value_attr = crt.color(ColorElement::Hostname);
 
         mv(y, x);
-        attron(caption_attr);
+        attrset(caption_attr);
         let _ = addstr("Hostname: ");
-        attroff(caption_attr);
 
-        attron(value_attr);
+        attrset(value_attr);
         let _ = addstr(&self.hostname);
-        attroff(value_attr);
     }
 
     fn mode(&self) -> MeterMode {

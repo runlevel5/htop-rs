@@ -281,11 +281,11 @@ impl MainPanel {
 
         // Fill the line with the header attribute (starting at self.x, not 0)
         mv(y, self.x);
-        attron(header_attr);
+        attrset(header_attr);
         for _ in 0..self.w {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(A_NORMAL);
 
         // Draw field titles with highlighting for sort column
         mv(y, self.x);
@@ -360,20 +360,9 @@ impl MainPanel {
 
         // Apply selection highlighting if selected
         if selected {
-            // For selected rows, we draw with selection background
-            mv(y, self.x);
-            attron(selection_attr);
-
-            let text = str.text();
-            let display_text: String = text.chars().take(self.w as usize).collect();
-            let _ = addstr(&display_text);
-
-            // Pad to width
-            let current_len = display_text.chars().count();
-            for _ in current_len..self.w as usize {
-                addch(' ' as u32);
-            }
-            attroff(selection_attr);
+            // For selected rows, use the override attribute method
+            // This matches C htop's behavior where RichString_setAttr overrides all per-char colors
+            str.write_at_width_with_attr(y, self.x, self.w as usize, selection_attr);
         } else {
             // For non-selected rows, use the RichString with per-field colors
             str.write_at_width(y, self.x, self.w as usize);
@@ -408,7 +397,6 @@ impl MainPanel {
 
         match field {
             ProcessField::Pid => {
-                // PID: right-aligned, typically 5-7 digits
                 str.append(&format!("{:>5} ", process.pid), base_color);
             }
             ProcessField::Ppid => {

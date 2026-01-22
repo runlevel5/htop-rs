@@ -100,11 +100,10 @@ impl FunctionBar {
 
         // First fill entire line with spaces in FUNCTION_BAR color
         mv(y, 0);
-        attron(bar_color);
+        attrset(bar_color);
         for _ in 0..width {
             addch(' ' as u32);
         }
-        attroff(bar_color);
 
         // Draw each key-label pair consecutively (no padding between pairs)
         let mut x = 0i32;
@@ -115,17 +114,16 @@ impl FunctionBar {
 
             // Draw the key (F1, F2, etc.) in FUNCTION_KEY color
             mv(y, x);
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr(key);
-            attroff(key_color);
             x += key.len() as i32;
 
             // Draw the label (Help, Setup, etc.) in FUNCTION_BAR color
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr(label);
-            attroff(bar_color);
             x += label.len() as i32;
         }
+        attrset(A_NORMAL);
     }
 
     /// Draw the function bar without settings (backward compatibility)
@@ -136,11 +134,10 @@ impl FunctionBar {
 
         // First fill entire line with spaces in FUNCTION_BAR color
         mv(y, 0);
-        attron(bar_color);
+        attrset(bar_color);
         for _ in 0..width {
             addch(' ' as u32);
         }
-        attroff(bar_color);
 
         // Draw each key-label pair consecutively (no padding between pairs)
         let mut x = 0i32;
@@ -151,17 +148,16 @@ impl FunctionBar {
 
             // Draw the key (F1, F2, etc.) in FUNCTION_KEY color
             mv(y, x);
-            attron(key_color);
+            attrset(key_color);
             let _ = addstr(key);
-            attroff(key_color);
             x += key.len() as i32;
 
             // Draw the label (Help, Setup, etc.) in FUNCTION_BAR color
-            attron(bar_color);
+            attrset(bar_color);
             let _ = addstr(label);
-            attroff(bar_color);
             x += label.len() as i32;
         }
+        attrset(A_NORMAL);
     }
 }
 

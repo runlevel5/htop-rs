@@ -52,13 +52,11 @@ impl Meter for ClockMeter {
         let value_attr = crt.color(ColorElement::Clock);
 
         mv(y, x);
-        attron(caption_attr);
+        attrset(caption_attr);
         let _ = addstr("Time: ");
-        attroff(caption_attr);
 
-        attron(value_attr);
+        attrset(value_attr);
         let _ = addstr(&self.time_str);
-        attroff(value_attr);
     }
 
     fn mode(&self) -> MeterMode {

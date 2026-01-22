@@ -52,13 +52,11 @@ impl Meter for DateMeter {
         let value_attr = crt.color(ColorElement::Date);
 
         mv(y, x);
-        attron(caption_attr);
+        attrset(caption_attr);
         let _ = addstr("Date: ");
-        attroff(caption_attr);
 
-        attron(value_attr);
+        attrset(value_attr);
         let _ = addstr(&self.date_str);
-        attroff(value_attr);
     }
 
     fn mode(&self) -> MeterMode {

@@ -45,6 +45,26 @@ pub const TREE_UTF8: TreeStrings = TreeStrings {
     desc: "\u{25bd}", // ▽
 };
 
+/// Bar meter mode characters - used for Monochrome theme to distinguish segments
+/// Each value index gets a different character: |, #, *, @, $, %, &, .
+/// For colored themes, all segments use '|'
+pub const BAR_METER_CHARACTERS: &[char] = &['|', '#', '*', '@', '$', '%', '&', '.'];
+
+/// Get the bar character for a given value index
+/// In Monochrome mode, each segment gets a different character
+/// In other modes, all segments use '|'
+#[inline]
+pub fn bar_meter_char(color_scheme: ColorScheme, value_index: usize) -> char {
+    if color_scheme == ColorScheme::Monochrome {
+        BAR_METER_CHARACTERS
+            .get(value_index)
+            .copied()
+            .unwrap_or('|')
+    } else {
+        '|'
+    }
+}
+
 /// Color elements for the UI
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
@@ -171,6 +191,57 @@ pub const KEY_RIGHTCLICK: i32 = KEY_F0 + 33;
 pub const KEY_SHIFT_TAB: i32 = KEY_F0 + 34;
 pub const KEY_HEADER_CLICK: i32 = KEY_F0 + 35;
 pub const KEY_DEL_MAC: i32 = 127;
+
+// =============================================================================
+// Global Color Pair System (matches C htop's ColorIndex/ColorPair scheme)
+// =============================================================================
+//
+// C htop uses ColorIndex(i,j) = (7-i)*8+j to compute unique pair indices for
+// all foreground/background color combinations. This ensures all 64 pairs
+// are consistently numbered across ALL color schemes, preventing issues when
+// switching between schemes.
+//
+// NOTE: Color pair 0 cannot be redefined by ncurses - it always represents
+// the terminal's default colors. The formula produces index 0 for white-on-black
+// (ColorIndex(7,0) = 0), so we need special handling to avoid pair 0.
+
+/// Compute color pair index for a foreground/background combination
+/// Matches C htop's ColorIndex(i,j) = (7-i)*8+j
+/// NOTE: This can return 0 for white-on-black, which is pair 0 (terminal default)
+#[inline]
+const fn color_index(fg: i16, bg: i16) -> i16 {
+    (7 - fg) * 8 + bg
+}
+
+// Special color pair indices (match C htop's ColorPairGrayBlack and ColorPairWhiteDefault)
+const COLOR_INDEX_GRAY_BLACK: i16 = color_index(COLOR_MAGENTA, COLOR_MAGENTA);
+const COLOR_INDEX_WHITE_DEFAULT: i16 = color_index(COLOR_RED, COLOR_RED);
+// Special index for white-on-black to avoid pair 0 (which can't be customized)
+// We use an unused slot: yellow-on-yellow (index 35) - not used by any color scheme
+// Note: cyan-on-cyan (14) is used by MC theme for ScreensCurBorder, so we can't use that
+const COLOR_INDEX_WHITE_BLACK: i16 = color_index(COLOR_YELLOW, COLOR_YELLOW);
+
+/// Get COLOR_PAIR for a foreground/background combination
+/// Matches C htop's ColorPair(i,j)
+/// NOTE: ColorIndex(White, Black) = 0, and pair 0 cannot be customized by ncurses.
+/// C htop has this same issue - it uses COLOR_PAIR(0) for white-on-black which
+/// results in terminal default colors. We match this behavior for compatibility.
+#[inline]
+fn color_pair(fg: i16, bg: i16) -> attr_t {
+    COLOR_PAIR(color_index(fg, bg))
+}
+
+/// Get the GrayBlack color pair (for shadow/dim colors)
+#[inline]
+fn color_pair_gray_black() -> attr_t {
+    COLOR_PAIR(COLOR_INDEX_GRAY_BLACK)
+}
+
+/// Get the WhiteDefault color pair (white on default background)
+#[inline]
+fn color_pair_white_default() -> attr_t {
+    COLOR_PAIR(COLOR_INDEX_WHITE_DEFAULT)
+}
 
 /// Mouse event data
 #[derive(Debug, Clone, Copy, Default)]
@@ -353,6 +424,7 @@ impl Crt {
     }
 
     /// Set up color pairs for a color scheme
+    /// This matches C htop's CRT_setColors which initializes ALL color pairs globally
     pub fn set_colors(&mut self, scheme: ColorScheme) {
         self.color_scheme = scheme;
 
@@ -364,7 +436,43 @@ impl Crt {
             return;
         }
 
-        // Initialize basic color pairs
+        // Initialize ALL color pairs globally (matches C htop's approach)
+        // This ensures consistent color pair indices across all schemes
+        // ColorIndex(i,j) = (7-i)*8+j maps each fg/bg combination to a unique pair number
+        let is_black_night = matches!(scheme, ColorScheme::BlackNight);
+
+        for i in 0i16..8 {
+            for j in 0i16..8 {
+                let idx = color_index(i, j);
+                // Skip special pairs (GrayBlack, WhiteDefault, and WhiteBlack have special handling)
+                // Also skip pair 0 (white-on-black via formula) as it can't be customized
+                if idx != COLOR_INDEX_GRAY_BLACK
+                    && idx != COLOR_INDEX_WHITE_DEFAULT
+                    && idx != COLOR_INDEX_WHITE_BLACK
+                    && idx != 0
+                {
+                    // For BlackNight scheme, use explicit black background (0)
+                    // For other schemes, use default background (-1) when j == 0
+                    let bg = if !is_black_night && j == 0 { -1 } else { j };
+                    init_pair(idx, i, bg);
+                }
+            }
+        }
+
+        // Special handling for GrayBlack pair (uses color 8 if available for dark gray)
+        let gray_fg = if COLORS() > 8 { 8 } else { COLOR_BLACK };
+        let gray_bg = if is_black_night { COLOR_BLACK } else { -1 };
+        init_pair(COLOR_INDEX_GRAY_BLACK, gray_fg, gray_bg);
+
+        // WhiteDefault pair (white on default background)
+        init_pair(COLOR_INDEX_WHITE_DEFAULT, COLOR_WHITE, -1);
+
+        // WhiteBlack pair (white on explicit black - avoids pair 0 which can't be customized)
+        // For BlackNight, use explicit black (0); for others, use default (-1)
+        let white_black_bg = if is_black_night { COLOR_BLACK } else { -1 };
+        init_pair(COLOR_INDEX_WHITE_BLACK, COLOR_WHITE, white_black_bg);
+
+        // Now set up the color scheme
         match scheme {
             ColorScheme::Monochrome => self.setup_monochrome(),
             ColorScheme::BlackOnWhite => self.setup_black_on_white(),
@@ -379,116 +487,133 @@ impl Crt {
 
     /// Set up default color scheme
     fn setup_default_colors(&mut self) {
-        // Color pair numbers
-        const PAIR_DEFAULT: i16 = 1;
-        const PAIR_CYAN_BLACK: i16 = 2;
-        const PAIR_GREEN_BLACK: i16 = 3;
-        const PAIR_YELLOW_BLACK: i16 = 4;
-        const PAIR_RED_BLACK: i16 = 5;
-        const PAIR_BLUE_BLACK: i16 = 6;
-        const PAIR_MAGENTA_BLACK: i16 = 7;
-        const PAIR_WHITE_BLUE: i16 = 8;
-        const PAIR_BLACK_GREEN: i16 = 9;
-        const PAIR_BLACK_CYAN: i16 = 10;
-        const PAIR_WHITE_BLACK: i16 = 11;
-        const PAIR_GRAY_BLACK: i16 = 12; // For dim/shadow colors
-        const PAIR_BLUE_BLUE: i16 = 13; // For inactive screen tabs
-        const PAIR_GREEN_GREEN: i16 = 14; // For active screen tab border
-        const PAIR_BLACK_BLUE: i16 = 15; // For inactive screen tab text
-        const PAIR_BLACK_YELLOW: i16 = 16; // For PanelSelectionFollow (filter/search following)
-        const PAIR_BLACK_WHITE: i16 = 17; // For PanelEdit (rename editing)
+        // All color pairs are already initialized in set_colors()
+        // Just assign color elements using the global color_pair() function
 
-        init_pair(PAIR_DEFAULT, -1, -1);
-        init_pair(PAIR_CYAN_BLACK, COLOR_CYAN, -1);
-        init_pair(PAIR_GREEN_BLACK, COLOR_GREEN, -1);
-        init_pair(PAIR_YELLOW_BLACK, COLOR_YELLOW, -1);
-        init_pair(PAIR_RED_BLACK, COLOR_RED, -1);
-        init_pair(PAIR_BLUE_BLACK, COLOR_BLUE, -1);
-        init_pair(PAIR_MAGENTA_BLACK, COLOR_MAGENTA, -1);
-        init_pair(PAIR_WHITE_BLUE, COLOR_WHITE, COLOR_BLUE);
-        init_pair(PAIR_BLACK_GREEN, COLOR_BLACK, COLOR_GREEN);
-        init_pair(PAIR_BLACK_CYAN, COLOR_BLACK, COLOR_CYAN);
-        init_pair(PAIR_WHITE_BLACK, COLOR_WHITE, -1);
-        init_pair(PAIR_BLUE_BLUE, COLOR_BLUE, COLOR_BLUE);
-        init_pair(PAIR_GREEN_GREEN, COLOR_GREEN, COLOR_GREEN);
-        init_pair(PAIR_BLACK_BLUE, COLOR_BLACK, COLOR_BLUE);
-        init_pair(PAIR_BLACK_YELLOW, COLOR_BLACK, COLOR_YELLOW);
-        init_pair(PAIR_BLACK_WHITE, COLOR_BLACK, COLOR_WHITE);
-
-        // Gray/black pair: use color 8 (dark gray) if available, otherwise black
-        // This matches C htop's ColorPairGrayBlack behavior
-        let gray_fg = if COLORS() > 8 { 8 } else { COLOR_BLACK };
-        init_pair(PAIR_GRAY_BLACK, gray_fg, -1);
-
-        self.colors[ColorElement::DefaultColor as usize] = COLOR_PAIR(PAIR_DEFAULT);
+        self.colors[ColorElement::ResetColor as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::DefaultColor as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
         // FunctionBar: Black text on Cyan background (for labels like "Help", "Setup")
-        self.colors[ColorElement::FunctionBar as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::FunctionBar as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
         // FunctionKey: White text on default/black background (for "F1", "F2", etc.)
-        self.colors[ColorElement::FunctionKey as usize] = COLOR_PAIR(PAIR_WHITE_BLACK);
-        self.colors[ColorElement::PanelHeaderFocus as usize] = COLOR_PAIR(PAIR_BLACK_GREEN);
-        self.colors[ColorElement::PanelHeaderUnfocus as usize] = COLOR_PAIR(PAIR_BLACK_GREEN);
+        self.colors[ColorElement::FunctionKey as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::PanelHeaderFocus as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelHeaderUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_GREEN);
         self.colors[ColorElement::PanelSelectionFocus as usize] =
-            COLOR_PAIR(PAIR_BLACK_CYAN) | A_BOLD;
+            color_pair(COLOR_BLACK, COLOR_CYAN);
         self.colors[ColorElement::PanelSelectionFollow as usize] =
-            COLOR_PAIR(PAIR_BLACK_YELLOW) | A_BOLD;
-        self.colors[ColorElement::PanelSelectionUnfocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
-        self.colors[ColorElement::PanelEdit as usize] = COLOR_PAIR(PAIR_BLACK_WHITE) | A_BOLD;
-        self.colors[ColorElement::Process as usize] = COLOR_PAIR(PAIR_DEFAULT);
-        self.colors[ColorElement::ProcessBasename as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD;
-        self.colors[ColorElement::ProcessTree as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::ProcessThread as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::ProcessRunState as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::ProcessDState as usize] = COLOR_PAIR(PAIR_RED_BLACK) | A_BOLD;
-        self.colors[ColorElement::CpuNormal as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::CpuSystem as usize] = COLOR_PAIR(PAIR_RED_BLACK);
-        self.colors[ColorElement::CpuNice as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::CpuIOWait as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Match C htop
-        self.colors[ColorElement::CpuIrq as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK);
-        self.colors[ColorElement::CpuSoftIrq as usize] = COLOR_PAIR(PAIR_MAGENTA_BLACK);
-        self.colors[ColorElement::CpuSteal as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::CpuGuest as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::MemoryUsed as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::MemoryBuffers as usize] = COLOR_PAIR(PAIR_BLUE_BLACK) | A_BOLD;
+            color_pair(COLOR_BLACK, COLOR_YELLOW);
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
+        self.colors[ColorElement::FailedRead as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Paused as usize] = color_pair(COLOR_YELLOW, COLOR_CYAN) | A_BOLD;
+        self.colors[ColorElement::Uptime as usize] = color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Battery as usize] = color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LargeNumber as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::MeterText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValue as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueError as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueIORead as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueIOWrite as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueNotice as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueOk as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueWarn as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::LedColor as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::TasksRunning as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Process as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::ProcessShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::ProcessTag as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessMegabytes as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessGigabytes as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessBasename as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessTree as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThread as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThreadBasename as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessComm as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThreadComm as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::ProcessRunState as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessDState as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::ProcessLowPriority as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessNew as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::ProcessTomb as usize] = color_pair(COLOR_BLACK, COLOR_RED);
+        self.colors[ColorElement::ProcessPriv as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::BarBorder as usize] = A_BOLD;
+        self.colors[ColorElement::BarShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::Swap as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::SwapCache as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::SwapFrontswap as usize] = color_pair_gray_black();
+        self.colors[ColorElement::Graph1 as usize] = color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryUsed as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryBuffers as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
         self.colors[ColorElement::MemoryBuffersText as usize] =
-            COLOR_PAIR(PAIR_BLUE_BLACK) | A_BOLD;
-        self.colors[ColorElement::MemoryCache as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK);
-        self.colors[ColorElement::MemoryShared as usize] = COLOR_PAIR(PAIR_MAGENTA_BLACK);
-        self.colors[ColorElement::MemoryCompressed as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
-        self.colors[ColorElement::Swap as usize] = COLOR_PAIR(PAIR_RED_BLACK);
-        self.colors[ColorElement::MeterValue as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
-        self.colors[ColorElement::MeterText as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::MeterShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
-        self.colors[ColorElement::BarShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
-        self.colors[ColorElement::BarBorder as usize] = A_BOLD; // Bold white for [ and ]
-        self.colors[ColorElement::Graph1 as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::Graph2 as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::TasksRunning as usize] = COLOR_PAIR(PAIR_GREEN_BLACK) | A_BOLD;
-        self.colors[ColorElement::Load as usize] = COLOR_PAIR(PAIR_DEFAULT);
-        self.colors[ColorElement::LoadAverageOne as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD; // Bold white
-        self.colors[ColorElement::LoadAverageFive as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD; // Bold cyan
-        self.colors[ColorElement::LoadAverageFifteen as usize] = COLOR_PAIR(PAIR_CYAN_BLACK); // Cyan (no bold)
-        self.colors[ColorElement::Uptime as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD; // Bold cyan
-        self.colors[ColorElement::Hostname as usize] = COLOR_PAIR(PAIR_DEFAULT) | A_BOLD;
-        self.colors[ColorElement::ProcessMegabytes as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::ProcessGigabytes as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::ProcessShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD; // Dim gray
-        self.colors[ColorElement::ProcessHighPriority as usize] = COLOR_PAIR(PAIR_RED_BLACK);
-        self.colors[ColorElement::ProcessLowPriority as usize] = COLOR_PAIR(PAIR_GREEN_BLACK);
-        self.colors[ColorElement::ProcessPriv as usize] = COLOR_PAIR(PAIR_RED_BLACK) | A_BOLD;
-        self.colors[ColorElement::LargeNumber as usize] = COLOR_PAIR(PAIR_RED_BLACK) | A_BOLD;
-        self.colors[ColorElement::FailedSearch as usize] = COLOR_PAIR(PAIR_RED_BLACK) | A_BOLD;
-        self.colors[ColorElement::HelpBold as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
-        self.colors[ColorElement::HelpShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
-        self.colors[ColorElement::Clock as usize] = COLOR_PAIR(PAIR_DEFAULT);
-        self.colors[ColorElement::CheckBox as usize] = COLOR_PAIR(PAIR_CYAN_BLACK);
-        self.colors[ColorElement::CheckMark as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
-        self.colors[ColorElement::CheckText as usize] = COLOR_PAIR(PAIR_DEFAULT);
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MemoryCache as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::MemoryShared as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::MemoryCompressed as usize] = color_pair_gray_black();
+        self.colors[ColorElement::Load as usize] = color_pair_white_default() | A_BOLD;
+        self.colors[ColorElement::LoadAverageOne as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LoadAverageFive as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::LoadAverageFifteen as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::HelpBold as usize] = color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::HelpShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::Clock as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::Date as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::DateTime as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::CheckBox as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::CheckMark as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::CpuNiceText as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuNormal as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::CpuSystem as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::CpuIOWait as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuSoftIrq as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::CpuSteal as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::CpuGuest as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
 
-        // Screen tabs colors (for "Main" tab header)
-        self.colors[ColorElement::ScreensOthBorder as usize] = COLOR_PAIR(PAIR_BLUE_BLUE);
-        self.colors[ColorElement::ScreensOthText as usize] = COLOR_PAIR(PAIR_BLACK_BLUE);
-        self.colors[ColorElement::ScreensCurBorder as usize] = COLOR_PAIR(PAIR_GREEN_GREEN);
-        self.colors[ColorElement::ScreensCurText as usize] = COLOR_PAIR(PAIR_BLACK_GREEN);
+        // Screen tabs colors
+        self.colors[ColorElement::ScreensOthBorder as usize] = color_pair(COLOR_BLUE, COLOR_BLUE);
+        self.colors[ColorElement::ScreensOthText as usize] = color_pair(COLOR_BLACK, COLOR_BLUE);
+        self.colors[ColorElement::ScreensCurBorder as usize] = color_pair(COLOR_GREEN, COLOR_GREEN);
+        self.colors[ColorElement::ScreensCurText as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+
+        // Dynamic colors
+        self.colors[ColorElement::DynamicGray as usize] = color_pair_gray_black();
+        self.colors[ColorElement::DynamicDarkGray as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::DynamicRed as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::DynamicGreen as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::DynamicBlue as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::DynamicCyan as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::DynamicMagenta as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::DynamicYellow as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::DynamicWhite as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
     }
 
     /// Set up monochrome color scheme
@@ -506,29 +631,637 @@ impl Crt {
         self.colors[ColorElement::HelpBold as usize] = A_BOLD;
     }
 
+    /// Set up Black on White color scheme
     fn setup_black_on_white(&mut self) {
-        // Simplified - use reverse video
-        self.setup_monochrome();
+        // All color pairs are already initialized in set_colors()
+        self.colors[ColorElement::ResetColor as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::DefaultColor as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::FunctionBar as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::FunctionKey as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::PanelHeaderFocus as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelHeaderUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelSelectionFocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::PanelSelectionFollow as usize] =
+            color_pair(COLOR_BLACK, COLOR_YELLOW);
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] =
+            color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
+        self.colors[ColorElement::FailedRead as usize] = color_pair(COLOR_RED, COLOR_WHITE);
+        self.colors[ColorElement::Paused as usize] = color_pair(COLOR_YELLOW, COLOR_CYAN) | A_BOLD;
+        self.colors[ColorElement::Uptime as usize] = color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::Battery as usize] = color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::LargeNumber as usize] = color_pair(COLOR_RED, COLOR_WHITE);
+        self.colors[ColorElement::MeterShadow as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::MeterText as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::MeterValue as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::MeterValueError as usize] =
+            color_pair(COLOR_RED, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::MeterValueIORead as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::MeterValueIOWrite as usize] =
+            color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::MeterValueNotice as usize] =
+            color_pair(COLOR_YELLOW, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::MeterValueOk as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::MeterValueWarn as usize] =
+            color_pair(COLOR_YELLOW, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::TasksRunning as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::Process as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::ProcessShadow as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::ProcessTag as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::ProcessMegabytes as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::ProcessGigabytes as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::ProcessBasename as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::ProcessTree as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::ProcessThread as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::ProcessThreadBasename as usize] =
+            color_pair(COLOR_BLUE, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::ProcessComm as usize] = color_pair(COLOR_MAGENTA, COLOR_WHITE);
+        self.colors[ColorElement::ProcessThreadComm as usize] =
+            color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::ProcessRunState as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::ProcessDState as usize] =
+            color_pair(COLOR_RED, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] =
+            color_pair(COLOR_RED, COLOR_WHITE);
+        self.colors[ColorElement::ProcessLowPriority as usize] =
+            color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::ProcessNew as usize] = color_pair(COLOR_WHITE, COLOR_GREEN);
+        self.colors[ColorElement::ProcessTomb as usize] = color_pair(COLOR_WHITE, COLOR_RED);
+        self.colors[ColorElement::ProcessPriv as usize] = color_pair(COLOR_MAGENTA, COLOR_WHITE);
+        self.colors[ColorElement::BarBorder as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::BarShadow as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::Swap as usize] = color_pair(COLOR_RED, COLOR_WHITE);
+        self.colors[ColorElement::SwapCache as usize] = color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::SwapFrontswap as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::Graph1 as usize] = color_pair(COLOR_BLUE, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::MemoryUsed as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::MemoryBuffers as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
+        self.colors[ColorElement::MemoryBuffersText as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
+        self.colors[ColorElement::MemoryCache as usize] = color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::MemoryShared as usize] = color_pair(COLOR_MAGENTA, COLOR_WHITE);
+        self.colors[ColorElement::MemoryCompressed as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::Load as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::LoadAverageOne as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::LoadAverageFive as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::LoadAverageFifteen as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::HelpBold as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::HelpShadow as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::Clock as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::Date as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::DateTime as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::CheckBox as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::CheckMark as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
+        self.colors[ColorElement::CpuNiceText as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
+        self.colors[ColorElement::CpuNormal as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::CpuSystem as usize] = color_pair(COLOR_RED, COLOR_WHITE);
+        self.colors[ColorElement::CpuIOWait as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::CpuSoftIrq as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::CpuSteal as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
+        self.colors[ColorElement::CpuGuest as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
+        self.colors[ColorElement::ScreensOthBorder as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::ScreensOthText as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::ScreensCurBorder as usize] = color_pair(COLOR_GREEN, COLOR_GREEN);
+        self.colors[ColorElement::ScreensCurText as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::DynamicGray as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::DynamicDarkGray as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::DynamicRed as usize] = color_pair(COLOR_RED, COLOR_WHITE);
+        self.colors[ColorElement::DynamicGreen as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
+        self.colors[ColorElement::DynamicBlue as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
+        self.colors[ColorElement::DynamicCyan as usize] = color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::DynamicMagenta as usize] = color_pair(COLOR_MAGENTA, COLOR_WHITE);
+        self.colors[ColorElement::DynamicYellow as usize] = color_pair(COLOR_YELLOW, COLOR_WHITE);
+        self.colors[ColorElement::DynamicWhite as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
     }
 
+    /// Set up Light Terminal color scheme
     fn setup_light_terminal(&mut self) {
-        self.setup_default_colors();
+        // All color pairs are already initialized in set_colors()
+        // Light Terminal uses default (-1) background which maps to BLACK in the pair system
+        self.colors[ColorElement::ResetColor as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::DefaultColor as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::FunctionBar as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::FunctionKey as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::PanelHeaderFocus as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelHeaderUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelSelectionFocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::PanelSelectionFollow as usize] =
+            color_pair(COLOR_BLACK, COLOR_YELLOW);
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
+        self.colors[ColorElement::FailedRead as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::Paused as usize] = color_pair(COLOR_YELLOW, COLOR_CYAN) | A_BOLD;
+        self.colors[ColorElement::Uptime as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::Battery as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::LargeNumber as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::MeterShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::MeterText as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::MeterValue as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueError as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueIORead as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueIOWrite as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueNotice as usize] = color_pair_white_default() | A_BOLD;
+        self.colors[ColorElement::MeterValueOk as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueWarn as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::TasksRunning as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::Process as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::ProcessShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::ProcessTag as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::ProcessMegabytes as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::ProcessGigabytes as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessBasename as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessTree as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThread as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThreadBasename as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessComm as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThreadComm as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::ProcessRunState as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessDState as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::ProcessLowPriority as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessNew as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::ProcessTomb as usize] = color_pair(COLOR_BLACK, COLOR_RED);
+        self.colors[ColorElement::ProcessPriv as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::BarBorder as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::BarShadow as usize] = color_pair_gray_black();
+        self.colors[ColorElement::Swap as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::SwapCache as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::SwapFrontswap as usize] = color_pair_gray_black();
+        self.colors[ColorElement::Graph1 as usize] = color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryUsed as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryBuffers as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryBuffersText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryCache as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::MemoryShared as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::MemoryCompressed as usize] = color_pair_gray_black();
+        self.colors[ColorElement::Load as usize] = color_pair_white_default() | A_BOLD;
+        self.colors[ColorElement::LoadAverageOne as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::LoadAverageFive as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::LoadAverageFifteen as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::HelpBold as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::HelpShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::Clock as usize] = A_BOLD;
+        self.colors[ColorElement::Date as usize] = A_BOLD;
+        self.colors[ColorElement::DateTime as usize] = A_BOLD;
+        self.colors[ColorElement::CheckBox as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::CheckMark as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::Hostname as usize] = A_BOLD;
+        self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::CpuNiceText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::CpuNormal as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::CpuSystem as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::CpuIOWait as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuSoftIrq as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::CpuSteal as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::CpuGuest as usize] = color_pair(COLOR_BLACK, COLOR_BLACK);
+        self.colors[ColorElement::ScreensOthBorder as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::ScreensOthText as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::ScreensCurBorder as usize] = color_pair(COLOR_GREEN, COLOR_GREEN);
+        self.colors[ColorElement::ScreensCurText as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::DynamicGray as usize] = color_pair_gray_black();
+        self.colors[ColorElement::DynamicDarkGray as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::DynamicRed as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::DynamicGreen as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::DynamicBlue as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::DynamicCyan as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::DynamicMagenta as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::DynamicYellow as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::DynamicWhite as usize] = A_BOLD;
     }
 
+    /// Set up Midnight color scheme (blue background like Midnight Commander)
     fn setup_midnight(&mut self) {
-        self.setup_default_colors();
+        // All color pairs are already initialized in set_colors()
+        self.colors[ColorElement::ResetColor as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::DefaultColor as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::FunctionBar as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::FunctionKey as usize] = A_NORMAL;
+        self.colors[ColorElement::PanelHeaderFocus as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::PanelHeaderUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::PanelSelectionFocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::PanelSelectionFollow as usize] =
+            color_pair(COLOR_BLACK, COLOR_YELLOW);
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
+        self.colors[ColorElement::FailedRead as usize] = color_pair(COLOR_RED, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Paused as usize] = color_pair(COLOR_BLACK, COLOR_CYAN) | A_BOLD;
+        self.colors[ColorElement::Uptime as usize] = color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Battery as usize] = color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::LargeNumber as usize] =
+            color_pair(COLOR_RED, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MeterShadow as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::MeterText as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::MeterValue as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MeterValueError as usize] =
+            color_pair(COLOR_RED, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MeterValueIORead as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::MeterValueIOWrite as usize] = color_pair(COLOR_BLACK, COLOR_BLUE);
+        self.colors[ColorElement::MeterValueNotice as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MeterValueOk as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::MeterValueWarn as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::TasksRunning as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Process as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::ProcessShadow as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::ProcessTag as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::ProcessMegabytes as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::ProcessGigabytes as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::ProcessBasename as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::ProcessTree as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::ProcessThread as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::ProcessThreadBasename as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::ProcessComm as usize] = color_pair(COLOR_MAGENTA, COLOR_BLUE);
+        self.colors[ColorElement::ProcessThreadComm as usize] = color_pair(COLOR_BLACK, COLOR_BLUE);
+        self.colors[ColorElement::ProcessRunState as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::ProcessDState as usize] =
+            color_pair(COLOR_RED, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] = color_pair(COLOR_RED, COLOR_BLUE);
+        self.colors[ColorElement::ProcessLowPriority as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::ProcessNew as usize] = color_pair(COLOR_BLUE, COLOR_GREEN);
+        self.colors[ColorElement::ProcessTomb as usize] = color_pair(COLOR_BLUE, COLOR_RED);
+        self.colors[ColorElement::ProcessPriv as usize] = color_pair(COLOR_MAGENTA, COLOR_BLUE);
+        self.colors[ColorElement::BarBorder as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::BarShadow as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::Swap as usize] = color_pair(COLOR_RED, COLOR_BLUE);
+        self.colors[ColorElement::SwapCache as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::SwapFrontswap as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Graph1 as usize] = color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::MemoryUsed as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MemoryBuffers as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MemoryBuffersText as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MemoryCache as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MemoryShared as usize] =
+            color_pair(COLOR_MAGENTA, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::MemoryCompressed as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Load as usize] = color_pair(COLOR_WHITE, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::LoadAverageOne as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::LoadAverageFive as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::LoadAverageFifteen as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::HelpBold as usize] = color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::HelpShadow as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::Clock as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::Date as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::DateTime as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::CheckBox as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::CheckMark as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CpuNiceText as usize] =
+            color_pair(COLOR_CYAN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CpuNormal as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CpuSystem as usize] = color_pair(COLOR_RED, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CpuIOWait as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::CpuSoftIrq as usize] = color_pair(COLOR_BLACK, COLOR_BLUE);
+        self.colors[ColorElement::CpuSteal as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::CpuGuest as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::ScreensOthBorder as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::ScreensOthText as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::ScreensCurBorder as usize] = color_pair(COLOR_CYAN, COLOR_CYAN);
+        self.colors[ColorElement::ScreensCurText as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::DynamicGray as usize] = color_pair(COLOR_BLACK, COLOR_BLUE);
+        self.colors[ColorElement::DynamicDarkGray as usize] =
+            color_pair(COLOR_BLACK, COLOR_BLUE) | A_BOLD;
+        self.colors[ColorElement::DynamicRed as usize] = color_pair(COLOR_RED, COLOR_BLUE);
+        self.colors[ColorElement::DynamicGreen as usize] = color_pair(COLOR_GREEN, COLOR_BLUE);
+        self.colors[ColorElement::DynamicBlue as usize] = color_pair(COLOR_BLACK, COLOR_BLUE);
+        self.colors[ColorElement::DynamicCyan as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
+        self.colors[ColorElement::DynamicMagenta as usize] = color_pair(COLOR_MAGENTA, COLOR_BLUE);
+        self.colors[ColorElement::DynamicYellow as usize] = color_pair(COLOR_YELLOW, COLOR_BLUE);
+        self.colors[ColorElement::DynamicWhite as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
     }
 
+    /// Set up Black Night color scheme
     fn setup_black_night(&mut self) {
-        self.setup_default_colors();
+        // All color pairs are already initialized in set_colors()
+        self.colors[ColorElement::ResetColor as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::DefaultColor as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::FunctionBar as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::FunctionKey as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::PanelHeaderFocus as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelHeaderUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::PanelSelectionFocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_CYAN);
+        self.colors[ColorElement::PanelSelectionFollow as usize] =
+            color_pair(COLOR_BLACK, COLOR_YELLOW);
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE);
+        self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_CYAN);
+        self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_GREEN);
+        self.colors[ColorElement::FailedRead as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Paused as usize] = color_pair(COLOR_YELLOW, COLOR_GREEN) | A_BOLD;
+        self.colors[ColorElement::Uptime as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::Battery as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::LargeNumber as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::MeterText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValue as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueError as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueIORead as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueIOWrite as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueNotice as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueOk as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MeterValueWarn as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::TasksRunning as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Process as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::ProcessTag as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessMegabytes as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessGigabytes as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessBasename as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessTree as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThread as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThreadBasename as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessComm as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::ProcessThreadComm as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::ProcessRunState as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessDState as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] =
+            color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::ProcessLowPriority as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::ProcessNew as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
+        self.colors[ColorElement::ProcessTomb as usize] = color_pair(COLOR_BLACK, COLOR_RED);
+        self.colors[ColorElement::ProcessPriv as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::BarBorder as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::BarShadow as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::Swap as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::SwapCache as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::SwapFrontswap as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::Graph1 as usize] = color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryUsed as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::MemoryBuffers as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::MemoryBuffersText as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::MemoryCache as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::MemoryShared as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::MemoryCompressed as usize] =
+            color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::Load as usize] = A_BOLD;
+        self.colors[ColorElement::LoadAverageOne as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LoadAverageFive as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::LoadAverageFifteen as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::HelpBold as usize] = color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::HelpShadow as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::Clock as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::Date as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::DateTime as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::CheckBox as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::CheckMark as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::CpuNiceText as usize] =
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuNormal as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::CpuSystem as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::CpuIOWait as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuSoftIrq as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::CpuSteal as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::CpuGuest as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::ScreensOthBorder as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        self.colors[ColorElement::ScreensOthText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::ScreensCurBorder as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::ScreensCurText as usize] =
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicGray as usize] = color_pair_gray_black();
+        self.colors[ColorElement::DynamicDarkGray as usize] = color_pair_gray_black() | A_BOLD;
+        self.colors[ColorElement::DynamicRed as usize] = color_pair(COLOR_RED, COLOR_BLACK);
+        self.colors[ColorElement::DynamicGreen as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
+        self.colors[ColorElement::DynamicBlue as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
+        self.colors[ColorElement::DynamicCyan as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
+        self.colors[ColorElement::DynamicMagenta as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
+        self.colors[ColorElement::DynamicYellow as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
+        self.colors[ColorElement::DynamicWhite as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
     }
 
+    /// Set up Broken Gray color scheme
+    /// This is like Default but fixes gray rendering for terminals that don't support it
     fn setup_broken_gray(&mut self) {
+        // First set up default colors
         self.setup_default_colors();
+
+        // Then fix the gray colors - replace gray with white
+        // In C htop, this replaces A_BOLD | ColorPairGrayBlack with ColorPair(White, Black)
+        const PAIR_WHITE_BLACK: i16 = 20; // Use a new pair number
+        init_pair(PAIR_WHITE_BLACK, COLOR_WHITE, -1);
+        let white_attr = COLOR_PAIR(PAIR_WHITE_BLACK);
+
+        // Replace all gray-based colors with white
+        self.colors[ColorElement::MeterShadow as usize] = white_attr;
+        self.colors[ColorElement::BarShadow as usize] = white_attr;
+        self.colors[ColorElement::ProcessShadow as usize] = white_attr;
+        self.colors[ColorElement::CpuIOWait as usize] = white_attr;
+        self.colors[ColorElement::MemoryCompressed as usize] = white_attr;
+        self.colors[ColorElement::HelpShadow as usize] = white_attr;
+        self.colors[ColorElement::DynamicGray as usize] = white_attr;
+        self.colors[ColorElement::DynamicDarkGray as usize] = white_attr;
     }
 
+    /// Set up Nord color scheme
+    /// Minimalist scheme inspired by the Nord color palette
     fn setup_nord(&mut self) {
-        self.setup_default_colors();
+        // Color pair numbers for Nord scheme
+        const PAIR_BLACK_CYAN: i16 = 1;
+        const PAIR_YELLOW_BLACK: i16 = 2;
+        const PAIR_CYAN_BLACK: i16 = 3;
+        const PAIR_WHITE_BLACK: i16 = 4;
+        const PAIR_GRAY_BLACK: i16 = 5;
+
+        init_pair(PAIR_BLACK_CYAN, COLOR_BLACK, COLOR_CYAN);
+        init_pair(PAIR_YELLOW_BLACK, COLOR_YELLOW, -1);
+        init_pair(PAIR_CYAN_BLACK, COLOR_CYAN, -1);
+        init_pair(PAIR_WHITE_BLACK, COLOR_WHITE, -1);
+
+        // Gray/black pair
+        let gray_fg = if COLORS() > 8 { 8 } else { COLOR_BLACK };
+        init_pair(PAIR_GRAY_BLACK, gray_fg, -1);
+
+        self.colors[ColorElement::ResetColor as usize] = A_NORMAL;
+        self.colors[ColorElement::DefaultColor as usize] = A_NORMAL;
+        self.colors[ColorElement::FunctionBar as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::FunctionKey as usize] = A_NORMAL;
+        self.colors[ColorElement::PanelHeaderFocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::PanelHeaderUnfocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::PanelSelectionFocus as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::PanelSelectionFollow as usize] = A_REVERSE;
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] = A_BOLD;
+        self.colors[ColorElement::PanelEdit as usize] = A_BOLD;
+        self.colors[ColorElement::FailedSearch as usize] =
+            COLOR_PAIR(PAIR_YELLOW_BLACK) | A_REVERSE | A_BOLD;
+        self.colors[ColorElement::FailedRead as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::Paused as usize] = COLOR_PAIR(PAIR_BLACK_CYAN) | A_BOLD;
+        self.colors[ColorElement::Uptime as usize] = A_BOLD;
+        self.colors[ColorElement::Battery as usize] = A_BOLD;
+        self.colors[ColorElement::LargeNumber as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterText as usize] = A_NORMAL;
+        self.colors[ColorElement::MeterValue as usize] = A_BOLD;
+        self.colors[ColorElement::MeterValueError as usize] = A_BOLD;
+        self.colors[ColorElement::MeterValueIORead as usize] = A_NORMAL;
+        self.colors[ColorElement::MeterValueIOWrite as usize] = A_NORMAL;
+        self.colors[ColorElement::MeterValueNotice as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::MeterValueOk as usize] = A_NORMAL;
+        self.colors[ColorElement::MeterValueWarn as usize] = A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = A_NORMAL;
+        self.colors[ColorElement::TasksRunning as usize] = A_BOLD;
+        self.colors[ColorElement::Process as usize] = A_NORMAL;
+        self.colors[ColorElement::ProcessShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessTag as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessMegabytes as usize] =
+            COLOR_PAIR(PAIR_WHITE_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessGigabytes as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessBasename as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessTree as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessThread as usize] = A_NORMAL;
+        self.colors[ColorElement::ProcessThreadBasename as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessComm as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessThreadComm as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessRunState as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessDState as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessLowPriority as usize] =
+            COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessNew as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessTomb as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::ProcessPriv as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::BarBorder as usize] = A_BOLD;
+        self.colors[ColorElement::BarShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::Swap as usize] = A_BOLD;
+        self.colors[ColorElement::SwapCache as usize] = A_NORMAL;
+        self.colors[ColorElement::SwapFrontswap as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::Graph1 as usize] = A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = A_NORMAL;
+        self.colors[ColorElement::MemoryUsed as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::MemoryBuffers as usize] = A_NORMAL;
+        self.colors[ColorElement::MemoryBuffersText as usize] = A_NORMAL;
+        self.colors[ColorElement::MemoryCache as usize] = A_NORMAL;
+        self.colors[ColorElement::MemoryShared as usize] = A_NORMAL;
+        self.colors[ColorElement::MemoryCompressed as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::Load as usize] = A_BOLD;
+        self.colors[ColorElement::LoadAverageOne as usize] = A_BOLD;
+        self.colors[ColorElement::LoadAverageFive as usize] = A_NORMAL;
+        self.colors[ColorElement::LoadAverageFifteen as usize] =
+            COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::HelpBold as usize] = A_BOLD;
+        self.colors[ColorElement::HelpShadow as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::Clock as usize] = A_BOLD;
+        self.colors[ColorElement::Date as usize] = A_BOLD;
+        self.colors[ColorElement::DateTime as usize] = A_BOLD;
+        self.colors[ColorElement::CheckBox as usize] = A_BOLD;
+        self.colors[ColorElement::CheckMark as usize] = A_NORMAL;
+        self.colors[ColorElement::CheckText as usize] = A_NORMAL;
+        self.colors[ColorElement::Hostname as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuNice as usize] = A_NORMAL;
+        self.colors[ColorElement::CpuNiceText as usize] = A_NORMAL;
+        self.colors[ColorElement::CpuNormal as usize] = A_BOLD;
+        self.colors[ColorElement::CpuSystem as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuIOWait as usize] = A_NORMAL;
+        self.colors[ColorElement::CpuIrq as usize] = A_BOLD;
+        self.colors[ColorElement::CpuSoftIrq as usize] = A_BOLD;
+        self.colors[ColorElement::CpuSteal as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuGuest as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::ScreensOthBorder as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::ScreensOthText as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::ScreensCurBorder as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::ScreensCurText as usize] = COLOR_PAIR(PAIR_BLACK_CYAN);
+        self.colors[ColorElement::DynamicGray as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicDarkGray as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicRed as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicGreen as usize] = A_BOLD;
+        self.colors[ColorElement::DynamicBlue as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicCyan as usize] = COLOR_PAIR(PAIR_CYAN_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicMagenta as usize] = A_BOLD;
+        self.colors[ColorElement::DynamicYellow as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;
+        self.colors[ColorElement::DynamicWhite as usize] = A_BOLD;
     }
 
     /// Get color attribute for an element
@@ -706,9 +1439,9 @@ impl Crt {
 
     /// Print a string with attributes
     pub fn print_at(&self, y: i32, x: i32, attr: attr_t, text: &str) {
-        attron(attr);
+        attrset(attr);
         let _ = mvaddstr(y, x, text);
-        attroff(attr);
+        attrset(A_NORMAL);
     }
 
     /// Print a string with a specific color element

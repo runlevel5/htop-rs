@@ -840,6 +840,14 @@ impl SetupScreen {
         let y = header_height; // Tab row is right after header
         let mut x = SCREEN_TAB_MARGIN_LEFT;
         let max_x = crt.width();
+        let reset_color = crt.color(ColorElement::ResetColor);
+
+        // Fill the entire tab row with the reset color background first
+        attrset(reset_color);
+        mv(y, 0);
+        for _ in 0..max_x {
+            addch(' ' as u32);
+        }
 
         if x >= max_x {
             return;
@@ -848,36 +856,34 @@ impl SetupScreen {
         let border_attr = crt.color(ColorElement::ScreensCurBorder);
         let text_attr = crt.color(ColorElement::ScreensCurText);
 
-        // Draw '['
-        attron(border_attr);
+        // Draw '[' - C htop doesn't reset between bracket and text
+        attrset(border_attr);
         mvaddch(y, x, '[' as u32);
-        attroff(border_attr);
         x += 1;
 
         if x >= max_x {
-            attrset(crt.color(ColorElement::ResetColor));
+            attrset(reset_color);
             return;
         }
 
         // Draw "Setup" text
         let name = "Setup";
         let name_width = name.len().min((max_x - x) as usize);
-        attron(text_attr);
+        attrset(text_attr);
         let _ = mvaddnstr(y, x, name, name_width as i32);
-        attroff(text_attr);
         x += name_width as i32;
 
         if x >= max_x {
-            attrset(crt.color(ColorElement::ResetColor));
+            attrset(reset_color);
             return;
         }
 
         // Draw ']'
-        attron(border_attr);
+        attrset(border_attr);
         mvaddch(y, x, ']' as u32);
-        attroff(border_attr);
 
-        attrset(crt.color(ColorElement::ResetColor));
+        // Only reset at the very end (matches C htop)
+        attrset(reset_color);
     }
 
     /// Draw the setup screen
@@ -917,6 +923,16 @@ impl SetupScreen {
         let w = self.categories_panel.w;
         let h = self.categories_panel.h;
 
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
+
         // Draw header
         let header_attr = if self.focus == 0 {
             crt.color(ColorElement::PanelHeaderFocus)
@@ -925,13 +941,12 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Categories";
         let _ = addstr(header);
         for _ in header.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
 
         // Draw items
         let selection_attr = if self.focus == 0 {
@@ -953,22 +968,15 @@ impl SetupScreen {
                 normal_attr
             };
 
-            attron(attr);
+            attrset(attr);
             let name = cat.name();
             let _ = addstr(name);
             for _ in name.len()..w as usize {
                 addch(' ' as u32);
             }
-            attroff(attr);
         }
 
-        // Fill remaining lines
-        for i in (SetupCategory::all().len() as i32 + 1)..h {
-            mv(y + i, x);
-            for _ in 0..w {
-                addch(' ' as u32);
-            }
-        }
+        attrset(reset_color);
     }
 
     fn draw_display_options(&self, crt: &Crt, settings: &Settings) {
@@ -976,6 +984,16 @@ impl SetupScreen {
         let y = self.content_panel.y;
         let w = self.content_panel.w;
         let h = self.content_panel.h;
+
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
 
         // Draw header
         let header_attr = if self.focus == 1 {
@@ -985,13 +1003,13 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Display options";
         let _ = addstr(header);
         for _ in header.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Draw items
         let selection_attr = if self.focus == 1 {
@@ -1016,25 +1034,24 @@ impl SetupScreen {
                 let display_str = item.display(settings, crt);
 
                 if is_selected {
-                    attron(selection_attr);
+                    attrset(selection_attr);
                     let text = display_str.text();
                     let display_text: String = text.chars().take(w as usize).collect();
                     let _ = addstr(&display_text);
                     for _ in display_text.chars().count()..w as usize {
                         addch(' ' as u32);
                     }
-                    attroff(selection_attr);
+                    attrset(reset_color);
                 } else {
                     // Draw with the RichString's own attributes
                     display_str.draw_at(screen_y, x, w);
                 }
             } else {
-                // Empty line
-                for _ in 0..w {
-                    addch(' ' as u32);
-                }
+                // Empty line - already filled with reset_color background
             }
         }
+
+        attrset(reset_color);
     }
 
     fn draw_colors_panel(&self, crt: &Crt, settings: &Settings) {
@@ -1042,6 +1059,16 @@ impl SetupScreen {
         let y = self.content_panel.y;
         let w = self.content_panel.w;
         let h = self.content_panel.h;
+
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
 
         // Draw header
         let header_attr = if self.focus == 1 {
@@ -1051,13 +1078,12 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Colors";
         let _ = addstr(header);
         for _ in header.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
 
         // Draw color scheme options
         let selection_attr = if self.focus == 1 {
@@ -1081,51 +1107,35 @@ impl SetupScreen {
             let is_checked = i == current_scheme;
 
             if is_selected {
-                attron(selection_attr);
+                attrset(selection_attr);
             }
 
             // Draw checkbox
             if !is_selected {
-                attron(box_color);
+                attrset(box_color);
             }
             let _ = addstr("[");
             if !is_selected {
-                attroff(box_color);
-                attron(mark_color);
+                attrset(mark_color);
             }
             let _ = addstr(if is_checked { "x" } else { " " });
             if !is_selected {
-                attroff(mark_color);
-                attron(box_color);
+                attrset(box_color);
             }
             let _ = addstr("]    ");
             if !is_selected {
-                attroff(box_color);
-                attron(text_color);
+                attrset(text_color);
             }
             let _ = addstr(name);
-            if !is_selected {
-                attroff(text_color);
-            }
 
             // Pad to width
             let used = 7 + name.len(); // "[x]    " + name
             for _ in used..w as usize {
                 addch(' ' as u32);
             }
-
-            if is_selected {
-                attroff(selection_attr);
-            }
         }
 
-        // Fill remaining lines
-        for i in (COLOR_SCHEME_NAMES.len() as i32 + 1)..h {
-            mv(y + i, x);
-            for _ in 0..w {
-                addch(' ' as u32);
-            }
-        }
+        attrset(reset_color);
     }
 
     fn draw_header_layout(&self, crt: &Crt, settings: &Settings) {
@@ -1133,6 +1143,16 @@ impl SetupScreen {
         let y = self.content_panel.y;
         let w = self.content_panel.w;
         let h = self.content_panel.h;
+
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
 
         // Draw header
         let header_attr = if self.focus == 1 {
@@ -1142,13 +1162,13 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Header Layout";
         let _ = addstr(header);
         for _ in header.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Draw header layout options with checkmarks (like C htop HeaderOptionsPanel)
         let layouts = HeaderLayout::all();
@@ -1175,7 +1195,7 @@ impl SetupScreen {
 
             if is_selected {
                 // Selected row - highlight entire line
-                attron(selected_attr);
+                attrset(selected_attr);
                 let _ = addstr(checkbox);
                 let desc = layout.description();
                 let _ = addstr(desc);
@@ -1184,33 +1204,23 @@ impl SetupScreen {
                 for _ in used..w as usize {
                     addch(' ' as u32);
                 }
-                attroff(selected_attr);
+                attrset(reset_color);
             } else {
                 // Non-selected row
-                attron(check_attr);
+                attrset(check_attr);
                 let _ = addstr(checkbox);
-                attroff(check_attr);
+                attrset(reset_color);
 
-                attron(text_attr);
+                attrset(text_attr);
                 let desc = layout.description();
                 let _ = addstr(desc);
-                attroff(text_attr);
+                attrset(reset_color);
 
-                // Pad to width
-                let used = checkbox.len() + desc.len();
-                for _ in used..w as usize {
-                    addch(' ' as u32);
-                }
+                // Pad to width - already filled with reset_color background
             }
         }
 
-        // Fill remaining lines
-        for i in (layouts.len() as i32 + 1)..h {
-            mv(y + i, x);
-            for _ in 0..w {
-                addch(' ' as u32);
-            }
-        }
+        attrset(reset_color);
     }
 
     fn draw_meters_panel(&self, crt: &Crt, settings: &Settings) {
@@ -1275,6 +1285,16 @@ impl SetupScreen {
         h: i32,
         has_focus: bool,
     ) {
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
+
         // Draw header
         let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
@@ -1283,14 +1303,14 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = format!("Column {}", col_idx + 1);
         let header_display: String = header.chars().take(w as usize).collect();
         let _ = addstr(&header_display);
         for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Get meters for this column
         let meters = settings.header_columns.get(col_idx);
@@ -1328,33 +1348,25 @@ impl SetupScreen {
                     let display_text: String = display.chars().take((w - 1) as usize).collect();
 
                     if is_selected {
-                        attron(selection_attr);
+                        attrset(selection_attr);
                         let _ = addstr(&display_text);
                         for _ in display_text.chars().count()..w as usize {
                             addch(' ' as u32);
                         }
-                        attroff(selection_attr);
+                        attrset(reset_color);
                     } else {
-                        attron(normal_attr);
+                        attrset(normal_attr);
                         let _ = addstr(&display_text);
-                        attroff(normal_attr);
-                        for _ in display_text.chars().count()..w as usize {
-                            addch(' ' as u32);
-                        }
-                    }
-                } else {
-                    // Empty row
-                    for _ in 0..w {
-                        addch(' ' as u32);
+                        attrset(reset_color);
+                        // Rest of line already filled with reset_color background
                     }
                 }
-            } else {
-                // No meters array
-                for _ in 0..w {
-                    addch(' ' as u32);
-                }
+                // Empty rows already filled with reset_color background
             }
+            // No meters array - already filled with reset_color background
         }
+
+        attrset(reset_color);
     }
 
     /// Draw the available meters panel
@@ -1367,6 +1379,16 @@ impl SetupScreen {
         h: i32,
         has_focus: bool,
     ) {
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
+
         // Draw header
         let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
@@ -1375,14 +1397,14 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Available meters";
         let header_display: String = header.chars().take(w as usize).collect();
         let _ = addstr(&header_display);
         for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Selection color
         let selection_attr = if has_focus {
@@ -1411,27 +1433,23 @@ impl SetupScreen {
                     .collect();
 
                 if is_selected {
-                    attron(selection_attr);
+                    attrset(selection_attr);
                     let _ = addstr(&display_text);
                     for _ in display_text.chars().count()..w as usize {
                         addch(' ' as u32);
                     }
-                    attroff(selection_attr);
+                    attrset(reset_color);
                 } else {
-                    attron(normal_attr);
+                    attrset(normal_attr);
                     let _ = addstr(&display_text);
-                    attroff(normal_attr);
-                    for _ in display_text.chars().count()..w as usize {
-                        addch(' ' as u32);
-                    }
-                }
-            } else {
-                // Empty row
-                for _ in 0..w {
-                    addch(' ' as u32);
+                    attrset(reset_color);
+                    // Rest of line already filled with reset_color background
                 }
             }
+            // Empty rows already filled with reset_color background
         }
+
+        attrset(reset_color);
     }
 
     fn draw_screens_panel(&self, crt: &Crt, settings: &Settings) {
@@ -1498,6 +1516,16 @@ impl SetupScreen {
         h: i32,
         has_focus: bool,
     ) {
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
+
         // Draw header
         let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
@@ -1506,14 +1534,14 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Screens";
         let header_display: String = header.chars().take(w as usize).collect();
         let _ = addstr(&header_display);
         for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Selection colors
         let selection_attr = if has_focus {
@@ -1550,27 +1578,23 @@ impl SetupScreen {
                 let display_text: String = display.chars().take((w - 1) as usize).collect();
 
                 if is_selected {
-                    attron(selection_attr);
+                    attrset(selection_attr);
                     let _ = addstr(&display_text);
                     for _ in display_text.chars().count()..w as usize {
                         addch(' ' as u32);
                     }
-                    attroff(selection_attr);
+                    attrset(reset_color);
                 } else {
-                    attron(normal_attr);
+                    attrset(normal_attr);
                     let _ = addstr(&display_text);
-                    attroff(normal_attr);
-                    for _ in display_text.chars().count()..w as usize {
-                        addch(' ' as u32);
-                    }
-                }
-            } else {
-                // Empty row
-                for _ in 0..w {
-                    addch(' ' as u32);
+                    attrset(reset_color);
+                    // Rest of line already filled with reset_color background
                 }
             }
+            // Empty rows already filled with reset_color background
         }
+
+        attrset(reset_color);
     }
 
     /// Draw the Active Columns panel
@@ -1584,6 +1608,16 @@ impl SetupScreen {
         h: i32,
         has_focus: bool,
     ) {
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
+
         // Draw header
         let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
@@ -1592,14 +1626,14 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Active Columns";
         let header_display: String = header.chars().take(w as usize).collect();
         let _ = addstr(&header_display);
         for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Selection colors
         let selection_attr = if has_focus {
@@ -1636,27 +1670,23 @@ impl SetupScreen {
                 let display_text: String = display.chars().take((w - 1) as usize).collect();
 
                 if is_selected {
-                    attron(selection_attr);
+                    attrset(selection_attr);
                     let _ = addstr(&display_text);
                     for _ in display_text.chars().count()..w as usize {
                         addch(' ' as u32);
                     }
-                    attroff(selection_attr);
+                    attrset(reset_color);
                 } else {
-                    attron(normal_attr);
+                    attrset(normal_attr);
                     let _ = addstr(&display_text);
-                    attroff(normal_attr);
-                    for _ in display_text.chars().count()..w as usize {
-                        addch(' ' as u32);
-                    }
-                }
-            } else {
-                // Empty row
-                for _ in 0..w {
-                    addch(' ' as u32);
+                    attrset(reset_color);
+                    // Rest of line already filled with reset_color background
                 }
             }
+            // Empty rows already filled with reset_color background
         }
+
+        attrset(reset_color);
     }
 
     /// Draw the Available Columns panel
@@ -1669,6 +1699,16 @@ impl SetupScreen {
         h: i32,
         has_focus: bool,
     ) {
+        // Fill panel background with reset color (matches C htop's mvhline behavior)
+        let reset_color = crt.color(ColorElement::ResetColor);
+        attrset(reset_color);
+        for row in 0..h {
+            mv(y + row, x);
+            for _ in 0..w {
+                addch(' ' as u32);
+            }
+        }
+
         // Draw header
         let header_attr = if has_focus {
             crt.color(ColorElement::PanelHeaderFocus)
@@ -1677,14 +1717,14 @@ impl SetupScreen {
         };
 
         mv(y, x);
-        attron(header_attr);
+        attrset(header_attr);
         let header = "Available Columns";
         let header_display: String = header.chars().take(w as usize).collect();
         let _ = addstr(&header_display);
         for _ in header_display.len()..w as usize {
             addch(' ' as u32);
         }
-        attroff(header_attr);
+        attrset(reset_color);
 
         // Selection colors
         let selection_attr = if has_focus {
@@ -1713,27 +1753,23 @@ impl SetupScreen {
                 let display_text: String = display.chars().take((w - 1) as usize).collect();
 
                 if is_selected {
-                    attron(selection_attr);
+                    attrset(selection_attr);
                     let _ = addstr(&display_text);
                     for _ in display_text.chars().count()..w as usize {
                         addch(' ' as u32);
                     }
-                    attroff(selection_attr);
+                    attrset(reset_color);
                 } else {
-                    attron(normal_attr);
+                    attrset(normal_attr);
                     let _ = addstr(&display_text);
-                    attroff(normal_attr);
-                    for _ in display_text.chars().count()..w as usize {
-                        addch(' ' as u32);
-                    }
-                }
-            } else {
-                // Empty row
-                for _ in 0..w {
-                    addch(' ' as u32);
+                    attrset(reset_color);
+                    // Rest of line already filled with reset_color background
                 }
             }
+            // Empty rows already filled with reset_color background
         }
+
+        attrset(reset_color);
     }
 
     fn draw_function_bar(&self, crt: &Crt, settings: &Settings) {

@@ -51,9 +51,8 @@ impl Meter for DateTimeMeter {
         let value_attr = crt.color(ColorElement::DateTime);
 
         mv(y, x);
-        attron(value_attr);
+        attrset(value_attr);
         let _ = addstr(&self.datetime_str);
-        attroff(value_attr);
     }
 
     fn mode(&self) -> MeterMode {

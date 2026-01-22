@@ -67,14 +67,12 @@ impl Meter for TasksMeter {
         mv(y, x);
 
         // "Tasks: "
-        attron(text_attr);
+        attrset(text_attr);
         let _ = addstr("Tasks: ");
-        attroff(text_attr);
 
         // Process count (total tasks - threads)
-        attron(value_attr);
+        attrset(value_attr);
         let _ = addstr(&format!("{}", self.total_tasks));
-        attroff(value_attr);
 
         // ", N thr" - userland threads (shadowed if hideUserlandThreads)
         let (thr_text_attr, thr_value_attr) = if settings.hide_userland_threads {
@@ -83,17 +81,14 @@ impl Meter for TasksMeter {
             (text_attr, running_attr)
         };
 
-        attron(thr_text_attr);
+        attrset(thr_text_attr);
         let _ = addstr(", ");
-        attroff(thr_text_attr);
 
-        attron(thr_value_attr);
+        attrset(thr_value_attr);
         let _ = addstr(&format!("{}", self.userland_threads));
-        attroff(thr_value_attr);
 
-        attron(thr_text_attr);
+        attrset(thr_text_attr);
         let _ = addstr(" thr");
-        attroff(thr_text_attr);
 
         // ", K kthr" - kernel threads (shadowed if hideKernelThreads)
         let (kthr_text_attr, kthr_value_attr) = if settings.hide_kernel_threads {
@@ -102,30 +97,24 @@ impl Meter for TasksMeter {
             (text_attr, running_attr)
         };
 
-        attron(kthr_text_attr);
+        attrset(kthr_text_attr);
         let _ = addstr(", ");
-        attroff(kthr_text_attr);
 
-        attron(kthr_value_attr);
+        attrset(kthr_value_attr);
         let _ = addstr(&format!("{}", self.kernel_threads));
-        attroff(kthr_value_attr);
 
-        attron(kthr_text_attr);
+        attrset(kthr_text_attr);
         let _ = addstr(" kthr");
-        attroff(kthr_text_attr);
 
         // "; R running" - always normal colors
-        attron(text_attr);
+        attrset(text_attr);
         let _ = addstr("; ");
-        attroff(text_attr);
 
-        attron(running_attr);
+        attrset(running_attr);
         let _ = addstr(&format!("{}", self.running));
-        attroff(running_attr);
 
-        attron(text_attr);
+        attrset(text_attr);
         let _ = addstr(" running");
-        attroff(text_attr);
     }
 
     fn mode(&self) -> MeterMode {
