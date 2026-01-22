@@ -401,10 +401,16 @@ impl MainPanel {
         }
 
         // Apply selection highlighting if selected
+        // Priority order (lowest to highest): normal -> shadow -> tagged -> selected
+        // This matches C htop Row_display behavior
         if selected {
             // For selected rows, use the override attribute method
             // This matches C htop's behavior where RichString_setAttr overrides all per-char colors
             str.write_at_width_with_attr(y, self.x, self.w as usize, selection_attr);
+        } else if process.tagged {
+            // For tagged rows, apply PROCESS_TAG color to entire row
+            let tag_attr = crt.color(ColorElement::ProcessTag);
+            str.write_at_width_with_attr(y, self.x, self.w as usize, tag_attr);
         } else {
             // For non-selected rows, use the RichString with per-field colors
             str.write_at_width(y, self.x, self.w as usize);
