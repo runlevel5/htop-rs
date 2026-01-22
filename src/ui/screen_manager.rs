@@ -2773,7 +2773,8 @@ impl ScreenManager {
         Ok(files)
     }
 
-    /// Show strace/dtruss output for process (like C htop actionStrace)
+    /// Show strace output for process (like C htop TraceScreen)
+    /// On unsupported platforms (macOS, etc.), shows "Tracing unavailable" message
     fn show_strace(&self, crt: &Crt, pid: i32) {
         crt.clear();
 
@@ -2782,28 +2783,24 @@ impl ScreenManager {
 
         mv(0, 0);
         attrset(bold);
-        #[cfg(target_os = "macos")]
-        let _ = addstr(&format!(
-            "System calls for PID {} (dtruss - requires sudo)",
-            pid
-        ));
-        #[cfg(not(target_os = "macos"))]
-        let _ = addstr(&format!("System calls for PID {} (strace)", pid));
+        let _ = addstr(&format!("Trace of process {}", pid));
         attrset(A_NORMAL);
 
         mv(2, 0);
         attrset(default_attr);
-        #[cfg(target_os = "macos")]
-        let _ = addstr("Run manually: sudo dtruss -p ");
+        // Match C htop: only Linux supports strace, others show "Tracing unavailable"
         #[cfg(target_os = "linux")]
-        let _ = addstr("Run manually: strace -p ");
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        let _ = addstr("Syscall tracing not supported on this platform.");
-
-        let _ = addstr(&pid.to_string());
-
-        mv(4, 0);
-        let _ = addstr("(Interactive tracing requires running htop with elevated privileges)");
+        {
+            let _ = addstr("Run manually: strace -p ");
+            let _ = addstr(&pid.to_string());
+            mv(4, 0);
+            let _ = addstr("(Interactive tracing requires running htop with elevated privileges)");
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = addstr("Tracing unavailable on not supported system.");
+            let _ = use_default_colors(); // suppress unused variable warning for pid
+        }
         attrset(A_NORMAL);
 
         mv(crt.height() - 1, 0);
