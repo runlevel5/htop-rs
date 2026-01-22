@@ -778,9 +778,16 @@ impl ScreenManager {
                 return HandlerResult::Redraw;
             }
             0x77 => {
-                // 'w' - wrap process command lines
-                self.main_panel.toggle_wrap_command();
-                return HandlerResult::Handled;
+                // 'w' - show command screen (wrap process command in multiple lines)
+                if let Some(pid) = self.main_panel.get_selected_pid(machine) {
+                    let command = machine
+                        .processes
+                        .get(pid)
+                        .map(|p| p.get_command().to_string())
+                        .unwrap_or_default();
+                    self.show_command_screen(crt, pid, &command);
+                }
+                return HandlerResult::Redraw;
             }
             0x78 => {
                 // 'x' - list file locks of process
@@ -1482,7 +1489,7 @@ impl ScreenManager {
             ("      l: ", "list open files with lsof", true),
             ("      x: ", "list file locks of process", false),
             ("      s: ", "trace syscalls with strace", true),
-            ("      w: ", "wrap process command", false),
+            ("      w: ", "wrap process command in multiple lines", false),
             (" F2 C S: ", "setup", false),
             (" F1 h ?: ", "show this help screen", false),
             ("  F10 q: ", "quit", false),
@@ -2866,6 +2873,279 @@ impl ScreenManager {
             match ch {
                 27 | 113 => break, // Esc or 'q'
                 x if x == KEY_F10 => break,
+                KEY_UP | 0x10 => {
+                    if selected > 0 {
+                        selected -= 1;
+                    }
+                }
+                KEY_DOWN | 0x0E => {
+                    selected += 1;
+                }
+                KEY_PPAGE => {
+                    selected = (selected - panel_height).max(0);
+                }
+                KEY_NPAGE => {
+                    selected = (selected + panel_height).min(max_selected);
+                }
+                KEY_HOME => {
+                    selected = 0;
+                }
+                KEY_END => {
+                    selected = max_selected;
+                }
+                _ => {}
+            }
+        }
+
+        crt.enable_delay();
+    }
+
+    /// Show command screen (like C htop CommandScreen)
+    /// Wraps the process command line in multiple lines
+    fn show_command_screen(&self, crt: &Crt, pid: i32, command: &str) {
+        // Wrap command into lines at word boundaries (like C htop CommandScreen_scan)
+        let wrap_command = |cmd: &str, max_width: usize| -> Vec<String> {
+            let max_width = max_width.max(40);
+            let mut lines = Vec::new();
+            let mut line = String::new();
+            let mut last_space = 0usize;
+
+            for ch in cmd.chars() {
+                if line.len() >= max_width {
+                    // Need to wrap
+                    let line_len = if last_space > 0 {
+                        last_space
+                    } else {
+                        line.len()
+                    };
+                    let (first, rest) = line.split_at(line_len);
+                    lines.push(first.to_string());
+                    line = rest.trim_start().to_string();
+                    last_space = 0;
+                }
+
+                line.push(ch);
+                if ch == ' ' {
+                    last_space = line.len();
+                }
+            }
+
+            if !line.is_empty() {
+                lines.push(line);
+            }
+
+            if lines.is_empty() {
+                lines.push(String::new());
+            }
+
+            lines
+        };
+
+        // Build wrapped lines
+        let mut lines = wrap_command(command, crt.width() as usize);
+
+        // State for the info screen
+        let mut selected = 0i32;
+        let mut scroll_v = 0i32;
+        let mut filter_text = String::new();
+        let mut search_text = String::new();
+        let mut filter_active = false;
+        let mut search_active = false;
+
+        // Get filtered lines
+        let get_filtered_lines = |lines: &[String], filter: &str| -> Vec<usize> {
+            if filter.is_empty() {
+                (0..lines.len()).collect()
+            } else {
+                let filter_lower = filter.to_lowercase();
+                lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, line)| line.to_lowercase().contains(&filter_lower))
+                    .map(|(i, _)| i)
+                    .collect()
+            }
+        };
+
+        loop {
+            let filtered_indices = get_filtered_lines(&lines, &filter_text);
+            let panel_height = crt.height() - 2; // Title + function bar
+            let panel_y = 1; // After title
+
+            // Clamp selection and scroll
+            let max_selected = (filtered_indices.len() as i32 - 1).max(0);
+            selected = selected.clamp(0, max_selected);
+
+            if selected < scroll_v {
+                scroll_v = selected;
+            } else if selected >= scroll_v + panel_height {
+                scroll_v = selected - panel_height + 1;
+            }
+            scroll_v = scroll_v.max(0);
+
+            // Draw title (like C htop InfoScreen_drawTitled)
+            let title_attr = crt.color(ColorElement::MeterText);
+            mv(0, 0);
+            attrset(title_attr);
+            let title = format!("Command of process {} - {}", pid, command);
+            let title_display: String = title.chars().take(crt.width() as usize).collect();
+            hline(' ' as u32, crt.width());
+            let _ = addstr(&title_display);
+            attrset(crt.color(ColorElement::DefaultColor));
+
+            // Draw lines
+            let default_attr = crt.color(ColorElement::DefaultColor);
+            let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
+
+            for row in 0..panel_height {
+                let y = panel_y + row;
+                let line_idx = (scroll_v + row) as usize;
+
+                mv(y, 0);
+
+                if line_idx < filtered_indices.len() {
+                    let actual_idx = filtered_indices[line_idx];
+                    let line = &lines[actual_idx];
+                    let is_selected = (scroll_v + row) == selected;
+
+                    let attr = if is_selected {
+                        selection_attr
+                    } else {
+                        default_attr
+                    };
+                    attrset(attr);
+                    hline(' ' as u32, crt.width());
+                    let display_line: String = line.chars().take(crt.width() as usize).collect();
+                    let _ = addstr(&display_line);
+                    attrset(A_NORMAL);
+                } else {
+                    attrset(default_attr);
+                    hline(' ' as u32, crt.width());
+                    attrset(A_NORMAL);
+                }
+            }
+
+            // Draw function bar or search/filter bar
+            let fb_y = crt.height() - 1;
+            mv(fb_y, 0);
+
+            if search_active || filter_active {
+                let bar_attr = crt.color(ColorElement::FunctionBar);
+                let key_attr = crt.color(ColorElement::FunctionKey);
+                attrset(bar_attr);
+                hline(' ' as u32, crt.width());
+                attrset(A_NORMAL);
+                mv(fb_y, 0);
+
+                if search_active {
+                    attrset(key_attr);
+                    let _ = addstr("Search: ");
+                    attrset(A_NORMAL);
+                    attrset(bar_attr);
+                    let _ = addstr(&search_text);
+                    attrset(A_NORMAL);
+                } else {
+                    attrset(key_attr);
+                    let _ = addstr("Filter: ");
+                    attrset(A_NORMAL);
+                    attrset(bar_attr);
+                    let _ = addstr(&filter_text);
+                    attrset(A_NORMAL);
+                }
+            } else {
+                let f4_label = if filter_text.is_empty() {
+                    "Filter "
+                } else {
+                    "FILTER "
+                };
+                let fb = FunctionBar::with_functions(vec![
+                    ("F3".to_string(), "Search ".to_string()),
+                    ("F4".to_string(), f4_label.to_string()),
+                    ("F5".to_string(), "Refresh".to_string()),
+                    ("Esc".to_string(), "Done   ".to_string()),
+                ]);
+                fb.draw_simple(crt, fb_y);
+            }
+
+            crt.refresh();
+
+            // Handle input
+            nodelay(stdscr(), false);
+            let ch = getch();
+
+            if search_active || filter_active {
+                match ch {
+                    27 => {
+                        if search_active {
+                            search_text.clear();
+                        }
+                        search_active = false;
+                        filter_active = false;
+                    }
+                    10 | KEY_ENTER => {
+                        search_active = false;
+                        filter_active = false;
+                    }
+                    KEY_BACKSPACE | 127 | 8 => {
+                        if search_active && !search_text.is_empty() {
+                            search_text.pop();
+                        } else if filter_active && !filter_text.is_empty() {
+                            filter_text.pop();
+                        }
+                    }
+                    _ if ch >= 32 && ch < 127 => {
+                        let c = char::from_u32(ch as u32).unwrap_or(' ');
+                        if search_active {
+                            search_text.push(c);
+                            let search_lower = search_text.to_lowercase();
+                            for (i, idx) in filtered_indices.iter().enumerate() {
+                                if lines[*idx].to_lowercase().contains(&search_lower) {
+                                    selected = i as i32;
+                                    break;
+                                }
+                            }
+                        } else if filter_active {
+                            filter_text.push(c);
+                            selected = 0;
+                            scroll_v = 0;
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            match ch {
+                27 | 113 => break, // Esc or 'q'
+                x if x == KEY_F10 => break,
+                x if x == KEY_F3 => {
+                    search_active = true;
+                    search_text.clear();
+                }
+                0x2F => {
+                    // '/' - search
+                    search_active = true;
+                    search_text.clear();
+                }
+                x if x == KEY_F4 => {
+                    filter_active = true;
+                }
+                0x5C => {
+                    // '\' - filter
+                    filter_active = true;
+                }
+                x if x == KEY_F5 => {
+                    // F5 - refresh (re-wrap at current width, preserve selection)
+                    let saved_selected = selected;
+                    lines = wrap_command(command, crt.width() as usize);
+                    let max_idx = (lines.len() as i32 - 1).max(0);
+                    selected = saved_selected.min(max_idx);
+                    crt.clear();
+                }
+                0x0C => {
+                    // Ctrl+L - refresh screen
+                    crt.clear();
+                }
                 KEY_UP | 0x10 => {
                     if selected > 0 {
                         selected -= 1;
