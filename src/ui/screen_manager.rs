@@ -777,6 +777,18 @@ impl ScreenManager {
                 self.main_panel.toggle_wrap_command();
                 return HandlerResult::Handled;
             }
+            0x78 => {
+                // 'x' - list file locks of process
+                if let Some(pid) = self.main_panel.get_selected_pid(machine) {
+                    let command = machine
+                        .processes
+                        .get(pid)
+                        .map(|p| p.get_command().to_string())
+                        .unwrap_or_default();
+                    self.show_file_locks(crt, pid, &command);
+                }
+                return HandlerResult::Redraw;
+            }
             0x09 => {
                 // Tab - switch to next screen tab
                 // Visual only for now - we only have one screen
@@ -1463,6 +1475,7 @@ impl ScreenManager {
             ("   F8 [: ", "lower priority (+ nice)", true),
             ("      e: ", "show process environment", false),
             ("      l: ", "list open files with lsof", true),
+            ("      x: ", "list file locks of process", false),
             ("      s: ", "trace syscalls with strace", true),
             ("      w: ", "wrap process command", false),
             (" F2 C S: ", "setup", false),
@@ -1836,6 +1849,378 @@ impl ScreenManager {
         }
 
         crt.enable_delay();
+    }
+
+    /// Show file locks for process (like C htop ProcessLocksScreen)
+    fn show_file_locks(&self, crt: &Crt, pid: i32, command: &str) {
+        // Get file locks for the process
+        let locks_result = Self::get_process_locks(pid);
+
+        // Build lines from locks data
+        let lines: Vec<String> = match locks_result {
+            Ok(locks) if locks.is_empty() => {
+                vec!["No locks have been found for the selected process.".to_string()]
+            }
+            Ok(locks) => locks,
+            Err(msg) => vec![msg],
+        };
+
+        // Header matching C htop ProcessLocksScreen
+        let header_str =
+            "   FD TYPE       EXCLUSION  READ/WRITE DEVICE       NODE               START                 END  FILENAME";
+
+        // State for the info screen
+        let mut selected = 0i32;
+        let mut scroll_v = 0i32;
+        let mut filter_text = String::new();
+        let mut search_text = String::new();
+        let mut filter_active = false;
+        let mut search_active = false;
+
+        // Get filtered lines
+        let get_filtered_lines = |lines: &[String], filter: &str| -> Vec<usize> {
+            if filter.is_empty() {
+                (0..lines.len()).collect()
+            } else {
+                let filter_lower = filter.to_lowercase();
+                lines
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, line)| line.to_lowercase().contains(&filter_lower))
+                    .map(|(i, _)| i)
+                    .collect()
+            }
+        };
+
+        loop {
+            let filtered_indices = get_filtered_lines(&lines, &filter_text);
+            let panel_height = crt.height() - 3; // Title + header + function bar
+            let panel_y = 2; // After title and header
+
+            // Clamp selection and scroll
+            let max_selected = (filtered_indices.len() as i32 - 1).max(0);
+            selected = selected.clamp(0, max_selected);
+
+            if selected < scroll_v {
+                scroll_v = selected;
+            } else if selected >= scroll_v + panel_height {
+                scroll_v = selected - panel_height + 1;
+            }
+            scroll_v = scroll_v.max(0);
+
+            // Draw title (like C htop InfoScreen_drawTitled)
+            let title_attr = crt.color(ColorElement::MeterText);
+            mv(0, 0);
+            attrset(title_attr);
+            let title = format!("Snapshot of file locks of process {} - {}", pid, command);
+            let title_display: String = title.chars().take(crt.width() as usize).collect();
+            hline(' ' as u32, crt.width());
+            let _ = addstr(&title_display);
+            attrset(A_NORMAL);
+
+            // Draw header
+            let header_attr = crt.color(ColorElement::PanelHeaderFocus);
+            mv(1, 0);
+            attrset(header_attr);
+            hline(' ' as u32, crt.width());
+            let header_display: String = header_str.chars().take(crt.width() as usize).collect();
+            let _ = addstr(&header_display);
+            attrset(A_NORMAL);
+
+            // Draw lines
+            let default_attr = crt.color(ColorElement::DefaultColor);
+            let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
+
+            for row in 0..panel_height {
+                let y = panel_y + row;
+                let line_idx = (scroll_v + row) as usize;
+
+                mv(y, 0);
+
+                if line_idx < filtered_indices.len() {
+                    let actual_idx = filtered_indices[line_idx];
+                    let line = &lines[actual_idx];
+                    let is_selected = (scroll_v + row) == selected;
+
+                    let attr = if is_selected {
+                        selection_attr
+                    } else {
+                        default_attr
+                    };
+                    attrset(attr);
+                    hline(' ' as u32, crt.width());
+                    let display_line: String = line.chars().take(crt.width() as usize).collect();
+                    let _ = addstr(&display_line);
+                    attrset(A_NORMAL);
+                } else {
+                    attrset(default_attr);
+                    hline(' ' as u32, crt.width());
+                    attrset(A_NORMAL);
+                }
+            }
+
+            // Draw function bar or search/filter bar
+            let fb_y = crt.height() - 1;
+            mv(fb_y, 0);
+
+            if search_active || filter_active {
+                let bar_attr = crt.color(ColorElement::FunctionBar);
+                let key_attr = crt.color(ColorElement::FunctionKey);
+                attrset(bar_attr);
+                hline(' ' as u32, crt.width());
+                attrset(A_NORMAL);
+                mv(fb_y, 0);
+
+                if search_active {
+                    attrset(key_attr);
+                    let _ = addstr("Search: ");
+                    attrset(A_NORMAL);
+                    attrset(bar_attr);
+                    let _ = addstr(&search_text);
+                    attrset(A_NORMAL);
+                } else {
+                    attrset(key_attr);
+                    let _ = addstr("Filter: ");
+                    attrset(A_NORMAL);
+                    attrset(bar_attr);
+                    let _ = addstr(&filter_text);
+                    attrset(A_NORMAL);
+                }
+            } else {
+                let f4_label = if filter_text.is_empty() {
+                    "Filter "
+                } else {
+                    "FILTER "
+                };
+                let fb = FunctionBar::with_functions(vec![
+                    ("F3".to_string(), "Search ".to_string()),
+                    ("F4".to_string(), f4_label.to_string()),
+                    ("F5".to_string(), "Refresh".to_string()),
+                    ("Esc".to_string(), "Done   ".to_string()),
+                ]);
+                fb.draw_simple(crt, fb_y);
+            }
+
+            crt.refresh();
+
+            // Handle input
+            nodelay(stdscr(), false);
+            let ch = getch();
+
+            if search_active || filter_active {
+                match ch {
+                    27 => {
+                        if search_active {
+                            search_text.clear();
+                        }
+                        search_active = false;
+                        filter_active = false;
+                    }
+                    10 | KEY_ENTER => {
+                        search_active = false;
+                        filter_active = false;
+                    }
+                    KEY_BACKSPACE | 127 | 8 => {
+                        if search_active && !search_text.is_empty() {
+                            search_text.pop();
+                        } else if filter_active && !filter_text.is_empty() {
+                            filter_text.pop();
+                        }
+                    }
+                    _ if ch >= 32 && ch < 127 => {
+                        let c = char::from_u32(ch as u32).unwrap_or(' ');
+                        if search_active {
+                            search_text.push(c);
+                            let search_lower = search_text.to_lowercase();
+                            for (i, idx) in filtered_indices.iter().enumerate() {
+                                if lines[*idx].to_lowercase().contains(&search_lower) {
+                                    selected = i as i32;
+                                    break;
+                                }
+                            }
+                        } else if filter_active {
+                            filter_text.push(c);
+                            selected = 0;
+                            scroll_v = 0;
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            match ch {
+                27 | 113 => break,
+                x if x == KEY_F10 => break,
+                x if x == KEY_F3 => {
+                    search_active = true;
+                    search_text.clear();
+                }
+                0x2F => {
+                    search_active = true;
+                    search_text.clear();
+                }
+                x if x == KEY_F4 => {
+                    filter_active = true;
+                }
+                0x5C => {
+                    filter_active = true;
+                }
+                x if x == KEY_F5 => {
+                    clear();
+                }
+                0x0C => {
+                    clear();
+                }
+                KEY_UP | 0x10 => {
+                    if selected > 0 {
+                        selected -= 1;
+                    }
+                }
+                KEY_DOWN | 0x0E => {
+                    selected += 1;
+                }
+                KEY_PPAGE => {
+                    selected = (selected - panel_height).max(0);
+                }
+                KEY_NPAGE => {
+                    selected = (selected + panel_height).min(max_selected);
+                }
+                KEY_HOME => {
+                    selected = 0;
+                }
+                KEY_END => {
+                    selected = max_selected;
+                }
+                _ => {}
+            }
+        }
+
+        crt.enable_delay();
+    }
+
+    /// Get file locks for a process
+    /// Returns formatted lock entries or error message
+    fn get_process_locks(pid: i32) -> Result<Vec<String>, String> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::fs;
+            use std::os::unix::fs::MetadataExt;
+            use std::path::Path;
+
+            let fdinfo_path = format!("/proc/{}/fdinfo", pid);
+            let fd_path = format!("/proc/{}/fd", pid);
+
+            let entries = match fs::read_dir(&fdinfo_path) {
+                Ok(e) => e,
+                Err(_) => return Err("Could not read process file descriptor info.".to_string()),
+            };
+
+            let mut locks = Vec::new();
+
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+
+                // Skip . and ..
+                if name_str == "." || name_str == ".." {
+                    continue;
+                }
+
+                // Parse FD number
+                let fd: i32 = match name_str.parse() {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+
+                // Read fdinfo file
+                let fdinfo_file = format!("{}/{}", fdinfo_path, name_str);
+                let content = match fs::read_to_string(&fdinfo_file) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                // Look for lock: lines
+                for line in content.lines() {
+                    if !line.starts_with("lock:\t") {
+                        continue;
+                    }
+
+                    // Parse lock line format:
+                    // lock:\t1: FLOCK  ADVISORY  WRITE 12345 08:01:123456 0 EOF
+                    let lock_part = &line[6..]; // Skip "lock:\t"
+                    let parts: Vec<&str> = lock_part.split_whitespace().collect();
+
+                    if parts.len() < 8 {
+                        continue;
+                    }
+
+                    // Parts: [0]=id:, [1]=type, [2]=advisory, [3]=read/write, [4]=pid, [5]=dev:inode, [6]=start, [7]=end
+                    let locktype = parts[1];
+                    let exclusive = parts[2];
+                    let readwrite = parts[3];
+                    let dev_inode = parts[5];
+                    let start = parts[6];
+                    let end = parts[7];
+
+                    // Parse device:inode (format: major:minor:inode)
+                    let dev_parts: Vec<&str> = dev_inode.split(':').collect();
+                    let (dev, inode) = if dev_parts.len() >= 3 {
+                        let major: u64 = dev_parts[0].parse().unwrap_or(0);
+                        let minor: u64 = dev_parts[1].parse().unwrap_or(0);
+                        let inode: u64 = dev_parts[2].parse().unwrap_or(0);
+                        let dev = (major << 8) | minor;
+                        (format!("{:#6x}", dev), inode.to_string())
+                    } else {
+                        ("     0".to_string(), "0".to_string())
+                    };
+
+                    // Format end (EOF or number)
+                    let end_display = if end == "EOF" {
+                        "<END OF FILE>".to_string()
+                    } else {
+                        end.to_string()
+                    };
+
+                    // Get filename from /proc/pid/fd/N
+                    let fd_link = format!("{}/{}", fd_path, fd);
+                    let filename = fs::read_link(&fd_link)
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| "<N/A>".to_string());
+
+                    // Format entry matching C htop format
+                    let entry = format!(
+                        "{:5} {:<10} {:<10} {:<10} {:>6} {:>10} {:>19} {:>19}  {}",
+                        fd,
+                        locktype,
+                        exclusive,
+                        readwrite,
+                        dev,
+                        inode,
+                        start,
+                        end_display,
+                        filename
+                    );
+                    locks.push(entry);
+                }
+            }
+
+            locks.sort();
+            Ok(locks)
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let _ = pid;
+            // macOS doesn't support this feature (same as C htop)
+            Err("This feature is not supported on your platform.".to_string())
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = pid;
+            Err("This feature is not supported on your platform.".to_string())
+        }
     }
 
     /// Show lsof output for process (like C htop OpenFilesScreen)
