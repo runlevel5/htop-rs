@@ -821,7 +821,9 @@ impl Default for Process {
 #[derive(Debug, Default)]
 pub struct ProcessList {
     pub processes: Vec<Process>,
-    pub by_pid: std::collections::HashMap<i32, usize>,
+    /// Tracks which PIDs exist (used for O(1) existence check in add())
+    /// Note: Does NOT store indices - use linear search for position lookup
+    pub by_pid: std::collections::HashSet<i32>,
     pub tree_display_order: Vec<i32>, // PIDs in tree display order
 }
 
@@ -829,7 +831,7 @@ impl ProcessList {
     pub fn new() -> Self {
         ProcessList {
             processes: Vec::new(),
-            by_pid: std::collections::HashMap::new(),
+            by_pid: std::collections::HashSet::new(),
             tree_display_order: Vec::new(),
         }
     }
@@ -837,32 +839,36 @@ impl ProcessList {
     /// Add or update a process
     pub fn add(&mut self, process: Process) {
         let pid = process.pid;
-        if let Some(&idx) = self.by_pid.get(&pid) {
-            self.processes[idx] = process;
+        if self.by_pid.contains(&pid) {
+            // Process exists - find and update via linear search
+            // (HashMap only tracks existence, not position, since indices change after sort)
+            if let Some(p) = self.processes.iter_mut().find(|p| p.pid == pid) {
+                *p = process;
+            }
         } else {
-            let idx = self.processes.len();
+            // New process
             self.processes.push(process);
-            self.by_pid.insert(pid, idx);
+            self.by_pid.insert(pid); // Just track that this PID exists
         }
     }
 
-    /// Get a process by PID
+    /// Get a process by PID (linear search - called rarely for user interactions)
     pub fn get(&self, pid: i32) -> Option<&Process> {
-        self.by_pid.get(&pid).map(|&idx| &self.processes[idx])
+        self.processes.iter().find(|p| p.pid == pid)
     }
 
-    /// Get a mutable reference to a process by PID
+    /// Get a mutable reference to a process by PID (linear search)
     pub fn get_mut(&mut self, pid: i32) -> Option<&mut Process> {
-        self.by_pid.get(&pid).map(|&idx| &mut self.processes[idx])
+        self.processes.iter_mut().find(|p| p.pid == pid)
     }
 
     /// Remove processes that weren't updated in the last scan
     pub fn cleanup(&mut self) {
         self.processes.retain(|p| p.updated);
-        // Rebuild the index
+        // Rebuild the existence set
         self.by_pid.clear();
-        for (idx, process) in self.processes.iter().enumerate() {
-            self.by_pid.insert(process.pid, idx);
+        for process in self.processes.iter() {
+            self.by_pid.insert(process.pid);
         }
         // Mark all as not updated for next scan
         for process in &mut self.processes {
@@ -870,21 +876,34 @@ impl ProcessList {
         }
     }
 
-    /// Sort processes by a field
+    /// Sort processes by a field using insertion sort
+    /// Insertion sort is O(n) for nearly-sorted data (common case between scans)
     pub fn sort_by(&mut self, field: ProcessField, ascending: bool) {
-        self.processes.sort_by(|a, b| {
-            let ord = a.compare_by_field(b, field);
-            if ascending {
-                ord
-            } else {
-                ord.reverse()
-            }
-        });
-        // Rebuild the index
-        self.by_pid.clear();
-        for (idx, process) in self.processes.iter().enumerate() {
-            self.by_pid.insert(process.pid, idx);
+        let len = self.processes.len();
+        if len <= 1 {
+            return;
         }
+
+        // Insertion sort - O(n) for nearly-sorted data, O(n²) worst case
+        for i in 1..len {
+            let mut j = i;
+            while j > 0 {
+                let cmp = self.processes[j - 1].compare_by_field(&self.processes[j], field);
+                let should_swap = if ascending {
+                    cmp == std::cmp::Ordering::Greater
+                } else {
+                    cmp == std::cmp::Ordering::Less
+                };
+
+                if should_swap {
+                    self.processes.swap(j - 1, j);
+                    j -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        // No need to rebuild by_pid - it only tracks existence, not position
     }
 
     /// Get the number of processes
@@ -945,11 +964,7 @@ impl ProcessList {
             }
         });
 
-        // Rebuild the index
-        self.by_pid.clear();
-        for (idx, process) in self.processes.iter().enumerate() {
-            self.by_pid.insert(process.pid, idx);
-        }
+        // No need to rebuild by_pid - it only tracks existence, not position
 
         // Build display list in tree order
         let mut display_list: Vec<i32> = Vec::new();
