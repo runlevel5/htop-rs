@@ -1600,8 +1600,54 @@ impl ScreenManager {
         let env_result: Result<Vec<String>, String> =
             Err("Environment reading not supported on this platform.".to_string());
 
+        // Helper to read environment
+        let read_env = |pid: i32| -> Vec<String> {
+            #[cfg(target_os = "macos")]
+            {
+                use std::process::Command;
+                Command::new("ps")
+                    .args(["-p", &pid.to_string(), "-E", "-o", "command="])
+                    .output()
+                    .ok()
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| {
+                        let mut vars: Vec<String> = Vec::new();
+                        if let Some(pos) = s.find(' ') {
+                            let env_part = &s[pos + 1..];
+                            for part in env_part.split_whitespace() {
+                                if part.contains('=') {
+                                    vars.push(part.to_string());
+                                }
+                            }
+                        }
+                        vars.sort();
+                        vars
+                    })
+                    .unwrap_or_else(|| vec!["Could not read process environment.".to_string()])
+            }
+            #[cfg(target_os = "linux")]
+            {
+                use std::fs;
+                fs::read_to_string(format!("/proc/{}/environ", pid))
+                    .map(|s| {
+                        let mut vars: Vec<String> = s
+                            .split('\0')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect();
+                        vars.sort();
+                        vars
+                    })
+                    .unwrap_or_else(|_| vec!["Could not read process environment.".to_string()])
+            }
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            {
+                vec!["Environment reading not supported on this platform.".to_string()]
+            }
+        };
+
         // Build lines from environment
-        let lines: Vec<String> = match env_result {
+        let mut lines: Vec<String> = match env_result {
             Ok(vars) => vars,
             Err(msg) => vec![msg],
         };
@@ -1811,10 +1857,13 @@ impl ScreenManager {
                     filter_active = true;
                 }
                 x if x == KEY_F5 => {
-                    // F5 - refresh (re-read environment)
-                    // For simplicity, just clear and continue
-                    // Full implementation would re-read /proc/pid/environ
-                    clear();
+                    // F5 - refresh (re-read environment, preserve selection like C htop)
+                    let saved_selected = selected;
+                    lines = read_env(pid);
+                    // Restore selection, clamped to new list size
+                    let max_idx = (lines.len() as i32 - 1).max(0);
+                    selected = saved_selected.min(max_idx);
+                    crt.clear();
                 }
                 0x0C => {
                     // Ctrl+L - refresh screen
