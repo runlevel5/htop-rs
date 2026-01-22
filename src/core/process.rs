@@ -260,7 +260,7 @@ impl ProcessField {
             ProcessField::Comm => "COMM ",
             ProcessField::Exe => "EXE ",
             ProcessField::Cwd => "CWD ",
-            ProcessField::PercentCpu => " CPU% ",
+            ProcessField::PercentCpu => "CPU% ",
             ProcessField::PercentMem => "MEM% ",
             ProcessField::IOPriority => "IO ",
             ProcessField::IORead => "  IO_R ",
