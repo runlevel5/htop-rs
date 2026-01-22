@@ -538,11 +538,11 @@ impl Crt {
         self.colors[ColorElement::ProcessMegabytes as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
         self.colors[ColorElement::ProcessGigabytes as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
         self.colors[ColorElement::ProcessBasename as usize] =
-            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+            color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::ProcessTree as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
         self.colors[ColorElement::ProcessThread as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
         self.colors[ColorElement::ProcessThreadBasename as usize] =
-            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
+            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::ProcessComm as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
         self.colors[ColorElement::ProcessThreadComm as usize] =
             color_pair(COLOR_YELLOW, COLOR_BLACK);
