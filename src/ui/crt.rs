@@ -618,17 +618,141 @@ impl Crt {
 
     /// Set up monochrome color scheme
     fn setup_monochrome(&mut self) {
+        // Monochrome uses terminal attributes (A_BOLD, A_DIM, A_REVERSE) instead of colors
+        // Initialize all to A_NORMAL first
         for color in &mut self.colors {
             *color = A_NORMAL;
         }
+
+        // Function bar and keys
         self.colors[ColorElement::FunctionBar as usize] = A_REVERSE;
-        self.colors[ColorElement::FunctionKey as usize] = A_REVERSE | A_BOLD;
-        self.colors[ColorElement::PanelHeaderFocus as usize] = A_REVERSE | A_BOLD;
+        self.colors[ColorElement::FunctionKey as usize] = A_NORMAL;
+
+        // Panel headers and selection
+        self.colors[ColorElement::PanelHeaderFocus as usize] = A_REVERSE;
         self.colors[ColorElement::PanelHeaderUnfocus as usize] = A_REVERSE;
-        self.colors[ColorElement::PanelSelectionFocus as usize] = A_REVERSE | A_BOLD;
-        self.colors[ColorElement::PanelSelectionUnfocus as usize] = A_REVERSE;
+        self.colors[ColorElement::PanelSelectionFocus as usize] = A_REVERSE;
+        self.colors[ColorElement::PanelSelectionFollow as usize] = A_REVERSE;
+        self.colors[ColorElement::PanelSelectionUnfocus as usize] = A_BOLD;
+        self.colors[ColorElement::PanelEdit as usize] = A_BOLD;
+
+        // Search/errors
+        self.colors[ColorElement::FailedSearch as usize] = A_REVERSE | A_BOLD;
+        self.colors[ColorElement::FailedRead as usize] = A_BOLD;
+        self.colors[ColorElement::Paused as usize] = A_BOLD | A_REVERSE;
+
+        // Meter elements
+        self.colors[ColorElement::MeterShadow as usize] = A_DIM;
+        self.colors[ColorElement::MeterText as usize] = A_NORMAL;
+        self.colors[ColorElement::MeterValue as usize] = A_BOLD;
+        self.colors[ColorElement::MeterValueError as usize] = A_BOLD;
+        self.colors[ColorElement::MeterValueNotice as usize] = A_BOLD;
+        self.colors[ColorElement::MeterValueWarn as usize] = A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = A_NORMAL;
+
+        // Status elements
+        self.colors[ColorElement::Uptime as usize] = A_BOLD;
+        self.colors[ColorElement::Battery as usize] = A_BOLD;
+        self.colors[ColorElement::LargeNumber as usize] = A_BOLD;
+        self.colors[ColorElement::TasksRunning as usize] = A_BOLD;
+
+        // Process elements
+        self.colors[ColorElement::ProcessShadow as usize] = A_DIM;
+        self.colors[ColorElement::ProcessTag as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessMegabytes as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessGigabytes as usize] = A_BOLD;
         self.colors[ColorElement::ProcessBasename as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessTree as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessRunState as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessDState as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessHighPriority as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessLowPriority as usize] = A_DIM;
+        self.colors[ColorElement::ProcessNew as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessTomb as usize] = A_DIM;
+        self.colors[ColorElement::ProcessThread as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessThreadBasename as usize] = A_REVERSE;
+        self.colors[ColorElement::ProcessComm as usize] = A_BOLD;
+        self.colors[ColorElement::ProcessThreadComm as usize] = A_REVERSE;
+        self.colors[ColorElement::ProcessPriv as usize] = A_BOLD;
+
+        // Bar elements
+        self.colors[ColorElement::BarBorder as usize] = A_BOLD;
+        self.colors[ColorElement::BarShadow as usize] = A_DIM;
+
+        // Memory/Swap elements
+        self.colors[ColorElement::Swap as usize] = A_BOLD;
+        self.colors[ColorElement::SwapCache as usize] = A_NORMAL;
+        self.colors[ColorElement::SwapFrontswap as usize] = A_DIM;
+        self.colors[ColorElement::MemoryUsed as usize] = A_BOLD;
+        self.colors[ColorElement::MemoryCompressed as usize] = A_DIM;
+
+        // Graph elements
+        self.colors[ColorElement::Graph1 as usize] = A_BOLD;
+        self.colors[ColorElement::Graph2 as usize] = A_NORMAL;
+
+        // Huge pages
+        self.colors[ColorElement::HugePage1 as usize] = A_BOLD;
+        self.colors[ColorElement::HugePage2 as usize] = A_NORMAL;
+        self.colors[ColorElement::HugePage3 as usize] = A_REVERSE | A_BOLD;
+        self.colors[ColorElement::HugePage4 as usize] = A_REVERSE;
+
+        // Load average
+        self.colors[ColorElement::LoadAverageFifteen as usize] = A_DIM;
+        self.colors[ColorElement::LoadAverageFive as usize] = A_NORMAL;
+        self.colors[ColorElement::LoadAverageOne as usize] = A_BOLD;
+        self.colors[ColorElement::Load as usize] = A_BOLD;
+
+        // Help
         self.colors[ColorElement::HelpBold as usize] = A_BOLD;
+        self.colors[ColorElement::HelpShadow as usize] = A_DIM;
+
+        // Clock/Date
+        self.colors[ColorElement::Clock as usize] = A_BOLD;
+        self.colors[ColorElement::Date as usize] = A_BOLD;
+        self.colors[ColorElement::DateTime as usize] = A_BOLD;
+
+        // Checkbox
+        self.colors[ColorElement::CheckBox as usize] = A_BOLD;
+
+        // Hostname
+        self.colors[ColorElement::Hostname as usize] = A_BOLD;
+
+        // CPU elements
+        self.colors[ColorElement::CpuNormal as usize] = A_BOLD;
+        self.colors[ColorElement::CpuSystem as usize] = A_BOLD;
+        self.colors[ColorElement::CpuIrq as usize] = A_BOLD;
+        self.colors[ColorElement::CpuSoftIrq as usize] = A_BOLD;
+        self.colors[ColorElement::CpuSteal as usize] = A_DIM;
+        self.colors[ColorElement::CpuGuest as usize] = A_DIM;
+
+        // Screen tabs - THIS IS THE KEY FIX
+        self.colors[ColorElement::ScreensOthBorder as usize] = A_DIM;
+        self.colors[ColorElement::ScreensOthText as usize] = A_DIM;
+        self.colors[ColorElement::ScreensCurBorder as usize] = A_REVERSE;
+        self.colors[ColorElement::ScreensCurText as usize] = A_REVERSE;
+
+        // Pressure stall
+        self.colors[ColorElement::PressureStallThreeHundred as usize] = A_DIM;
+        self.colors[ColorElement::PressureStallSixty as usize] = A_NORMAL;
+        self.colors[ColorElement::PressureStallTen as usize] = A_BOLD;
+
+        // File descriptors
+        self.colors[ColorElement::FileDescriptorUsed as usize] = A_BOLD;
+        self.colors[ColorElement::FileDescriptorMax as usize] = A_BOLD;
+
+        // ZFS elements
+        self.colors[ColorElement::ZfsAnon as usize] = A_DIM;
+        self.colors[ColorElement::ZfsHeader as usize] = A_BOLD;
+        self.colors[ColorElement::ZfsOther as usize] = A_DIM;
+        self.colors[ColorElement::ZfsCompressed as usize] = A_BOLD;
+        self.colors[ColorElement::ZfsRatio as usize] = A_BOLD;
+
+        // Dynamic colors
+        self.colors[ColorElement::DynamicGray as usize] = A_DIM;
+        self.colors[ColorElement::DynamicDarkGray as usize] = A_DIM;
+        self.colors[ColorElement::DynamicRed as usize] = A_BOLD;
+        self.colors[ColorElement::DynamicCyan as usize] = A_BOLD;
+        self.colors[ColorElement::DynamicWhite as usize] = A_BOLD;
     }
 
     /// Set up Black on White color scheme
