@@ -126,6 +126,8 @@ pub enum ProcessField {
     IOWriteRate,
     IOReadOps,
     IOWriteOps,
+    PercentIODelay,
+    PercentSwapDelay,
     Ctxt,
     CGroup,
     OomScore,
@@ -215,6 +217,8 @@ impl ProcessField {
             ProcessField::IOWriteRate => "IO_WRITE_RATE",
             ProcessField::IOReadOps => "IO_OPS",
             ProcessField::IOWriteOps => "IO_OPS",
+            ProcessField::PercentIODelay => "PERCENT_IO_DELAY",
+            ProcessField::PercentSwapDelay => "PERCENT_SWAP_DELAY",
             ProcessField::Ctxt => "CTXT",
             ProcessField::CGroup => "CGROUP",
             ProcessField::OomScore => "OOM",
@@ -266,6 +270,8 @@ impl ProcessField {
             ProcessField::IOWriteRate => "DISK WRITE ",
             ProcessField::IOReadOps => " IO_ROP ",
             ProcessField::IOWriteOps => " IO_WOP ",
+            ProcessField::PercentIODelay => " IOD% ",
+            ProcessField::PercentSwapDelay => "SWPD% ",
             ProcessField::Ctxt => "    CTXT ",
             ProcessField::CGroup => "CGROUP ",
             ProcessField::OomScore => " OOM ",
@@ -319,6 +325,8 @@ impl ProcessField {
             ProcessField::IOWriteRate => "The I/O rate of write(2) in bytes per second",
             ProcessField::IOReadOps => "Read operations",
             ProcessField::IOWriteOps => "Write operations",
+            ProcessField::PercentIODelay => "Block I/O delay %",
+            ProcessField::PercentSwapDelay => "Swapin delay %",
             ProcessField::Ctxt => "Context switches",
             ProcessField::CGroup => "Control group",
             ProcessField::OomScore => "OOM killer score",
@@ -367,6 +375,8 @@ impl ProcessField {
             "IO_READ_RATE" => Some(ProcessField::IOReadRate),
             "IO_WRITE_RATE" => Some(ProcessField::IOWriteRate),
             "IO_PRIORITY" => Some(ProcessField::IOPriority),
+            "PERCENT_IO_DELAY" | "IOD%" => Some(ProcessField::PercentIODelay),
+            "PERCENT_SWAP_DELAY" | "SWPD%" => Some(ProcessField::PercentSwapDelay),
             _ => None,
         }
     }
@@ -387,6 +397,8 @@ impl ProcessField {
                 | ProcessField::IORate
                 | ProcessField::IOReadRate
                 | ProcessField::IOWriteRate
+                | ProcessField::PercentIODelay
+                | ProcessField::PercentSwapDelay
         )
     }
 }
@@ -492,6 +504,10 @@ pub struct Process {
     pub io_read_rate: f64,
     pub io_write_rate: f64,
 
+    // Delay accounting (Linux-specific, requires CONFIG_TASKSTATS)
+    pub blkio_delay_percent: f32,  // Block I/O delay %
+    pub swapin_delay_percent: f32, // Swapin delay %
+
     // Context switches
     pub ctxt_switches: u64,
 
@@ -571,6 +587,8 @@ impl Process {
             io_write_bytes: 0,
             io_read_rate: 0.0,
             io_write_rate: 0.0,
+            blkio_delay_percent: f32::NAN,
+            swapin_delay_percent: f32::NAN,
             ctxt_switches: 0,
             cgroup: None,
             oom_score: 0,

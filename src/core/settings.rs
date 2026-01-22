@@ -269,6 +269,8 @@ impl ScreenSettings {
                 ProcessField::IORate,
                 ProcessField::IOReadRate,
                 ProcessField::IOWriteRate,
+                ProcessField::PercentSwapDelay,
+                ProcessField::PercentIODelay,
                 ProcessField::Command,
             ],
             sort_key: ProcessField::IORate,

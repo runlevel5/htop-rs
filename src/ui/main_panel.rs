@@ -732,6 +732,28 @@ impl MainPanel {
                 // Total bytes written
                 print_kbytes(str, process.io_write_bytes, coloring && !is_shadowed, crt);
             }
+            ProcessField::PercentIODelay => {
+                // Block I/O delay percentage (Linux delay accounting)
+                if is_shadowed {
+                    str.append(
+                        &format!("{:>4.1} ", process.blkio_delay_percent),
+                        shadow_color,
+                    );
+                } else {
+                    print_percentage(str, process.blkio_delay_percent, 5, crt);
+                }
+            }
+            ProcessField::PercentSwapDelay => {
+                // Swapin delay percentage (Linux delay accounting)
+                if is_shadowed {
+                    str.append(
+                        &format!("{:>4.1} ", process.swapin_delay_percent),
+                        shadow_color,
+                    );
+                } else {
+                    print_percentage(str, process.swapin_delay_percent, 5, crt);
+                }
+            }
             _ => {
                 // Default: show placeholder
                 str.append("? ", base_color);
