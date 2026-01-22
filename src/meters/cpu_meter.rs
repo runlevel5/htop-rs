@@ -36,6 +36,7 @@ pub struct CpuMeter {
     steal: f64,
     guest: f64,
     iowait: f64,
+    frequency: f64,
     /// Number of CPUs (cached for height calculation)
     cpu_count: usize,
 }
@@ -54,6 +55,7 @@ impl CpuMeter {
             steal: 0.0,
             guest: 0.0,
             iowait: 0.0,
+            frequency: 0.0,
             cpu_count: 1,
         }
     }
@@ -100,7 +102,18 @@ impl CpuMeter {
         }
     }
 
+    /// Format CPU frequency for display
+    /// Returns frequency string in MHz format, or "N/A" if not available
+    fn format_frequency(frequency: f64) -> String {
+        if frequency > 0.0 && frequency.is_finite() {
+            format!("{:4}MHz", frequency as u32)
+        } else {
+            "N/A".to_string()
+        }
+    }
+
     /// Draw a CPU bar with percentage text inside (like C htop)
+    /// When show_cpu_usage is false, no percentage text is displayed (matches C htop showCPUUsage)
     fn draw_cpu_bar_internal(
         crt: &Crt,
         caption: &str,
@@ -109,6 +122,9 @@ impl CpuMeter {
         x: i32,
         y: i32,
         width: i32,
+        show_cpu_usage: bool,
+        show_cpu_frequency: bool,
+        frequency: f64,
     ) {
         use ncurses::*;
 
@@ -137,8 +153,19 @@ impl CpuMeter {
         // Inner bar width (between brackets)
         let inner_width = (bar_width - 2) as usize;
 
-        // Format the percentage text to show inside the bar (right-aligned)
-        let text = format!("{:.1}%", total_percent);
+        // Build the text to display inside the bar (right-aligned)
+        // Matches C htop: cpuUsageBuffer + " " + cpuFrequencyBuffer (all inside the bar)
+        let mut text = String::new();
+        if show_cpu_usage {
+            text.push_str(&format!("{:.1}%", total_percent));
+        }
+        if show_cpu_frequency {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(&Self::format_frequency(frequency));
+        }
+
         let text_len = text.len();
         let padding = inner_width.saturating_sub(text_len);
 
@@ -163,7 +190,7 @@ impl CpuMeter {
             let attr = crt.color(*color);
             attron(attr);
             for _ in 0..*chars {
-                if pos >= padding && pos - padding < text_len {
+                if !text.is_empty() && pos >= padding && pos - padding < text_len {
                     let ch = text.chars().nth(pos - padding).unwrap_or('|');
                     addch(ch as u32);
                 } else {
@@ -178,7 +205,7 @@ impl CpuMeter {
         let shadow_attr = crt.color(ColorElement::BarShadow);
         attron(shadow_attr);
         while pos < inner_width {
-            if pos >= padding && pos - padding < text_len {
+            if !text.is_empty() && pos >= padding && pos - padding < text_len {
                 let ch = text.chars().nth(pos - padding).unwrap_or(' ');
                 addch(ch as u32);
             } else {
@@ -199,30 +226,70 @@ impl CpuMeter {
         y: i32,
         width: i32,
         count_from_one: bool,
+        show_cpu_usage: bool,
+        account_guest: bool,
+        detailed_cpu_time: bool,
+        show_cpu_frequency: bool,
     ) {
-        let values = vec![
-            (cpu.user_percent, ColorElement::CpuNormal),
-            (cpu.nice_percent, ColorElement::CpuNice),
-            (cpu.system_percent, ColorElement::CpuSystem),
-            (cpu.irq_percent, ColorElement::CpuIrq),
-            (cpu.softirq_percent, ColorElement::CpuSoftIrq),
-            (cpu.steal_percent, ColorElement::CpuSteal),
-            (cpu.guest_percent, ColorElement::CpuGuest),
-            (cpu.iowait_percent, ColorElement::CpuIOWait),
-        ];
+        // Build values array based on detailed_cpu_time setting
+        // When detailed: show all 8 segments
+        // When not detailed: combine system+irq+softirq into "kernel", combine steal+guest into one
+        let values = if detailed_cpu_time {
+            vec![
+                (cpu.user_percent, ColorElement::CpuNormal),
+                (cpu.nice_percent, ColorElement::CpuNice),
+                (cpu.system_percent, ColorElement::CpuSystem),
+                (cpu.irq_percent, ColorElement::CpuIrq),
+                (cpu.softirq_percent, ColorElement::CpuSoftIrq),
+                (cpu.steal_percent, ColorElement::CpuSteal),
+                (cpu.guest_percent, ColorElement::CpuGuest),
+                (cpu.iowait_percent, ColorElement::CpuIOWait),
+            ]
+        } else {
+            // Non-detailed: combine into simpler view (matches C htop)
+            // normal (user), nice, kernel (system+irq+softirq), virtual (steal+guest)
+            vec![
+                (cpu.user_percent, ColorElement::CpuNormal),
+                (cpu.nice_percent, ColorElement::CpuNice),
+                (
+                    cpu.system_percent + cpu.irq_percent + cpu.softirq_percent,
+                    ColorElement::CpuSystem,
+                ),
+                (
+                    cpu.steal_percent + cpu.guest_percent,
+                    ColorElement::CpuGuest,
+                ),
+            ]
+        };
 
+        // Calculate total - guest is only included when account_guest is true and detailed mode
         let total = cpu.user_percent
             + cpu.nice_percent
             + cpu.system_percent
             + cpu.irq_percent
             + cpu.softirq_percent
             + cpu.steal_percent
-            + cpu.guest_percent
+            + if account_guest || !detailed_cpu_time {
+                cpu.guest_percent
+            } else {
+                0.0
+            }
             + cpu.iowait_percent;
 
         // Apply count_cpus_from_one setting (like C htop Settings_cpuId macro)
         let display_id = if count_from_one { cpu_idx + 1 } else { cpu_idx };
-        Self::draw_cpu_bar_internal(crt, &format!("{}", display_id), &values, total, x, y, width);
+        Self::draw_cpu_bar_internal(
+            crt,
+            &format!("{}", display_id),
+            &values,
+            total,
+            x,
+            y,
+            width,
+            show_cpu_usage,
+            show_cpu_frequency,
+            cpu.frequency,
+        );
     }
 }
 
@@ -262,6 +329,7 @@ impl Meter for CpuMeter {
             self.steal = cpu.steal_percent;
             self.guest = cpu.guest_percent;
             self.iowait = cpu.iowait_percent;
+            self.frequency = cpu.frequency;
         }
     }
 
@@ -309,6 +377,10 @@ impl Meter for CpuMeter {
                                     row_y,
                                     col_width,
                                     settings.count_cpus_from_one,
+                                    settings.show_cpu_usage,
+                                    settings.account_guest_in_cpu_meter,
+                                    settings.detailed_cpu_time,
+                                    settings.show_cpu_frequency,
                                 );
                             }
                         }
@@ -329,41 +401,95 @@ impl Meter for CpuMeter {
                             _ => "CPU".to_string(),
                         };
 
-                        let values = vec![
-                            (self.user, ColorElement::CpuNormal),
-                            (self.nice, ColorElement::CpuNice),
-                            (self.system, ColorElement::CpuSystem),
-                            (self.irq, ColorElement::CpuIrq),
-                            (self.softirq, ColorElement::CpuSoftIrq),
-                            (self.steal, ColorElement::CpuSteal),
-                            (self.guest, ColorElement::CpuGuest),
-                            (self.iowait, ColorElement::CpuIOWait),
-                        ];
+                        // Build values array based on detailed_cpu_time setting
+                        let values = if settings.detailed_cpu_time {
+                            vec![
+                                (self.user, ColorElement::CpuNormal),
+                                (self.nice, ColorElement::CpuNice),
+                                (self.system, ColorElement::CpuSystem),
+                                (self.irq, ColorElement::CpuIrq),
+                                (self.softirq, ColorElement::CpuSoftIrq),
+                                (self.steal, ColorElement::CpuSteal),
+                                (self.guest, ColorElement::CpuGuest),
+                                (self.iowait, ColorElement::CpuIOWait),
+                            ]
+                        } else {
+                            // Non-detailed: combine into simpler view
+                            vec![
+                                (self.user, ColorElement::CpuNormal),
+                                (self.nice, ColorElement::CpuNice),
+                                (
+                                    self.system + self.irq + self.softirq,
+                                    ColorElement::CpuSystem,
+                                ),
+                                (self.steal + self.guest, ColorElement::CpuGuest),
+                            ]
+                        };
 
+                        // Calculate total - guest only included when account_guest is true and detailed
                         let total = self.user
                             + self.nice
                             + self.system
                             + self.irq
                             + self.softirq
                             + self.steal
-                            + self.guest
+                            + if settings.account_guest_in_cpu_meter || !settings.detailed_cpu_time
+                            {
+                                self.guest
+                            } else {
+                                0.0
+                            }
                             + self.iowait;
 
-                        Self::draw_cpu_bar_internal(crt, &caption, &values, total, x, y, width);
+                        Self::draw_cpu_bar_internal(
+                            crt,
+                            &caption,
+                            &values,
+                            total,
+                            x,
+                            y,
+                            width,
+                            settings.show_cpu_usage,
+                            settings.show_cpu_frequency,
+                            self.frequency,
+                        );
                     }
                 }
             }
             MeterMode::Text => {
-                let total = self.user
-                    + self.nice
-                    + self.system
-                    + self.irq
-                    + self.softirq
-                    + self.steal
-                    + self.guest
-                    + self.iowait;
-                let text = format!("{:.1}%", total);
-                super::draw_text(crt, x, y, "CPU: ", &text);
+                // Text mode respects detailed_cpu_time (matches C htop CPUMeter_display)
+                let freq_suffix = if settings.show_cpu_frequency {
+                    format!(" freq: {} ", Self::format_frequency(self.frequency))
+                } else {
+                    String::new()
+                };
+
+                if settings.detailed_cpu_time {
+                    // Detailed: show breakdown like C htop
+                    // Format: ":5.1% sy:5.1% ni:5.1% hi:5.1% si:5.1% st:5.1% gu:5.1% wa:5.1%"
+                    let text = format!(
+                        "{:.1}% sy:{:.1}% ni:{:.1}% hi:{:.1}% si:{:.1}% st:{:.1}% gu:{:.1}% wa:{:.1}%{}",
+                        self.user,
+                        self.system,
+                        self.nice,
+                        self.irq,
+                        self.softirq,
+                        self.steal,
+                        self.guest,
+                        self.iowait,
+                        freq_suffix
+                    );
+                    super::draw_text(crt, x, y, "CPU:", &text);
+                } else {
+                    // Non-detailed: simpler display
+                    let kernel = self.system + self.irq + self.softirq;
+                    let virt = self.steal + self.guest;
+                    let text = format!(
+                        "{:.1}% sys:{:.1}% low:{:.1}% vir:{:.1}%{}",
+                        self.user, kernel, self.nice, virt, freq_suffix
+                    );
+                    super::draw_text(crt, x, y, "CPU:", &text);
+                }
             }
             _ => {
                 // Graph/LED modes not implemented - fall back to text
@@ -373,7 +499,11 @@ impl Meter for CpuMeter {
                     + self.irq
                     + self.softirq
                     + self.steal
-                    + self.guest
+                    + if settings.account_guest_in_cpu_meter || !settings.detailed_cpu_time {
+                        self.guest
+                    } else {
+                        0.0
+                    }
                     + self.iowait;
                 let text = format!("{:.1}%", total);
                 super::draw_text(crt, x, y, "CPU: ", &text);

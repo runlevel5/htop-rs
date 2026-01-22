@@ -42,6 +42,10 @@ pub struct ScreenManager {
 
     /// Last update time
     last_update: Instant,
+
+    /// Function bar temporarily hidden (for hide_function_bar mode 1)
+    /// In mode 1, the bar is hidden on ESC and shown again on any other key
+    function_bar_hidden: bool,
 }
 
 impl ScreenManager {
@@ -55,6 +59,7 @@ impl ScreenManager {
             hide_meters: false,
             paused: false,
             last_update: Instant::now(),
+            function_bar_hidden: false,
         }
     }
 
@@ -79,10 +84,19 @@ impl ScreenManager {
         let screen_tabs_height = if self.settings.screen_tabs { 1 } else { 0 };
 
         // Function bar takes 1 line at the bottom
-        let function_bar_height = if self.settings.hide_function_bar > 0 {
-            0
-        } else {
-            1
+        // Mode 0: always show
+        // Mode 1: hide on ESC until next input (tracked by function_bar_hidden)
+        // Mode 2: always hide
+        let function_bar_height = match self.settings.hide_function_bar {
+            0 => 1,
+            1 => {
+                if self.function_bar_hidden {
+                    0
+                } else {
+                    1
+                }
+            }
+            _ => 0, // Mode 2+: always hide
         };
 
         // Main panel gets the rest
@@ -281,7 +295,16 @@ impl ScreenManager {
         self.main_panel.draw(crt, machine, &self.settings);
 
         // Draw function bar or search/filter bar
-        if self.settings.hide_function_bar == 0 {
+        // Mode 0: always show
+        // Mode 1: hide on ESC until next input (tracked by function_bar_hidden)
+        // Mode 2: always hide
+        let show_function_bar = match self.settings.hide_function_bar {
+            0 => true,
+            1 => !self.function_bar_hidden,
+            _ => false, // Mode 2+: always hide
+        };
+
+        if show_function_bar {
             let y = crt.height() - 1;
             if self.main_panel.inc_search.active {
                 // Draw search/filter bar
@@ -309,6 +332,9 @@ impl ScreenManager {
         machine: &mut Machine,
         running: &AtomicBool,
     ) -> anyhow::Result<()> {
+        // Copy settings to machine for platform access
+        machine.update_process_names = self.settings.update_process_names;
+
         // Initial scan BEFORE layout so we know actual CPU count for meter heights
         platform::scan(machine);
         self.header.update(machine);
@@ -346,6 +372,9 @@ impl ScreenManager {
                     >= Duration::from_millis(self.settings.delay as u64 * 100);
 
             if should_update {
+                // Update settings in machine before scan
+                machine.update_process_names = self.settings.update_process_names;
+
                 // Perform platform scan to update system state
                 platform::scan(machine);
 
@@ -405,6 +434,25 @@ impl ScreenManager {
 
     /// Handle a key event
     fn handle_key(&mut self, key: i32, crt: &mut Crt, machine: &mut Machine) -> HandlerResult {
+        // Handle hide_function_bar mode 1:
+        // - ESC (0x1B) hides the function bar temporarily
+        // - Any other key shows it again
+        if self.settings.hide_function_bar == 1 {
+            if key == 0x1B && !self.main_panel.inc_search.active {
+                // ESC hides the function bar (when not in search/filter mode)
+                if !self.function_bar_hidden {
+                    self.function_bar_hidden = true;
+                    self.layout(crt);
+                    return HandlerResult::Handled;
+                }
+            } else if self.function_bar_hidden {
+                // Any other key shows the function bar again
+                self.function_bar_hidden = false;
+                self.layout(crt);
+                // Don't return - continue processing the key
+            }
+        }
+
         // If search/filter mode is active, pass keys to main panel FIRST
         // This prevents global shortcuts from intercepting typed characters
         if self.main_panel.inc_search.active {

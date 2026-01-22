@@ -636,6 +636,11 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
 
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
+    scan_processes_with_settings(machine, false);
+}
+
+/// Scan all processes with settings control
+pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names: bool) {
     // Get list of all PIDs
     let mut pids: Vec<i32> = vec![0; 4096];
     let count = unsafe {
@@ -737,53 +742,58 @@ pub fn scan_processes(machine: &mut Machine) {
         // Get username
         process.user = Some(machine.get_username(process.uid));
 
-        // Get process name/command
-        let mut name_buf = [0u8; MAXCOMLEN + 1];
-        let name_len = unsafe {
-            proc_name(
-                pid,
-                name_buf.as_mut_ptr() as *mut c_void,
-                name_buf.len() as u32,
-            )
-        };
+        // Only update process name/command if it's new or update_process_names is enabled
+        // (matches C htop Settings.updateProcessNames behavior)
+        if is_new || update_process_names {
+            // Get process name/command
+            let mut name_buf = [0u8; MAXCOMLEN + 1];
+            let name_len = unsafe {
+                proc_name(
+                    pid,
+                    name_buf.as_mut_ptr() as *mut c_void,
+                    name_buf.len() as u32,
+                )
+            };
 
-        if name_len > 0 {
-            if let Ok(name) = CStr::from_bytes_until_nul(&name_buf) {
-                process.comm = Some(name.to_string_lossy().to_string());
-            }
-        }
-
-        // Fallback to pbi_comm
-        if process.comm.is_none() {
-            if let Some(pos) = bsd_info.pbi_comm.iter().position(|&c| c == 0) {
-                if let Ok(comm) = std::str::from_utf8(&bsd_info.pbi_comm[..pos]) {
-                    process.comm = Some(comm.to_string());
+            if name_len > 0 {
+                if let Ok(name) = CStr::from_bytes_until_nul(&name_buf) {
+                    process.comm = Some(name.to_string_lossy().to_string());
                 }
             }
-        }
 
-        // Get executable path
-        let mut path_buf = [0u8; MAXPATHLEN];
-        let path_len =
-            unsafe { proc_pidpath(pid, path_buf.as_mut_ptr() as *mut c_void, MAXPATHLEN as u32) };
-
-        if path_len > 0 {
-            if let Ok(path) = CStr::from_bytes_until_nul(&path_buf) {
-                let path_str = path.to_string_lossy().to_string();
-                process.exe = Some(path_str);
+            // Fallback to pbi_comm
+            if process.comm.is_none() {
+                if let Some(pos) = bsd_info.pbi_comm.iter().position(|&c| c == 0) {
+                    if let Ok(comm) = std::str::from_utf8(&bsd_info.pbi_comm[..pos]) {
+                        process.comm = Some(comm.to_string());
+                    }
+                }
             }
-        }
 
-        // Get full command line with arguments via KERN_PROCARGS2
-        // This matches C htop's DarwinProcess_setFromKInfoProc behavior
-        if let Some((cmdline, basename_end)) = get_process_cmdline(pid) {
-            process.update_cmdline(cmdline, basename_end);
-        } else if let Some(ref exe) = process.exe {
-            // Fallback to exe path if KERN_PROCARGS2 fails
-            process.update_cmdline(exe.clone(), 0);
-        } else if let Some(ref comm) = process.comm {
-            // Fallback to comm
-            process.update_cmdline(comm.clone(), comm.len());
+            // Get executable path
+            let mut path_buf = [0u8; MAXPATHLEN];
+            let path_len = unsafe {
+                proc_pidpath(pid, path_buf.as_mut_ptr() as *mut c_void, MAXPATHLEN as u32)
+            };
+
+            if path_len > 0 {
+                if let Ok(path) = CStr::from_bytes_until_nul(&path_buf) {
+                    let path_str = path.to_string_lossy().to_string();
+                    process.exe = Some(path_str);
+                }
+            }
+
+            // Get full command line with arguments via KERN_PROCARGS2
+            // This matches C htop's DarwinProcess_setFromKInfoProc behavior
+            if let Some((cmdline, basename_end)) = get_process_cmdline(pid) {
+                process.update_cmdline(cmdline, basename_end);
+            } else if let Some(ref exe) = process.exe {
+                // Fallback to exe path if KERN_PROCARGS2 fails
+                process.update_cmdline(exe.clone(), 0);
+            } else if let Some(ref comm) = process.comm {
+                // Fallback to comm
+                process.update_cmdline(comm.clone(), comm.len());
+            }
         }
 
         // Task info

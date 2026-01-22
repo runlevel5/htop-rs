@@ -205,6 +205,9 @@ pub struct Machine {
 
     // Boot time
     pub boot_time: i64,
+
+    // Settings copied from Settings for platform access
+    pub update_process_names: bool,
 }
 
 impl Machine {
@@ -250,6 +253,7 @@ impl Machine {
             uptime: Duration::ZERO,
             load_average: [0.0, 0.0, 0.0],
             boot_time: 0,
+            update_process_names: false,
         }
     }
 

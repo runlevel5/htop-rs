@@ -340,6 +340,9 @@ impl MainPanel {
         let mut str = RichString::with_capacity(256);
         let coloring = settings.highlight_megabytes;
 
+        // Compute if this row should be shadowed (other user's process)
+        let is_shadowed = settings.shadow_other_users && process.uid != current_uid;
+
         for field in &self.fields {
             self.write_field(
                 &mut str,
@@ -347,9 +350,11 @@ impl MainPanel {
                 *field,
                 coloring,
                 crt,
-                current_uid,
                 settings.show_program_path,
-                settings.shadow_other_users,
+                settings.highlight_threads,
+                settings.highlight_base_name,
+                settings.show_thread_names,
+                is_shadowed,
             );
         }
 
@@ -383,63 +388,74 @@ impl MainPanel {
         field: ProcessField,
         coloring: bool,
         crt: &Crt,
-        current_uid: u32,
         show_program_path: bool,
-        shadow_other_users: bool,
+        highlight_threads: bool,
+        highlight_base_name: bool,
+        show_thread_names: bool,
+        is_shadowed: bool,
     ) {
         let process_color = crt.color(ColorElement::Process);
         let shadow_color = crt.color(ColorElement::ProcessShadow);
         let basename_color = crt.color(ColorElement::ProcessBasename);
 
+        // When is_shadowed is true, use shadow_color for all fields that would normally
+        // use process_color (matches C htop behavior for shadow_other_users)
+        let base_color = if is_shadowed {
+            shadow_color
+        } else {
+            process_color
+        };
+
         match field {
             ProcessField::Pid => {
                 // PID: right-aligned, typically 5-7 digits
-                str.append(&format!("{:>5} ", process.pid), process_color);
+                str.append(&format!("{:>5} ", process.pid), base_color);
             }
             ProcessField::Ppid => {
-                str.append(&format!("{:>5} ", process.ppid), process_color);
+                str.append(&format!("{:>5} ", process.ppid), base_color);
             }
             ProcessField::User => {
-                // USER: left-aligned, 10 chars, dim if not current user (only if shadow_other_users enabled)
+                // USER: left-aligned, 10 chars, always use is_shadowed computation
                 let user = process.user.as_deref().unwrap_or("?");
-                let attr = if shadow_other_users && process.uid != current_uid {
-                    shadow_color
-                } else {
-                    process_color
-                };
-                print_left_aligned(str, attr, user, 10);
+                print_left_aligned(str, base_color, user, 10);
             }
             ProcessField::State => {
-                // STATE: single char with colors
+                // STATE: single char with colors (state colors override shadowing)
                 let state_char = process.state.to_char();
-                let attr = match process.state {
-                    ProcessState::Running | ProcessState::Runnable | ProcessState::Traced => {
-                        crt.color(ColorElement::ProcessRunState)
+                let attr = if is_shadowed {
+                    shadow_color
+                } else {
+                    match process.state {
+                        ProcessState::Running | ProcessState::Runnable | ProcessState::Traced => {
+                            crt.color(ColorElement::ProcessRunState)
+                        }
+                        ProcessState::Blocked
+                        | ProcessState::Defunct
+                        | ProcessState::Stopped
+                        | ProcessState::UninterruptibleWait
+                        | ProcessState::Zombie => crt.color(ColorElement::ProcessDState),
+                        ProcessState::Queued
+                        | ProcessState::Waiting
+                        | ProcessState::Idle
+                        | ProcessState::Sleeping => shadow_color,
+                        _ => process_color,
                     }
-                    ProcessState::Blocked
-                    | ProcessState::Defunct
-                    | ProcessState::Stopped
-                    | ProcessState::UninterruptibleWait
-                    | ProcessState::Zombie => crt.color(ColorElement::ProcessDState),
-                    ProcessState::Queued
-                    | ProcessState::Waiting
-                    | ProcessState::Idle
-                    | ProcessState::Sleeping => shadow_color,
-                    _ => process_color,
                 };
                 str.append(&format!("{} ", state_char), attr);
             }
             ProcessField::Priority => {
                 // PRIORITY: 3 chars, RT for realtime
                 if process.priority <= -100 {
-                    str.append(" RT ", process_color);
+                    str.append(" RT ", base_color);
                 } else {
-                    str.append(&format!("{:>3} ", process.priority), process_color);
+                    str.append(&format!("{:>3} ", process.priority), base_color);
                 }
             }
             ProcessField::Nice => {
-                // NICE: 3 chars, colored by value
-                let attr = if process.nice < 0 {
+                // NICE: 3 chars, colored by value (nice colors override shadowing)
+                let attr = if is_shadowed {
+                    shadow_color
+                } else if process.nice < 0 {
                     crt.color(ColorElement::ProcessHighPriority)
                 } else if process.nice > 0 {
                     crt.color(ColorElement::ProcessLowPriority)
@@ -449,32 +465,47 @@ impl MainPanel {
                 str.append(&format!("{:>3} ", process.nice), attr);
             }
             ProcessField::MSize => {
-                // VIRT: memory in KiB with coloring
-                print_kbytes(str, process.m_virt as u64, coloring, crt);
+                // VIRT: memory in KiB with coloring (disabled if shadowed)
+                print_kbytes(str, process.m_virt as u64, coloring && !is_shadowed, crt);
             }
             ProcessField::MResident => {
-                // RES: memory in KiB with coloring
-                print_kbytes(str, process.m_resident as u64, coloring, crt);
+                // RES: memory in KiB with coloring (disabled if shadowed)
+                print_kbytes(
+                    str,
+                    process.m_resident as u64,
+                    coloring && !is_shadowed,
+                    crt,
+                );
             }
             ProcessField::MShare => {
-                // SHR: memory in KiB with coloring
-                print_kbytes(str, process.m_share as u64, coloring, crt);
+                // SHR: memory in KiB with coloring (disabled if shadowed)
+                print_kbytes(str, process.m_share as u64, coloring && !is_shadowed, crt);
             }
             ProcessField::PercentCpu => {
                 // CPU%: percentage with coloring (width 5 to match C htop)
-                print_percentage(str, process.percent_cpu, 5, crt);
+                // When shadowed, use shadow color
+                if is_shadowed {
+                    str.append(&format!("{:>4.1} ", process.percent_cpu), shadow_color);
+                } else {
+                    print_percentage(str, process.percent_cpu, 5, crt);
+                }
             }
             ProcessField::PercentMem => {
                 // MEM%: percentage with coloring (width 4, no autoWidth)
-                print_percentage(str, process.percent_mem, 4, crt);
+                // When shadowed, use shadow color
+                if is_shadowed {
+                    str.append(&format!("{:>3.1} ", process.percent_mem), shadow_color);
+                } else {
+                    print_percentage(str, process.percent_mem, 4, crt);
+                }
             }
             ProcessField::Time => {
-                // TIME+: time with coloring
-                print_time(str, process.time, coloring, crt);
+                // TIME+: time with coloring (disabled if shadowed)
+                print_time(str, process.time, coloring && !is_shadowed, crt);
             }
             ProcessField::Nlwp => {
-                // NLWP: thread count, dim if 1
-                let attr = if process.nlwp == 1 {
+                // NLWP: thread count, dim if 1 or if shadowed
+                let attr = if is_shadowed || process.nlwp == 1 {
                     shadow_color
                 } else {
                     process_color
@@ -482,13 +513,30 @@ impl MainPanel {
                 str.append(&format!("{:>4} ", process.nlwp), attr);
             }
             ProcessField::Processor => {
-                str.append(&format!("{:>3} ", process.processor), process_color);
+                str.append(&format!("{:>3} ", process.processor), base_color);
             }
             ProcessField::Command | ProcessField::CmdLine => {
                 // Command: use basename highlighting with tree view support
                 // When show_program_path is false, show command starting from basename
                 // (basename + arguments), matching C htop behavior
-                let cmd = if show_program_path {
+                //
+                // Settings that affect command display:
+                // - show_thread_names: for threads, show thread's own name instead of parent command
+                // - highlight_threads: use ProcessThread color for threads
+                // - highlight_base_name: highlight the basename portion
+                // - is_shadowed: use shadow_color for other users' processes
+
+                // Determine the command text to display
+                let cmd = if show_thread_names && process.is_thread() {
+                    // Show thread's own name (comm field)
+                    process.comm.as_deref().unwrap_or_else(|| {
+                        if show_program_path {
+                            process.get_command()
+                        } else {
+                            process.get_command_from_basename()
+                        }
+                    })
+                } else if show_program_path {
                     process.get_command()
                 } else {
                     process.get_command_from_basename()
@@ -533,43 +581,54 @@ impl MainPanel {
                     str.append(" ", tree_attr);
                 }
 
-                if process.is_thread() {
+                // Determine colors based on settings
+                if is_shadowed {
+                    // Shadow overrides all other coloring for commands
+                    str.append(cmd, shadow_color);
+                } else if process.is_thread() && highlight_threads {
+                    // Thread highlighting (only if enabled)
                     str.append(cmd, crt.color(ColorElement::ProcessThread));
-                } else if show_program_path {
-                    // Highlight basename portion when showing full path
-                    let basename = process.get_basename();
-                    if let Some(pos) = cmd.find(basename) {
-                        if pos > 0 {
-                            str.append(&cmd[..pos], process_color);
-                        }
-                        str.append(basename, basename_color);
-                        let after = pos + basename.len();
-                        if after < cmd.len() {
-                            str.append(&cmd[after..], process_color);
+                } else if highlight_base_name {
+                    // Basename highlighting (only if enabled)
+                    if show_program_path {
+                        // Highlight basename portion when showing full path
+                        let basename = process.get_basename();
+                        if let Some(pos) = cmd.find(basename) {
+                            if pos > 0 {
+                                str.append(&cmd[..pos], base_color);
+                            }
+                            str.append(basename, basename_color);
+                            let after = pos + basename.len();
+                            if after < cmd.len() {
+                                str.append(&cmd[after..], base_color);
+                            }
+                        } else {
+                            str.append(cmd, base_color);
                         }
                     } else {
-                        str.append(cmd, process_color);
+                        // When not showing path, cmd starts with basename followed by arguments
+                        // Highlight the basename portion, then show arguments in normal color
+                        let basename = process.get_basename();
+                        if cmd.starts_with(basename) {
+                            str.append(basename, basename_color);
+                            let after = basename.len();
+                            if after < cmd.len() {
+                                str.append(&cmd[after..], base_color);
+                            }
+                        } else {
+                            // Fallback: just show entire command highlighted
+                            str.append(cmd, basename_color);
+                        }
                     }
                 } else {
-                    // When not showing path, cmd starts with basename followed by arguments
-                    // Highlight the basename portion, then show arguments in normal color
-                    let basename = process.get_basename();
-                    if cmd.starts_with(basename) {
-                        str.append(basename, basename_color);
-                        let after = basename.len();
-                        if after < cmd.len() {
-                            str.append(&cmd[after..], process_color);
-                        }
-                    } else {
-                        // Fallback: just show entire command highlighted
-                        str.append(cmd, basename_color);
-                    }
+                    // No special highlighting, use base color
+                    str.append(cmd, base_color);
                 }
-                str.append_char(' ', process_color);
+                str.append_char(' ', base_color);
             }
             ProcessField::Tty => {
                 let tty = process.tty_name.as_deref().unwrap_or("?");
-                let attr = if tty == "?" {
+                let attr = if is_shadowed || tty == "?" {
                     shadow_color
                 } else {
                     process_color
@@ -578,7 +637,7 @@ impl MainPanel {
             }
             _ => {
                 // Default: show placeholder
-                str.append("? ", process_color);
+                str.append("? ", base_color);
             }
         }
     }

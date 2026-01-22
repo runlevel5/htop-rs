@@ -525,6 +525,23 @@ impl Settings {
             "screen_tabs" => {
                 self.screen_tabs = value == "1";
             }
+            "show_thread_names" => {
+                self.show_thread_names = value == "1";
+            }
+            "account_guest_in_cpu_meter" => {
+                self.account_guest_in_cpu_meter = value == "1";
+            }
+            "show_cached_memory" => {
+                self.show_cached_memory = value == "1";
+            }
+            "update_process_names" => {
+                self.update_process_names = value == "1";
+            }
+            "hide_function_bar" => {
+                if let Ok(v) = value.parse::<i32>() {
+                    self.hide_function_bar = v.clamp(0, 2);
+                }
+            }
             _ => {}
         }
     }
@@ -630,6 +647,31 @@ impl Settings {
             if self.header_margin { 1 } else { 0 }
         )?;
         writeln!(file, "screen_tabs={}", if self.screen_tabs { 1 } else { 0 })?;
+        writeln!(
+            file,
+            "show_thread_names={}",
+            if self.show_thread_names { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "account_guest_in_cpu_meter={}",
+            if self.account_guest_in_cpu_meter {
+                1
+            } else {
+                0
+            }
+        )?;
+        writeln!(
+            file,
+            "show_cached_memory={}",
+            if self.show_cached_memory { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "update_process_names={}",
+            if self.update_process_names { 1 } else { 0 }
+        )?;
+        writeln!(file, "hide_function_bar={}", self.hide_function_bar)?;
 
         Ok(())
     }

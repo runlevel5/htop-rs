@@ -62,7 +62,7 @@ pub fn scan_processes(machine: &mut Machine) {
     }
     #[cfg(target_os = "macos")]
     {
-        darwin::scan_processes(machine);
+        darwin::scan_processes_with_settings(machine, machine.update_process_names);
     }
 }
 

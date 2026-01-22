@@ -72,15 +72,7 @@ impl Meter for MemoryMeter {
         self.cache = machine.cached_mem as f64;
     }
 
-    fn draw(
-        &self,
-        crt: &Crt,
-        _machine: &Machine,
-        _settings: &Settings,
-        x: i32,
-        y: i32,
-        width: i32,
-    ) {
+    fn draw(&self, crt: &Crt, _machine: &Machine, settings: &Settings, x: i32, y: i32, width: i32) {
         use ncurses::*;
 
         match self.mode {
@@ -124,13 +116,24 @@ impl Meter for MemoryMeter {
                 let padding = inner_width.saturating_sub(text_len);
 
                 // Calculate bar segments (order matches C htop MemoryMeter_attributes)
-                let values = [
-                    (self.used, ColorElement::MemoryUsed),
-                    (self.shared.max(0.0), ColorElement::MemoryShared),
-                    (self.compressed.max(0.0), ColorElement::MemoryCompressed),
-                    (self.buffers, ColorElement::MemoryBuffers),
-                    (self.cache, ColorElement::MemoryCache),
-                ];
+                // Only include cache if show_cached_memory is enabled (matches C htop)
+                let values: Vec<(f64, ColorElement)> = if settings.show_cached_memory {
+                    vec![
+                        (self.used, ColorElement::MemoryUsed),
+                        (self.shared.max(0.0), ColorElement::MemoryShared),
+                        (self.compressed.max(0.0), ColorElement::MemoryCompressed),
+                        (self.buffers, ColorElement::MemoryBuffers),
+                        (self.cache, ColorElement::MemoryCache),
+                    ]
+                } else {
+                    vec![
+                        (self.used, ColorElement::MemoryUsed),
+                        (self.shared.max(0.0), ColorElement::MemoryShared),
+                        (self.compressed.max(0.0), ColorElement::MemoryCompressed),
+                        (self.buffers, ColorElement::MemoryBuffers),
+                        // Cache omitted when show_cached_memory is false
+                    ]
+                };
 
                 // Calculate how many chars each segment takes
                 let mut bar_chars = Vec::new();
@@ -203,7 +206,7 @@ impl Meter for MemoryMeter {
                     mode: MeterMode::Bar,
                     ..*self
                 };
-                fallback.draw(crt, _machine, _settings, x, y, width);
+                fallback.draw(crt, _machine, settings, x, y, width);
             }
         }
     }
