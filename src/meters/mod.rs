@@ -301,20 +301,20 @@ pub fn draw_text(crt: &Crt, x: i32, y: i32, caption: &str, text: &str) {
 /// UTF-8 braille graph characters (4 pixels per row)
 /// Index is calculated as: left_dots * 5 + right_dots
 /// where left_dots and right_dots are 0-4 (number of dots filled from bottom)
-const GRAPH_DOTS_UTF8: [&str; 25] = [
-    /*00*/ " ", /*01*/ "⢀", /*02*/ "⢠", /*03*/ "⢰", /*04*/ "⢸",
-    /*10*/ "⡀", /*11*/ "⣀", /*12*/ "⣠", /*13*/ "⣰", /*14*/ "⣸",
-    /*20*/ "⡄", /*21*/ "⣄", /*22*/ "⣤", /*23*/ "⣴", /*24*/ "⣼",
-    /*30*/ "⡆", /*31*/ "⣆", /*32*/ "⣦", /*33*/ "⣶", /*34*/ "⣾",
-    /*40*/ "⡇", /*41*/ "⣇", /*42*/ "⣧", /*43*/ "⣷", /*44*/ "⣿",
+const GRAPH_DOTS_UTF8: [char; 25] = [
+    /*00*/ ' ', /*01*/ '⢀', /*02*/ '⢠', /*03*/ '⢰', /*04*/ '⢸',
+    /*10*/ '⡀', /*11*/ '⣀', /*12*/ '⣠', /*13*/ '⣰', /*14*/ '⣸',
+    /*20*/ '⡄', /*21*/ '⣄', /*22*/ '⣤', /*23*/ '⣴', /*24*/ '⣼',
+    /*30*/ '⡆', /*31*/ '⣆', /*32*/ '⣦', /*33*/ '⣶', /*34*/ '⣾',
+    /*40*/ '⡇', /*41*/ '⣇', /*42*/ '⣧', /*43*/ '⣷', /*44*/ '⣿',
 ];
 
 /// ASCII graph characters (2 pixels per row)
 /// Index is calculated as: left_dots * 3 + right_dots
 /// where left_dots and right_dots are 0-2 (number of dots filled from bottom)
-const GRAPH_DOTS_ASCII: [&str; 9] = [
-    /*00*/ " ", /*01*/ ".", /*02*/ ":", /*10*/ ".", /*11*/ ".",
-    /*12*/ ":", /*20*/ ":", /*21*/ ":", /*22*/ ":",
+const GRAPH_DOTS_ASCII: [char; 9] = [
+    /*00*/ ' ', /*01*/ '.', /*02*/ ':', /*10*/ '.', /*11*/ '.',
+    /*12*/ ':', /*20*/ ':', /*21*/ ':', /*22*/ ':',
 ];
 
 /// Pixels per row for UTF-8 mode
@@ -361,10 +361,10 @@ pub fn draw_graph(
     let graph_x = x + caption_len;
 
     // Select character set based on UTF-8 support
-    let (dots, pix_per_row, dots_per_row) = if crt.utf8 {
-        (&GRAPH_DOTS_UTF8[..], PIXPERROW_UTF8, 5)
+    let (dots_utf8, dots_ascii, pix_per_row, dots_per_row) = if crt.utf8 {
+        (Some(&GRAPH_DOTS_UTF8[..]), None, PIXPERROW_UTF8, 5)
     } else {
-        (&GRAPH_DOTS_ASCII[..], PIXPERROW_ASCII, 3)
+        (None, Some(&GRAPH_DOTS_ASCII[..]), PIXPERROW_ASCII, 3)
     };
 
     let total_pix = pix_per_row * height;
@@ -382,6 +382,18 @@ pub fn draw_graph(
         (0, empty_cols as i32)
     };
 
+    // Helper to draw a single graph cell
+    let draw_cell = |line: i32, col: i32, char_idx: usize, color: ColorElement| {
+        attrset(crt.color(color));
+        if let Some(dots) = dots_utf8 {
+            let ch = dots.get(char_idx).copied().unwrap_or(' ');
+            mvaddch(y + line, graph_x + col, ch as u32);
+        } else if let Some(dots) = dots_ascii {
+            let ch = dots.get(char_idx).copied().unwrap_or(' ');
+            mvaddch(y + line, graph_x + col, ch as u32);
+        }
+    };
+
     // Draw the graph
     let mut col = 0i32;
     let mut i = data_start;
@@ -391,12 +403,10 @@ pub fn draw_graph(
         let v1 = graph_data.values.get(i).copied().unwrap_or(0.0);
         let v2 = graph_data.values.get(i + 1).copied().unwrap_or(0.0);
 
-        // Convert to pixel counts (clamped to 1..total_pix)
+        // Convert to pixel counts
         // Values are already normalized to 0.0-1.0
-        let pix1 =
-            ((v1 * total_pix as f64).round() as i32).clamp(if v1 > 0.0 { 1 } else { 0 }, total_pix);
-        let pix2 =
-            ((v2 * total_pix as f64).round() as i32).clamp(if v2 > 0.0 { 1 } else { 0 }, total_pix);
+        let pix1 = ((v1 * total_pix as f64).round() as i32).clamp(0, total_pix);
+        let pix2 = ((v2 * total_pix as f64).round() as i32).clamp(0, total_pix);
 
         // Draw each row of this column
         let mut color_idx = ColorElement::Graph1;
@@ -410,10 +420,8 @@ pub fn draw_graph(
 
             // Get the character for this cell
             let char_idx = (line1 * dots_per_row + line2) as usize;
-            let ch = dots.get(char_idx).unwrap_or(&" ");
 
-            attrset(crt.color(color_idx));
-            let _ = mvaddstr(y + line, graph_x + col_start + col, ch);
+            draw_cell(line, col_start + col, char_idx, color_idx);
 
             // Alternate colors for visual effect (top row is Graph1, rest is Graph2)
             color_idx = ColorElement::Graph2;
@@ -424,10 +432,9 @@ pub fn draw_graph(
     }
 
     // Fill any remaining empty columns on the left with spaces
-    attrset(crt.color(ColorElement::ResetColor));
     for empty_col in 0..col_start {
         for line in 0..height {
-            mvaddch(y + line, graph_x + empty_col, ' ' as u32);
+            draw_cell(line, empty_col, 0, ColorElement::Graph2); // index 0 is space
         }
     }
 

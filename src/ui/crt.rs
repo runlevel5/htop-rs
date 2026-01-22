@@ -326,9 +326,9 @@ impl Crt {
 
             if let Some(lc) = lc_ctype {
                 let c_str = std::ffi::CString::new(lc).unwrap_or_default();
-                libc::setlocale(libc::LC_CTYPE, c_str.as_ptr());
+                libc::setlocale(libc::LC_ALL, c_str.as_ptr());
             } else {
-                libc::setlocale(libc::LC_CTYPE, b"\0".as_ptr() as *const libc::c_char);
+                libc::setlocale(libc::LC_ALL, b"\0".as_ptr() as *const libc::c_char);
             }
         }
 
@@ -527,8 +527,7 @@ impl Crt {
             color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::MeterValueOk as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
         self.colors[ColorElement::MeterValueWarn as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
-        self.colors[ColorElement::LedColor as usize] =
-            color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::LedColor as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
         self.colors[ColorElement::TasksRunning as usize] =
             color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::Process as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);

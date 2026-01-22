@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_graph, draw_led, GraphData, Meter, MeterMode};
+use super::{draw_graph, GraphData, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::bar_meter_char;
 use crate::ui::ColorElement;
@@ -12,6 +12,7 @@ use crate::ui::Crt;
 ///
 /// Displays memory usage exactly like C htop:
 /// Bar mode: "Mem[|||||||||     XXXM/YYYM]"
+/// Text mode: ":TOTAL used:VALUE shared:VALUE compressed:VALUE buffers:VALUE cache:VALUE available:VALUE"
 /// The value text appears right-aligned INSIDE the bar
 #[derive(Debug)]
 pub struct MemoryMeter {
@@ -21,6 +22,7 @@ pub struct MemoryMeter {
     shared: f64,
     compressed: f64,
     cache: f64,
+    available: f64,
     total: f64,
     /// Graph data for historical display (RefCell for interior mutability)
     graph_data: RefCell<GraphData>,
@@ -41,6 +43,7 @@ impl MemoryMeter {
             shared: 0.0,
             compressed: 0.0,
             cache: 0.0,
+            available: 0.0,
             total: 0.0,
             graph_data: RefCell::new(GraphData::new()),
         }
@@ -90,6 +93,7 @@ impl Meter for MemoryMeter {
         self.shared = machine.shared_mem as f64;
         self.compressed = machine.compressed_mem as f64;
         self.cache = machine.cached_mem as f64;
+        self.available = machine.available_mem as f64;
     }
 
     fn draw(&self, crt: &Crt, _machine: &Machine, settings: &Settings, x: i32, y: i32, width: i32) {
@@ -202,21 +206,111 @@ impl Meter for MemoryMeter {
                 attrset(crt.color(ColorElement::ResetColor));
             }
             MeterMode::Text => {
+                // Text mode: show detailed breakdown like C htop MemoryMeter_display
+                // Format: "Mem:TOTAL used:VALUE shared:VALUE compressed:VALUE buffers:VALUE cache:VALUE available:VALUE"
                 let text_attr = crt.color(ColorElement::MeterText);
                 let value_attr = crt.color(ColorElement::MeterValue);
+                let shadow_attr = crt.color(ColorElement::MeterShadow);
+
+                // Colors for memory components (matching C htop)
+                let used_attr = crt.color(ColorElement::MemoryUsed);
+                let shared_attr = crt.color(ColorElement::MemoryShared);
+                let compressed_attr = crt.color(ColorElement::MemoryCompressed);
+                let buffers_attr = crt.color(ColorElement::MemoryBuffersText);
+                let cache_attr = crt.color(ColorElement::MemoryCache);
+
+                // Buffer/cache label and value colors depend on show_cached_memory setting
+                let (buffers_label_attr, buffers_value_attr) = if settings.show_cached_memory {
+                    (text_attr, buffers_attr)
+                } else {
+                    (shadow_attr, shadow_attr)
+                };
+                let (cache_label_attr, cache_value_attr) = if settings.show_cached_memory {
+                    (text_attr, cache_attr)
+                } else {
+                    (shadow_attr, shadow_attr)
+                };
 
                 mv(y, x);
+
+                // "Mem:TOTAL"
                 attrset(text_attr);
                 let _ = addstr("Mem:");
-
-                let display_used = self.used + self.shared.max(0.0);
                 attrset(value_attr);
-                let _ = addstr(&format!(
-                    "{}/{}",
-                    Self::human_unit(display_used),
-                    Self::human_unit(self.total)
-                ));
+                let _ = addstr(&Self::human_unit(self.total));
+
+                // " used:VALUE"
+                attrset(text_attr);
+                let _ = addstr(" used:");
+                attrset(used_attr);
+                let _ = addstr(&Self::human_unit(self.used));
+
+                // " shared:VALUE" (only if >= 0, not all platforms support it)
+                if self.shared >= 0.0 {
+                    attrset(text_attr);
+                    let _ = addstr(" shared:");
+                    attrset(shared_attr);
+                    let _ = addstr(&Self::human_unit(self.shared));
+                }
+
+                // " compressed:VALUE" (only if >= 0, not all platforms support it)
+                if self.compressed >= 0.0 {
+                    attrset(text_attr);
+                    let _ = addstr(" compressed:");
+                    attrset(compressed_attr);
+                    let _ = addstr(&Self::human_unit(self.compressed));
+                }
+
+                // " buffers:VALUE"
+                attrset(buffers_label_attr);
+                let _ = addstr(" buffers:");
+                attrset(buffers_value_attr);
+                let _ = addstr(&Self::human_unit(self.buffers));
+
+                // " cache:VALUE"
+                attrset(cache_label_attr);
+                let _ = addstr(" cache:");
+                attrset(cache_value_attr);
+                let _ = addstr(&Self::human_unit(self.cache));
+
+                // " available:VALUE" (only if >= 0, not all platforms support it)
+                if self.available >= 0.0 {
+                    attrset(text_attr);
+                    let _ = addstr(" available:");
+                    attrset(value_attr);
+                    let _ = addstr(&Self::human_unit(self.available));
+                }
+
                 attrset(crt.color(ColorElement::ResetColor));
+            }
+            MeterMode::Led => {
+                // LED mode: show same detailed breakdown as Text mode, rendered with draw_led
+                // Format: "Mem:TOTAL used:VALUE shared:VALUE compressed:VALUE buffers:VALUE cache:VALUE available:VALUE"
+                let mut text = format!(
+                    ":{} used:{}",
+                    Self::human_unit(self.total),
+                    Self::human_unit(self.used)
+                );
+
+                if self.shared >= 0.0 {
+                    text.push_str(&format!(" shared:{}", Self::human_unit(self.shared)));
+                }
+
+                if self.compressed >= 0.0 {
+                    text.push_str(&format!(
+                        " compressed:{}",
+                        Self::human_unit(self.compressed)
+                    ));
+                }
+
+                text.push_str(&format!(" buffers:{}", Self::human_unit(self.buffers)));
+                text.push_str(&format!(" cache:{}", Self::human_unit(self.cache)));
+
+                if self.available >= 0.0 {
+                    text.push_str(&format!(" available:{}", Self::human_unit(self.available)));
+                }
+
+                super::draw_led(crt, x, y, width, "Mem", &text);
             }
             MeterMode::Graph => {
                 // Calculate memory usage as percentage (normalized to 0.0-1.0)
@@ -236,16 +330,6 @@ impl Meter for MemoryMeter {
                 // Draw the graph
                 let graph_data = self.graph_data.borrow();
                 draw_graph(crt, x, y, width, self.height(), &graph_data, "Mem");
-            }
-            MeterMode::Led => {
-                // Format memory values for LED display
-                let display_used = self.used + self.shared.max(0.0) + self.compressed.max(0.0);
-                let text = format!(
-                    "{}/{}",
-                    Self::human_unit(display_used),
-                    Self::human_unit(self.total)
-                );
-                draw_led(crt, x, y, width, "Mem ", &text);
             }
         }
     }

@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_graph, draw_led, GraphData, Meter, MeterMode};
+use super::{draw_graph, GraphData, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::bar_meter_char;
 use crate::ui::ColorElement;
@@ -183,19 +183,50 @@ impl Meter for SwapMeter {
                 }
             }
             MeterMode::Text => {
+                // Text mode: show detailed breakdown like C htop SwapMeter_display
+                // Format: "Swp:TOTAL used:VALUE cache:VALUE"
                 let text_attr = crt.color(ColorElement::MeterText);
                 let value_attr = crt.color(ColorElement::MeterValue);
+                let cache_attr = crt.color(ColorElement::SwapCache);
 
                 mv(y, x);
+
+                // "Swp:TOTAL"
                 attrset(text_attr);
                 let _ = addstr("Swp:");
-
                 attrset(value_attr);
-                let _ = addstr(&format!(
-                    "{}/{}",
-                    Self::human_unit(self.used),
-                    Self::human_unit(self.total)
-                ));
+                let _ = addstr(&Self::human_unit(self.total));
+
+                // " used:VALUE"
+                attrset(text_attr);
+                let _ = addstr(" used:");
+                attrset(value_attr);
+                let _ = addstr(&Self::human_unit(self.used));
+
+                // " cache:VALUE" (only if >= 0, not all platforms support it)
+                if self.cache >= 0.0 {
+                    attrset(text_attr);
+                    let _ = addstr(" cache:");
+                    attrset(cache_attr);
+                    let _ = addstr(&Self::human_unit(self.cache));
+                }
+
+                attrset(crt.color(ColorElement::ResetColor));
+            }
+            MeterMode::Led => {
+                // LED mode: show same detailed breakdown as Text mode, rendered with draw_led
+                // Format: "Swp:TOTAL used:VALUE cache:VALUE"
+                let mut text = format!(
+                    ":{} used:{}",
+                    Self::human_unit(self.total),
+                    Self::human_unit(self.used)
+                );
+
+                if self.cache >= 0.0 {
+                    text.push_str(&format!(" cache:{}", Self::human_unit(self.cache)));
+                }
+
+                super::draw_led(crt, x, y, width, "Swp", &text);
             }
             MeterMode::Graph => {
                 // Calculate swap usage as percentage (normalized to 0.0-1.0)
@@ -214,15 +245,6 @@ impl Meter for SwapMeter {
                 // Draw the graph
                 let graph_data = self.graph_data.borrow();
                 draw_graph(crt, x, y, width, self.height(), &graph_data, "Swp");
-            }
-            MeterMode::Led => {
-                // Format swap values for LED display
-                let text = format!(
-                    "{}/{}",
-                    Self::human_unit(self.used),
-                    Self::human_unit(self.total)
-                );
-                draw_led(crt, x, y, width, "Swp ", &text);
             }
         }
     }
