@@ -575,19 +575,43 @@ impl MainPanel {
                 let separator_color = crt.color(ColorElement::FailedRead);
 
                 // Determine the command text to display
-                let cmd = if show_thread_names && process.is_thread() {
-                    // Show thread's own name (comm field)
-                    process.comm.as_deref().unwrap_or_else(|| {
-                        if show_program_path {
+                // C htop logic for showThreadNames:
+                // - For userland threads when showThreadNames is enabled:
+                //   - If comm differs from cmdline basename: show ONLY comm
+                //   - If comm matches cmdline basename: show cmdline normally
+                let (cmd, show_only_comm) = if show_thread_names && process.is_userland_thread {
+                    if let Some(ref comm) = process.comm {
+                        let basename = process.get_basename();
+                        // TASK_COMM_LEN is 16, so comm is truncated to 15 chars
+                        let cmp_len = comm.len().min(15);
+                        if !basename.starts_with(&comm[..cmp_len]) {
+                            // comm differs from basename - show only comm
+                            (comm.as_str(), true)
+                        } else {
+                            // comm matches basename - show cmdline normally
+                            let cmd = if show_program_path {
+                                process.get_command()
+                            } else {
+                                process.get_command_from_basename()
+                            };
+                            (cmd, false)
+                        }
+                    } else {
+                        // No comm - show cmdline
+                        let cmd = if show_program_path {
                             process.get_command()
                         } else {
                             process.get_command_from_basename()
-                        }
-                    })
-                } else if show_program_path {
-                    process.get_command()
+                        };
+                        (cmd, false)
+                    }
                 } else {
-                    process.get_command_from_basename()
+                    let cmd = if show_program_path {
+                        process.get_command()
+                    } else {
+                        process.get_command_from_basename()
+                    };
+                    (cmd, false)
                 };
 
                 // Draw tree indentation if in tree view mode
@@ -656,6 +680,10 @@ impl MainPanel {
                 if is_shadowed {
                     // Shadow overrides all other coloring for commands
                     str.append(cmd, shadow_color);
+                } else if show_only_comm {
+                    // showThreadNames mode: showing only comm for thread
+                    // Use thread comm color (matches C htop commAttr for threads)
+                    str.append(cmd, comm_color);
                 } else if process.is_thread() && highlight_threads {
                     // Thread highlighting with basename support (matches C htop)
                     let thread_color = crt.color(ColorElement::ProcessThread);
