@@ -158,6 +158,17 @@ impl RichString {
 
     /// Write the string with truncation/padding to fit a width
     pub fn write_at_width(&self, y: i32, x: i32, width: usize) {
+        self.write_at_width_with_pad_attr(y, x, width, None)
+    }
+
+    /// Write the string with truncation/padding to fit a width, with optional padding attribute
+    pub fn write_at_width_with_pad_attr(
+        &self,
+        y: i32,
+        x: i32,
+        width: usize,
+        pad_attr: Option<attr_t>,
+    ) {
         mv(y, x);
 
         // Use attrset instead of attron for proper color handling
@@ -180,7 +191,13 @@ impl RichString {
             written += 1;
         }
 
-        // Pad with spaces if needed (keep current_attr for background)
+        // Pad with spaces if needed
+        // Use pad_attr if specified, otherwise keep current_attr for background
+        if let Some(attr) = pad_attr {
+            if attr != current_attr {
+                attrset(attr);
+            }
+        }
         while written < width {
             addch(' ' as u32);
             written += 1;

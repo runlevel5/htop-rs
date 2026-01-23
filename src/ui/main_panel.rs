@@ -374,45 +374,76 @@ impl MainPanel {
         mv(y, self.x);
         let mut str = RichString::with_capacity(256);
 
+        // Track if Command column has filter active (for padding color)
+        let command_filter_active =
+            filter_active && self.fields.contains(&ProcessField::Command);
+
         for field in &self.fields {
             let title = field.title();
             let is_sort_column = *field == active_sort_key;
             // Command column turns yellow when filter is active
             let is_filter_column = filter_active && *field == ProcessField::Command;
 
-            let attr = if is_sort_column {
-                sort_attr
-            } else if is_filter_column {
+            // Determine base attribute for this column
+            let base_attr = if is_filter_column {
                 filter_attr
             } else {
                 header_attr
             };
 
-            str.append(title, attr);
+            // For the column text itself, use sort color if it's the sort column
+            let text_attr = if is_sort_column {
+                sort_attr
+            } else {
+                base_attr
+            };
+
+            // Split title into text and trailing spaces
+            let trimmed = title.trim_end();
+            let trailing_spaces = title.len() - trimmed.len();
+
+            // Draw the column text (without trailing spaces)
+            str.append(trimmed, text_attr);
 
             if is_sort_column {
-                // Replace trailing space with sort indicator (matches C htop Table.c:308-314)
-                // Check if last char is a space, if so replace it with indicator
-                if !str.is_empty() && str.last_char() == Some(' ') {
-                    str.rewind(1);
-                    // Ascending (small to large): △ (north), Descending (large to small): ▽ (south)
-                    let indicator = if ascending {
-                        crt.tree_str.asc
-                    } else {
-                        crt.tree_str.desc
-                    };
-                    str.append(indicator, attr);
+                // Add sort indicator with sort color
+                let indicator = if ascending {
+                    crt.tree_str.asc
+                } else {
+                    crt.tree_str.desc
+                };
+                str.append(indicator, text_attr);
+
+                // Add remaining trailing spaces (minus 1 for the indicator) with base color
+                // If filter is active on this column, trailing spaces are yellow
+                if trailing_spaces > 1 {
+                    let spaces: String = " ".repeat(trailing_spaces - 1);
+                    str.append(&spaces, base_attr);
+                }
+            } else {
+                // Add trailing spaces with base color
+                if trailing_spaces > 0 {
+                    let spaces: String = " ".repeat(trailing_spaces);
+                    str.append(&spaces, base_attr);
                 }
             }
 
             // Add "(merged)" after Command field when showMergedCommand is enabled
             // (matches C htop Table.c:315-317)
+            // Use base_attr so it's yellow if filter is active
             if *field == ProcessField::Command && settings.show_merged_command {
-                str.append("(merged)", attr);
+                str.append("(merged)", base_attr);
             }
         }
 
-        str.write_at_width(y, self.x, self.w as usize);
+        // Use filter color for padding if Command column filter is active
+        // This ensures the entire Command column area (which extends to screen edge) is yellow
+        let pad_attr = if command_filter_active {
+            Some(filter_attr)
+        } else {
+            None
+        };
+        str.write_at_width_with_pad_attr(y, self.x, self.w as usize, pad_attr);
     }
 
     /// Build header string for display (used when drawing header separately)
