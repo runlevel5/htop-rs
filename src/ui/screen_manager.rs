@@ -1369,6 +1369,8 @@ impl ScreenManager {
         // Restore main panel position
         self.main_panel.move_to(orig_main_x, panel_y);
         self.main_panel.resize(orig_main_w, panel_height);
+        // Force full redraw since the screen was overlaid by kill menu
+        self.main_panel.needs_redraw = true;
 
         // Send the signal if one was selected
         if let Some(signal) = selected_signal {
@@ -1491,6 +1493,8 @@ impl ScreenManager {
         // Restore main panel position
         self.main_panel.move_to(orig_main_x, panel_y);
         self.main_panel.resize(orig_main_w, panel_height);
+        // Force full redraw since the screen was overlaid by sort menu
+        self.main_panel.needs_redraw = true;
 
         // Apply the selection
         if let Some(field) = selected_field {
@@ -3901,6 +3905,8 @@ impl ScreenManager {
         self.main_panel.selected = 0;
         self.main_panel.scroll_v = 0;
         self.main_panel.invalidate_display_list();
+        // Force full redraw since the screen was overlaid by user menu
+        self.main_panel.needs_redraw = true;
 
         // Re-enable delay for main loop (clear is handled by Redraw handler)
         crt.enable_delay();
