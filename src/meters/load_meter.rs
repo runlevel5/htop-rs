@@ -211,9 +211,10 @@ impl Meter for LoadAverageMeter {
                 draw_graph(crt, x, y, width, self.height(), &graph_data, "LA ");
             }
             MeterMode::Led => {
-                // LED mode: show "X.XX/Y.YY/Z.ZZ" like C htop txtBuffer format
-                let text = format!("{:.2}/{:.2}/{:.2}", self.load1, self.load5, self.load15);
-                super::draw_led(crt, x, y, width, "LA ", &text);
+                // LED mode: same format as Text mode (C htop uses display function for LED)
+                // Format: "X.XX Y.YY Z.ZZ " (each value followed by space)
+                let text = format!("{:.2} {:.2} {:.2} ", self.load1, self.load5, self.load15);
+                super::draw_led(crt, x, y, width, "Load average: ", &text);
             }
         }
     }
