@@ -1,6 +1,6 @@
 //! htop-rs - A Rust port of htop, an interactive process viewer
 //!
-//! Copyright (C) 2004-2024 htop dev team
+//! Copyright (C) 2026 Trung Le
 //! Released under the GNU GPLv2+
 
 mod core;
@@ -9,7 +9,7 @@ mod platform;
 mod ui;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::core::{Machine, Settings};
@@ -18,12 +18,62 @@ use crate::ui::{Crt, Header, MainPanel, ScreenManager};
 /// Static flag for clean shutdown
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const COPYRIGHT: &str = "(C) 2026 Trung Le.";
+const LICENSE_SPDX: &str = env!("CARGO_PKG_LICENSE");
+
+/// Convert SPDX license identifier to display string
+fn license_display() -> &'static str {
+    match LICENSE_SPDX {
+        "GPL-2.0-or-later" => "GNU GPLv2+",
+        "GPL-2.0" | "GPL-2.0-only" => "GNU GPLv2",
+        "GPL-3.0-or-later" => "GNU GPLv3+",
+        "GPL-3.0" | "GPL-3.0-only" => "GNU GPLv3",
+        "MIT" => "MIT License",
+        "Apache-2.0" => "Apache License 2.0",
+        _ => LICENSE_SPDX,
+    }
+}
+
+fn print_version_full() {
+    println!("htop {}", VERSION);
+    println!("{}", COPYRIGHT);
+    println!("Released under the {}.", license_display());
+}
+
+fn print_version() {
+    println!("htop {}", VERSION);
+}
+
+fn print_help() {
+    print_version_full();
+    println!();
+    println!("-C --no-color                   Use a monochrome color scheme");
+    println!("-d --delay=DELAY                Set the delay between updates, in tenths of seconds");
+    println!("-F --filter=FILTER              Show only the commands matching the given filter");
+    println!("   --no-function-bar             Hide the function bar");
+    println!("-h --help                       Print this help screen");
+    println!("-H --highlight-changes[=DELAY]  Highlight new and old processes");
+    println!("-M --no-mouse                   Disable the mouse");
+    println!("   --no-meters                  Hide meters");
+    println!("-n --max-iterations=NUMBER      Exit htop after NUMBER iterations/frame updates");
+    println!("-p --pid=PID[,PID,PID...]       Show only the given PIDs");
+    println!("   --readonly                   Disable all system and process changing features");
+    println!("-s --sort-key=COLUMN            Sort by COLUMN in list view (try --sort-key=help for a list)");
+    println!("-t --tree                       Show the tree view (can be combined with -s)");
+    println!("-u --user[=USERNAME]            Show only processes for a given user (or $USER)");
+    println!("-U --no-unicode                 Do not use unicode but plain ASCII");
+    println!("-V --version                    Print version info");
+    println!();
+    println!("Press F1 inside htop for online help.");
+    println!("See 'man htop' for more information.");
+}
+
 /// htop - an interactive process viewer
 #[derive(Parser, Debug)]
-#[command(name = "htop-rs")]
-#[command(author = "htop dev team")]
-#[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Interactive process viewer", long_about = None)]
+#[command(name = "htop")]
+#[command(disable_help_flag = true)]
+#[command(disable_version_flag = true)]
 struct Args {
     /// Use a monochrome color scheme
     #[arg(short = 'C', long = "no-color")]
@@ -80,6 +130,14 @@ struct Args {
     /// Hide the function bar
     #[arg(long = "no-function-bar")]
     no_function_bar: bool,
+
+    /// Print this help screen
+    #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+    help: bool,
+
+    /// Print version info
+    #[arg(short = 'V', long = "version", action = ArgAction::SetTrue)]
+    version: bool,
 }
 
 fn setup_signal_handlers() {
@@ -95,6 +153,16 @@ fn ctrlc_handler() {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Handle help and version flags first
+    if args.help {
+        print_help();
+        return Ok(());
+    }
+    if args.version {
+        print_version();
+        return Ok(());
+    }
 
     // Set up signal handlers
     setup_signal_handlers();

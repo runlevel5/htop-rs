@@ -20,6 +20,20 @@ use super::Crt;
 use crate::core::{Machine, ProcessField, Settings};
 use crate::platform;
 
+/// Convert SPDX license identifier to display string
+fn license_display() -> &'static str {
+    const LICENSE_SPDX: &str = env!("CARGO_PKG_LICENSE");
+    match LICENSE_SPDX {
+        "GPL-2.0-or-later" => "GNU GPLv2+",
+        "GPL-2.0" | "GPL-2.0-only" => "GNU GPLv2",
+        "GPL-3.0-or-later" => "GNU GPLv3+",
+        "GPL-3.0" | "GPL-3.0-only" => "GNU GPLv3",
+        "MIT" => "MIT License",
+        "Apache-2.0" => "Apache License 2.0",
+        _ => LICENSE_SPDX,
+    }
+}
+
 /// Parsed lsof file entry (from lsof -F output)
 #[derive(Default)]
 struct LsofFileEntry {
@@ -1482,6 +1496,26 @@ impl ScreenManager {
         let bar_border = crt.color(ColorElement::BarBorder);
         let bar_shadow = crt.color(ColorElement::BarShadow);
 
+        // DEBUG: Log attribute values to file
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::File::create("/tmp/htop-rs-debug.log") {
+            writeln!(f, "=== htop-rs Help Screen Debug ===").ok();
+            writeln!(f, "ColorScheme: {:?}", crt.color_scheme).ok();
+            writeln!(f, "default_color: 0x{:08X} ({})", default_color, default_color).ok();
+            writeln!(f, "bold (HelpBold): 0x{:08X} ({})", bold, bold).ok();
+            writeln!(f, "bar_border: 0x{:08X} ({})", bar_border, bar_border).ok();
+            writeln!(f, "bar_shadow: 0x{:08X} ({})", bar_shadow, bar_shadow).ok();
+            writeln!(f, "").ok();
+            writeln!(f, "Expected values for Monochrome:").ok();
+            writeln!(f, "  A_NORMAL  = 0x{:08X} ({})", A_NORMAL, A_NORMAL).ok();
+            writeln!(f, "  A_DIM     = 0x{:08X} ({})", A_DIM, A_DIM).ok();
+            writeln!(f, "  A_BOLD    = 0x{:08X} ({})", A_BOLD, A_BOLD).ok();
+            writeln!(f, "  A_REVERSE = 0x{:08X} ({})", A_REVERSE, A_REVERSE).ok();
+            writeln!(f, "").ok();
+            writeln!(f, "bar_shadow should be A_DIM in Monochrome mode").ok();
+            writeln!(f, "bar_shadow == A_DIM: {}", bar_shadow == A_DIM).ok();
+        }
+
         // Fill screen with HELP_BOLD background (like C htop)
         attrset(bold);
         for i in 0..crt.height() - 1 {
@@ -1499,12 +1533,19 @@ impl ScreenManager {
             line,
             0,
             &format!(
-                "htop-rs {} - Interactive process viewer",
+                "htop {} - (C) 2026 Trung Le.",
                 env!("CARGO_PKG_VERSION")
             ),
         );
         line += 1;
-        mvaddstr(line, 0, "Released under the MIT License.");
+        mvaddstr(
+            line,
+            0,
+            &format!(
+                "Released under the {}. See 'man' page for more info.",
+                license_display()
+            ),
+        );
         line += 2;
 
         // CPU usage bar legend (non-detailed mode)
@@ -1529,8 +1570,10 @@ impl ScreenManager {
         addstr("/");
         attrset(crt.color(ColorElement::CpuGuest));
         addstr("guest");
+        attrset(default_color);
+        addstr("                            "); // 28 spaces
         attrset(bar_shadow);
-        addstr("                            used%"); // 28 spaces + used%
+        addstr("used%");
         attrset(bar_border);
         addstr("]");
         line += 1;
@@ -1561,8 +1604,10 @@ impl ScreenManager {
         addstr("/");
         attrset(crt.color(ColorElement::MemoryCache));
         addstr("cache");
+        attrset(default_color);
+        addstr("          "); // 10 spaces
         attrset(bar_shadow);
-        addstr("          used"); // 10 spaces + used
+        addstr("used");
         attrset(default_color);
         addstr("/");
         attrset(bar_shadow);
@@ -1580,8 +1625,10 @@ impl ScreenManager {
         addstr("[");
         attrset(crt.color(ColorElement::Swap));
         addstr("used");
+        attrset(default_color);
+        addstr("                                          "); // 42 spaces
         attrset(bar_shadow);
-        addstr("                                          used"); // 42 spaces + used
+        addstr("used");
         attrset(default_color);
         addstr("/");
         attrset(bar_shadow);
@@ -1597,7 +1644,18 @@ impl ScreenManager {
             0,
             "Type and layout of header meters are configurable in the setup screen.",
         );
-        line += 2;
+        line += 1;
+
+        // Monochrome mode info (only shown when using Monochrome color scheme)
+        if crt.color_scheme == crate::core::ColorScheme::Monochrome {
+            mvaddstr(
+                line,
+                0,
+                "In monochrome, meters display as different chars, in order: |#*@$%&.",
+            );
+            line += 1;
+        }
+        line += 1;
 
         // Process state legend
         attrset(default_color);
@@ -1643,6 +1701,7 @@ impl ScreenManager {
             ("      u: ", "show processes of a single user", false),
             ("      H: ", "hide/show user process threads", false),
             ("      K: ", "hide/show kernel threads", false),
+            ("      O: ", "hide/show processes in containers", false),
             ("      F: ", "cursor follows process", false),
             ("  + - *: ", "expand/collapse tree/toggle all", false),
             ("N P M T: ", "sort by PID, CPU%, MEM% or TIME", false),
@@ -1660,6 +1719,7 @@ impl ScreenManager {
             ("   F7 ]: ", "higher priority (root only)", true),
             ("   F8 [: ", "lower priority (+ nice)", true),
             ("      e: ", "show process environment", false),
+            ("      i: ", "set IO priority", true),
             ("      l: ", "list open files with lsof", true),
             ("      x: ", "list file locks of process", false),
             ("      s: ", "trace syscalls with strace", true),
@@ -3620,26 +3680,74 @@ impl ScreenManager {
         let panel_content_height = (crt.height() - panel_start_y - 1 - 1) as usize;
         let mut scroll = 0usize;
 
+        // Initial clear and full draw
+        crt.clear();
+
+        // === Draw meters at the top (once) ===
+        if !self.hide_meters {
+            self.header.draw(crt, machine, &self.settings);
+        }
+
+        // === Draw screen tabs if enabled (once) ===
+        if self.settings.screen_tabs {
+            self.draw_screen_tabs(crt);
+        }
+
+        // === Draw main process panel on the right (once, unfocused) ===
+        // Draw main panel header
+        mv(panel_start_y, user_panel_width);
+        attrset(header_unfocus_attr);
+        // Fill the rest of the header row
+        for _ in user_panel_width..crt.width() {
+            let _ = addch(' ' as u32);
+        }
+        // Draw column headers
+        mv(panel_start_y, user_panel_width);
+        let header_str = self.main_panel.build_header_string(
+            &self.settings,
+            machine.sort_key,
+            machine.sort_descending,
+        );
+        let header_display: String = header_str
+            .chars()
+            .take((crt.width() - user_panel_width) as usize)
+            .collect();
+        let _ = addstr(&header_display);
+        attrset(reset_attr);
+
+        // Draw the main panel content (processes) - only once at start
+        let orig_show_header = self.main_panel.show_header;
+        self.main_panel.show_header = false;
+        self.main_panel.y = panel_start_y + 1;
+        self.main_panel.h = panel_content_height as i32;
+        self.main_panel
+            .ensure_visible(machine.processes.len() as i32);
+        self.main_panel.draw(crt, machine, &self.settings);
+        self.main_panel.show_header = orig_show_header;
+
+        // === Draw function bar at bottom (once) ===
+        mv(crt.height() - 1, 0);
+        attrset(func_bar_attr);
+        for _ in 0..crt.width() {
+            let _ = addch(' ' as u32);
+        }
+        mv(crt.height() - 1, 0);
+        attrset(func_key_attr);
+        let _ = addstr("Enter");
+        attrset(func_bar_attr);
+        let _ = addstr("Show   ");
+        attrset(func_key_attr);
+        let _ = addstr("Esc");
+        attrset(func_bar_attr);
+        let _ = addstr("Cancel ");
+        attrset(reset_attr);
+
         loop {
-            // Clear screen
-            crt.clear();
-
-            // === Draw meters at the top ===
-            if !self.hide_meters {
-                self.header.draw(crt, machine, &self.settings);
-            }
-
-            // === Draw screen tabs if enabled ===
-            if self.settings.screen_tabs {
-                self.draw_screen_tabs(crt);
-            }
-
-            // === Draw user selection panel on the left ===
+            // Only redraw the user selection panel (left side) - this is the only part that changes
 
             // Draw user panel header
             mv(panel_start_y, user_panel_x);
             attrset(panel_header_attr);
-            // Fill header row with spaces, then draw header text
             for _ in 0..user_panel_width {
                 let _ = addch(' ' as u32);
             }
@@ -3647,7 +3755,7 @@ impl ScreenManager {
             let _ = addstr(user_panel_header_text);
             attrset(reset_attr);
 
-            // Draw user menu items starting after panel header
+            // Draw user menu items
             for i in 0..panel_content_height {
                 let item_idx = scroll + i;
                 let row_y = panel_start_y + 1 + i as i32;
@@ -3683,61 +3791,6 @@ impl ScreenManager {
                     attrset(reset_attr);
                 }
             }
-
-            // === Draw main process panel on the right (unfocused) ===
-
-            // Draw main panel header
-            mv(panel_start_y, user_panel_width);
-            attrset(header_unfocus_attr);
-            // Fill the rest of the header row
-            for _ in user_panel_width..crt.width() {
-                let _ = addch(' ' as u32);
-            }
-            // Draw column headers
-            mv(panel_start_y, user_panel_width);
-            let header_str = self.main_panel.build_header_string(
-                &self.settings,
-                machine.sort_key,
-                machine.sort_descending,
-            );
-            let header_display: String = header_str
-                .chars()
-                .take((crt.width() - user_panel_width) as usize)
-                .collect();
-            let _ = addstr(&header_display);
-            attrset(reset_attr);
-
-            // Draw the main panel content (processes)
-            // Temporarily disable header drawing since we drew it above
-            let orig_show_header = self.main_panel.show_header;
-            self.main_panel.show_header = false;
-            self.main_panel.y = panel_start_y + 1; // Start after our manually drawn header
-            self.main_panel.h = panel_content_height as i32;
-            // Ensure selected row is visible with the smaller panel height
-            self.main_panel
-                .ensure_visible(machine.processes.len() as i32);
-            self.main_panel.draw(crt, machine, &self.settings);
-            self.main_panel.show_header = orig_show_header;
-
-            // === Draw function bar at bottom ===
-            mv(crt.height() - 1, 0);
-            attrset(func_bar_attr);
-            // Fill entire bottom row
-            for _ in 0..crt.width() {
-                let _ = addch(' ' as u32);
-            }
-            mv(crt.height() - 1, 0);
-            // Draw "Enter" key
-            attrset(func_key_attr);
-            let _ = addstr("Enter");
-            attrset(func_bar_attr);
-            let _ = addstr("Show   ");
-            // Draw "Esc" key
-            attrset(func_key_attr);
-            let _ = addstr("Esc");
-            attrset(func_bar_attr);
-            let _ = addstr("Cancel ");
-            attrset(reset_attr);
 
             crt.refresh();
 
@@ -3821,8 +3874,7 @@ impl ScreenManager {
         self.main_panel.h = orig_main_h;
         self.main_panel.scroll_v = orig_main_scroll_v;
 
-        // Clear screen to trigger full redraw when returning to main view
-        crt.clear();
+        // Re-enable delay for main loop (clear is handled by Redraw handler)
         crt.enable_delay();
     }
 }
