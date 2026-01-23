@@ -483,11 +483,17 @@ impl ScreenManager {
                 // Update header meters with new data
                 self.header.update(machine);
 
-                // Data changed, need full redraw of header and process list
-                // Also invalidate the cached display list so it gets rebuilt
+                // Data changed - invalidate the cached display list so it gets rebuilt
+                // Header always needs redraw to show updated meters
                 self.header_needs_redraw = true;
-                self.main_panel.needs_redraw = true;
                 self.main_panel.invalidate_display_list();
+
+                // Only force full process list redraw when user is NOT actively interacting
+                // This keeps navigation smooth while data updates in the background
+                // sort_timeout > 0 means user recently pressed a key
+                if self.sort_timeout == 0 {
+                    self.main_panel.needs_redraw = true;
+                }
 
                 self.last_update = Instant::now();
 
