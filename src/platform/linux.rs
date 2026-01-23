@@ -322,6 +322,10 @@ pub fn scan_memory(machine: &mut Machine) {
 
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
+    // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
+    // This allows widths to shrink back when there are no longer processes with wide values
+    machine.field_widths.reset_auto_widths();
+    
     let all_procs = match procfs::process::all_processes() {
         Ok(procs) => procs,
         Err(_) => return,

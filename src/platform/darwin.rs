@@ -706,6 +706,10 @@ pub fn scan_processes(machine: &mut Machine) {
 
 /// Scan all processes with settings control
 pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names: bool) {
+    // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
+    // This allows widths to shrink back when there are no longer processes with wide values
+    machine.field_widths.reset_auto_widths();
+    
     // Get list of all PIDs
     let mut pids: Vec<i32> = vec![0; 4096];
     let count = unsafe {
