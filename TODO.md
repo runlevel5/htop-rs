@@ -62,6 +62,61 @@ pub struct Theme {
 - `src/meters/*.rs` - Use theme for bar characters
 - `src/ui/screen_manager.rs` - Use theme's help_text instead of checking scheme
 
+### Delay accounting columns (Linux taskstats)
+Implement `PercentCpuDelay`, `PercentIODelay`, `PercentSwapDelay` columns which show scheduling delay percentages.
+
+**Requirements:**
+- Linux netlink socket with `NETLINK_GENERIC` family
+- `TASKSTATS` genetlink family for per-task delay accounting
+- Requires `CAP_NET_ADMIN` capability or root privileges
+- Kernel config: `CONFIG_TASKSTATS`, `CONFIG_TASK_DELAY_ACCT`
+
+**Implementation approach:**
+1. Create netlink socket and resolve TASKSTATS family ID
+2. Send `TASKSTATS_CMD_GET` with `TASKSTATS_CMD_ATTR_PID` for each process
+3. Parse response for `cpu_delay_total`, `blkio_delay_total`, `swapin_delay_total` (in nanoseconds)
+4. Calculate percentage: `delay_total / (delay_total + run_time) * 100`
+
+**Reference:**
+- C htop: `linux/LinuxProcessTable.c` - `LinuxProcessTable_readDelayAcctData()`
+- Linux kernel: `include/uapi/linux/taskstats.h`
+- Documentation: `Documentation/accounting/delay-accounting.rst`
+
+**Fields affected:**
+- `cpu_delay_percent` - CPU scheduling delay %
+- `blkio_delay_percent` - Block I/O delay %
+- `swapin_delay_percent` - Swap-in delay %
+
+### GPU metrics columns (Linux DRM)
+Implement `GpuTime` and `GpuPercent` columns for GPU usage per process.
+
+**Requirements:**
+- Linux DRM (Direct Rendering Manager) subsystem
+- `/sys/class/drm/card*/device/` for GPU enumeration
+- `/proc/[pid]/fdinfo/` for per-process GPU usage (driver-specific)
+- Supported drivers: i915 (Intel), amdgpu (AMD), nvidia (requires nvidia-smi or NVML)
+
+**Implementation approach:**
+1. Enumerate GPUs from `/sys/class/drm/`
+2. For each process, scan `/proc/[pid]/fdinfo/*` for DRM file descriptors
+3. Parse driver-specific fields:
+   - i915/amdgpu: `drm-engine-*` fields show nanoseconds of GPU time
+   - nvidia: Use NVML library or parse `nvidia-smi` output
+4. Calculate GPU % based on time delta between scans
+
+**Reference:**
+- C htop: `linux/GPU.c`, `linux/LinuxProcess.c` GPU-related code
+- Kernel docs: `Documentation/gpu/drm-usage-stats.rst`
+
+**Fields affected:**
+- `gpu_time` - Total GPU time in centiseconds
+- `gpu_percent` - GPU usage percentage
+
+**Notes:**
+- This is complex due to driver-specific formats
+- May want to make this optional/feature-gated
+- Consider caching GPU enumeration (GPUs don't change at runtime)
+
 ### Context-sensitive meter help (F1 in Meters setup)
 The F1 Help screen doesn't cover details of individual meters. Add a Help command in the Meters setup panel that shows detailed information about the currently selected meter.
 
