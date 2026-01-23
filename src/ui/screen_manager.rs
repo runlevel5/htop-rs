@@ -1539,7 +1539,7 @@ impl ScreenManager {
         let mut current_selection = 0i32;
         for (i, field) in self.main_panel.fields.iter().enumerate() {
             // Get the field name (trimmed, like C htop String_trim)
-            let name = field.name().unwrap_or("?").trim();
+            let name = field.name().trim();
             sort_panel.add_list_item(name, *field as i32);
 
             // Pre-select the current sort key

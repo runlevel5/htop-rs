@@ -257,9 +257,8 @@ fn main() -> Result<()> {
 fn print_sort_keys() {
     println!("Available sort keys:");
     for field in core::ProcessField::all() {
-        if let Some(name) = field.name() {
-            println!("  {:>19} {}", name, field.description());
-        }
+        let name = field.name();
+        println!("  {:>19} {}", name, field.description());
     }
 }
 

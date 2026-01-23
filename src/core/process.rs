@@ -78,71 +78,142 @@ pub enum Tristate {
 }
 
 /// Process fields for display and sorting
+///
+/// Field numbers match C htop's RowField.h for compatibility.
+/// Platform-specific fields are conditionally compiled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
 #[derive(Default)]
 pub enum ProcessField {
+    // === Common fields (all platforms) - from RowField.h ===
     Pid = 1,
-    Command,
-    State,
-    Ppid,
-    Pgrp,
-    Session,
-    TtyNr,
-    Tpgid,
-    Minflt,
-    Majflt,
-    Priority,
-    Nice,
-    Starttime,
-    Processor,
-    MSize,
-    MResident,
-    MShare,
-    MText,
-    MLib,
-    MData,
-    MDirty,
-    StUid,
-    User,
-    Time,
-    Nlwp,
-    Tty,
-    CmdLine,
-    Comm,
-    Exe,
-    Cwd,
+    Command = 2,
+    State = 3,
+    Ppid = 4,
+    Pgrp = 5,
+    Session = 6,
+    Tty = 7,
+    Tpgid = 8,
+    Minflt = 10,
+    Majflt = 12,
+    Priority = 18,
+    Nice = 19,
+    Starttime = 21,
+    Processor = 38,
+    MSize = 39,      // M_VIRT
+    MResident = 40,  // M_RESIDENT
+    StUid = 46,
     #[default]
-    PercentCpu,
-    PercentMem,
-    IOPriority,
-    IORead,
-    IOWrite,
-    IORate,
-    IOReadRate,
-    IOWriteRate,
-    IOReadOps,
-    IOWriteOps,
-    PercentIODelay,
-    PercentSwapDelay,
-    Ctxt,
-    CGroup,
-    OomScore,
-    SecAttr,
-    Elapsed,
+    PercentCpu = 47,
+    PercentMem = 48,
+    User = 49,
+    Time = 50,
+    Nlwp = 51,
+    Tgid = 52,
+    PercentNormCpu = 53,
+    Elapsed = 54,
+    SchedulerPolicy = 55,
+    ProcComm = 124,
+    ProcExe = 125,
+    Cwd = 126,
+
+    // === Linux-specific fields - from linux/ProcessField.h ===
+    #[cfg(target_os = "linux")]
+    Cminflt = 11,
+    #[cfg(target_os = "linux")]
+    Cmajflt = 13,
+    #[cfg(target_os = "linux")]
+    Utime = 14,
+    #[cfg(target_os = "linux")]
+    Stime = 15,
+    #[cfg(target_os = "linux")]
+    Cutime = 16,
+    #[cfg(target_os = "linux")]
+    Cstime = 17,
+    #[cfg(target_os = "linux")]
+    MShare = 41,
+    #[cfg(target_os = "linux")]
+    MText = 42,  // M_TRS (CODE)
+    #[cfg(target_os = "linux")]
+    MData = 43,  // M_DRS (DATA)
+    #[cfg(target_os = "linux")]
+    MLib = 44,   // M_LRS (LIB)
+    #[cfg(target_os = "linux")]
+    Rchar = 103,
+    #[cfg(target_os = "linux")]
+    Wchar = 104,
+    #[cfg(target_os = "linux")]
+    Syscr = 105,
+    #[cfg(target_os = "linux")]
+    Syscw = 106,
+    #[cfg(target_os = "linux")]
+    Rbytes = 107,
+    #[cfg(target_os = "linux")]
+    Wbytes = 108,
+    #[cfg(target_os = "linux")]
+    Cnclwb = 109,
+    #[cfg(target_os = "linux")]
+    IOReadRate = 110,
+    #[cfg(target_os = "linux")]
+    IOWriteRate = 111,
+    #[cfg(target_os = "linux")]
+    IORate = 112,
+    #[cfg(target_os = "linux")]
+    CGroup = 113,
+    #[cfg(target_os = "linux")]
+    Oom = 114,
+    #[cfg(target_os = "linux")]
+    IOPriority = 115,
+    #[cfg(target_os = "linux")]
+    PercentCpuDelay = 116,
+    #[cfg(target_os = "linux")]
+    PercentIODelay = 117,
+    #[cfg(target_os = "linux")]
+    PercentSwapDelay = 118,
+    #[cfg(target_os = "linux")]
+    MPss = 119,
+    #[cfg(target_os = "linux")]
+    MSwap = 120,
+    #[cfg(target_os = "linux")]
+    MPsswp = 121,
+    #[cfg(target_os = "linux")]
+    Ctxt = 122,
+    #[cfg(target_os = "linux")]
+    SecAttr = 123,
+    #[cfg(target_os = "linux")]
+    AutogroupId = 127,
+    #[cfg(target_os = "linux")]
+    AutogroupNice = 128,
+    #[cfg(target_os = "linux")]
+    CCGroup = 129,
+    #[cfg(target_os = "linux")]
+    Container = 130,
+    #[cfg(target_os = "linux")]
+    MPriv = 131,
+    #[cfg(target_os = "linux")]
+    GpuTime = 132,
+    #[cfg(target_os = "linux")]
+    GpuPercent = 133,
+    #[cfg(target_os = "linux")]
+    IsContainer = 134,
+
+    // === macOS-specific fields - from darwin/ProcessField.h ===
+    #[cfg(target_os = "macos")]
+    Translated = 100,
 }
 
 impl ProcessField {
-    /// Get all process fields
-    pub fn all() -> &'static [ProcessField] {
-        &[
+    /// Get all process fields for the current platform
+    pub fn all() -> Vec<ProcessField> {
+        let mut fields = vec![
+            // Common fields (all platforms)
             ProcessField::Pid,
             ProcessField::Command,
             ProcessField::State,
             ProcessField::Ppid,
             ProcessField::Pgrp,
             ProcessField::Session,
-            ProcessField::TtyNr,
+            ProcessField::Tty,
             ProcessField::Tpgid,
             ProcessField::Minflt,
             ProcessField::Majflt,
@@ -152,35 +223,87 @@ impl ProcessField {
             ProcessField::Processor,
             ProcessField::MSize,
             ProcessField::MResident,
-            ProcessField::MShare,
-            ProcessField::MText,
-            ProcessField::MLib,
-            ProcessField::MData,
-            ProcessField::MDirty,
             ProcessField::StUid,
+            ProcessField::PercentCpu,
+            ProcessField::PercentMem,
             ProcessField::User,
             ProcessField::Time,
             ProcessField::Nlwp,
-            ProcessField::Tty,
-            ProcessField::CmdLine,
-            ProcessField::Comm,
-            ProcessField::Exe,
+            ProcessField::Tgid,
+            ProcessField::PercentNormCpu,
+            ProcessField::Elapsed,
+            ProcessField::SchedulerPolicy,
+            ProcessField::ProcComm,
+            ProcessField::ProcExe,
             ProcessField::Cwd,
-            ProcessField::PercentCpu,
-            ProcessField::PercentMem,
-        ]
+        ];
+
+        // Linux-specific fields
+        #[cfg(target_os = "linux")]
+        {
+            fields.extend([
+                ProcessField::Cminflt,
+                ProcessField::Cmajflt,
+                ProcessField::Utime,
+                ProcessField::Stime,
+                ProcessField::Cutime,
+                ProcessField::Cstime,
+                ProcessField::MShare,
+                ProcessField::MText,
+                ProcessField::MData,
+                ProcessField::MLib,
+                ProcessField::Rchar,
+                ProcessField::Wchar,
+                ProcessField::Syscr,
+                ProcessField::Syscw,
+                ProcessField::Rbytes,
+                ProcessField::Wbytes,
+                ProcessField::Cnclwb,
+                ProcessField::IOReadRate,
+                ProcessField::IOWriteRate,
+                ProcessField::IORate,
+                ProcessField::CGroup,
+                ProcessField::Oom,
+                ProcessField::IOPriority,
+                ProcessField::PercentCpuDelay,
+                ProcessField::PercentIODelay,
+                ProcessField::PercentSwapDelay,
+                ProcessField::MPss,
+                ProcessField::MSwap,
+                ProcessField::MPsswp,
+                ProcessField::Ctxt,
+                ProcessField::SecAttr,
+                ProcessField::AutogroupId,
+                ProcessField::AutogroupNice,
+                ProcessField::CCGroup,
+                ProcessField::Container,
+                ProcessField::MPriv,
+                ProcessField::GpuTime,
+                ProcessField::GpuPercent,
+                ProcessField::IsContainer,
+            ]);
+        }
+
+        // macOS-specific fields
+        #[cfg(target_os = "macos")]
+        {
+            fields.push(ProcessField::Translated);
+        }
+
+        fields
     }
 
     /// Get the name of a process field (matches C htop naming convention)
-    pub fn name(self) -> Option<&'static str> {
-        Some(match self {
+    pub fn name(self) -> &'static str {
+        match self {
+            // Common fields
             ProcessField::Pid => "PID",
             ProcessField::Command => "Command",
             ProcessField::State => "STATE",
             ProcessField::Ppid => "PPID",
             ProcessField::Pgrp => "PGRP",
             ProcessField::Session => "SESSION",
-            ProcessField::TtyNr => "TTY_NR",
+            ProcessField::Tty => "TTY",
             ProcessField::Tpgid => "TPGID",
             ProcessField::Minflt => "MINFLT",
             ProcessField::Majflt => "MAJFLT",
@@ -190,51 +313,118 @@ impl ProcessField {
             ProcessField::Processor => "PROCESSOR",
             ProcessField::MSize => "M_VIRT",
             ProcessField::MResident => "M_RESIDENT",
-            ProcessField::MShare => "M_SHARE",
-            ProcessField::MText => "M_TRS",
-            ProcessField::MLib => "M_LRS",
-            ProcessField::MData => "M_DRS",
-            ProcessField::MDirty => "M_DT",
             ProcessField::StUid => "ST_UID",
+            ProcessField::PercentCpu => "PERCENT_CPU",
+            ProcessField::PercentMem => "PERCENT_MEM",
             ProcessField::User => "USER",
             ProcessField::Time => "TIME",
             ProcessField::Nlwp => "NLWP",
-            ProcessField::Tty => "TTY",
-            ProcessField::CmdLine => "Command",
-            ProcessField::Comm => "COMM",
-            ProcessField::Exe => "EXE",
-            ProcessField::Cwd => "CWD",
-            ProcessField::PercentCpu => "PERCENT_CPU",
-            ProcessField::PercentMem => "PERCENT_MEM",
-            ProcessField::IOPriority => "IO_PRIORITY",
-            ProcessField::IORead => "RBYTES",
-            ProcessField::IOWrite => "WBYTES",
-            ProcessField::IORate => "IO_RATE",
-            ProcessField::IOReadRate => "IO_READ_RATE",
-            ProcessField::IOWriteRate => "IO_WRITE_RATE",
-            ProcessField::IOReadOps => "IO_OPS",
-            ProcessField::IOWriteOps => "IO_OPS",
-            ProcessField::PercentIODelay => "PERCENT_IO_DELAY",
-            ProcessField::PercentSwapDelay => "PERCENT_SWAP_DELAY",
-            ProcessField::Ctxt => "CTXT",
-            ProcessField::CGroup => "CGROUP",
-            ProcessField::OomScore => "OOM",
-            ProcessField::SecAttr => "SECATTR",
+            ProcessField::Tgid => "TGID",
+            ProcessField::PercentNormCpu => "PERCENT_NORM_CPU",
             ProcessField::Elapsed => "ELAPSED",
-        })
+            ProcessField::SchedulerPolicy => "SCHEDULERPOLICY",
+            ProcessField::ProcComm => "COMM",
+            ProcessField::ProcExe => "EXE",
+            ProcessField::Cwd => "CWD",
+
+            // Linux-specific fields
+            #[cfg(target_os = "linux")]
+            ProcessField::Cminflt => "CMINFLT",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cmajflt => "CMAJFLT",
+            #[cfg(target_os = "linux")]
+            ProcessField::Utime => "UTIME",
+            #[cfg(target_os = "linux")]
+            ProcessField::Stime => "STIME",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cutime => "CUTIME",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cstime => "CSTIME",
+            #[cfg(target_os = "linux")]
+            ProcessField::MShare => "M_SHARE",
+            #[cfg(target_os = "linux")]
+            ProcessField::MText => "M_TRS",
+            #[cfg(target_os = "linux")]
+            ProcessField::MData => "M_DRS",
+            #[cfg(target_os = "linux")]
+            ProcessField::MLib => "M_LRS",
+            #[cfg(target_os = "linux")]
+            ProcessField::Rchar => "RCHAR",
+            #[cfg(target_os = "linux")]
+            ProcessField::Wchar => "WCHAR",
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscr => "SYSCR",
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscw => "SYSCW",
+            #[cfg(target_os = "linux")]
+            ProcessField::Rbytes => "RBYTES",
+            #[cfg(target_os = "linux")]
+            ProcessField::Wbytes => "WBYTES",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cnclwb => "CNCLWB",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOReadRate => "IO_READ_RATE",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOWriteRate => "IO_WRITE_RATE",
+            #[cfg(target_os = "linux")]
+            ProcessField::IORate => "IO_RATE",
+            #[cfg(target_os = "linux")]
+            ProcessField::CGroup => "CGROUP",
+            #[cfg(target_os = "linux")]
+            ProcessField::Oom => "OOM",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOPriority => "IO_PRIORITY",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentCpuDelay => "PERCENT_CPU_DELAY",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentIODelay => "PERCENT_IO_DELAY",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentSwapDelay => "PERCENT_SWAP_DELAY",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPss => "M_PSS",
+            #[cfg(target_os = "linux")]
+            ProcessField::MSwap => "M_SWAP",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPsswp => "M_PSSWP",
+            #[cfg(target_os = "linux")]
+            ProcessField::Ctxt => "CTXT",
+            #[cfg(target_os = "linux")]
+            ProcessField::SecAttr => "SECATTR",
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupId => "AUTOGROUP_ID",
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupNice => "AUTOGROUP_NICE",
+            #[cfg(target_os = "linux")]
+            ProcessField::CCGroup => "CCGROUP",
+            #[cfg(target_os = "linux")]
+            ProcessField::Container => "CONTAINER",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPriv => "M_PRIV",
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuTime => "GPU_TIME",
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuPercent => "GPU_PERCENT",
+            #[cfg(target_os = "linux")]
+            ProcessField::IsContainer => "ISCONTAINER",
+
+            // macOS-specific fields
+            #[cfg(target_os = "macos")]
+            ProcessField::Translated => "TRANSLATED",
+        }
     }
 
     /// Get the title (column header) for a process field
     pub fn title(self) -> &'static str {
         match self {
-            ProcessField::Pid => "  PID ",
+            // Common fields
+            ProcessField::Pid => "PID",
             ProcessField::Command => "Command ",
             ProcessField::State => "S ",
-            ProcessField::Ppid => " PPID ",
-            ProcessField::Pgrp => " PGRP ",
-            ProcessField::Session => "  SID ",
-            ProcessField::TtyNr => "TTY_NR ",
-            ProcessField::Tpgid => "TPGID ",
+            ProcessField::Ppid => "PPID",
+            ProcessField::Pgrp => "PGRP",
+            ProcessField::Session => "SID",
+            ProcessField::Tty => "TTY      ",
+            ProcessField::Tpgid => "TPGID",
             ProcessField::Minflt => "     MINFLT ",
             ProcessField::Majflt => "     MAJFLT ",
             ProcessField::Priority => "PRI ",
@@ -243,92 +433,223 @@ impl ProcessField {
             ProcessField::Processor => "CPU ",
             ProcessField::MSize => " VIRT ",
             ProcessField::MResident => "  RES ",
-            ProcessField::MShare => "  SHR ",
-            ProcessField::MText => " CODE ",
-            ProcessField::MLib => "  LIB ",
-            ProcessField::MData => " DATA ",
-            ProcessField::MDirty => "DIRTY ",
-            ProcessField::StUid => "  UID ",
+            ProcessField::StUid => "UID",
+            ProcessField::PercentCpu => " CPU%",
+            ProcessField::PercentMem => "MEM% ",
             ProcessField::User => "USER       ",
             ProcessField::Time => "  TIME+  ",
             ProcessField::Nlwp => "NLWP ",
-            ProcessField::Tty => "TTY      ",
-            ProcessField::CmdLine => "Command",
-            ProcessField::Comm => "COMM ",
-            ProcessField::Exe => "EXE ",
-            ProcessField::Cwd => "CWD ",
-            ProcessField::PercentCpu => "CPU% ",
-            ProcessField::PercentMem => "MEM% ",
-            ProcessField::IOPriority => "IO ",
-            ProcessField::IORead => "  IO_R ",
-            ProcessField::IOWrite => "  IO_W ",
-            ProcessField::IORate => "  DISK R/W ",
-            ProcessField::IOReadRate => " DISK READ ",
-            ProcessField::IOWriteRate => "DISK WRITE ",
-            ProcessField::IOReadOps => " IO_ROP ",
-            ProcessField::IOWriteOps => " IO_WOP ",
-            ProcessField::PercentIODelay => " IOD% ",
-            ProcessField::PercentSwapDelay => "SWPD% ",
-            ProcessField::Ctxt => "    CTXT ",
-            ProcessField::CGroup => "CGROUP ",
-            ProcessField::OomScore => " OOM ",
-            ProcessField::SecAttr => "Security Attribute ",
+            ProcessField::Tgid => "TGID",
+            ProcessField::PercentNormCpu => "NCPU%",
             ProcessField::Elapsed => "ELAPSED  ",
+            ProcessField::SchedulerPolicy => "SCHED ",
+            ProcessField::ProcComm => "COMM            ",
+            ProcessField::ProcExe => "EXE             ",
+            ProcessField::Cwd => "CWD                       ",
+
+            // Linux-specific fields
+            #[cfg(target_os = "linux")]
+            ProcessField::Cminflt => "    CMINFLT ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cmajflt => "    CMAJFLT ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Utime => " UTIME+  ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Stime => " STIME+  ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cutime => " CUTIME+ ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cstime => " CSTIME+ ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MShare => "  SHR ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MText => " CODE ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MData => " DATA ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MLib => "  LIB ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Rchar => "RCHAR ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Wchar => "WCHAR ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscr => "  READ_SYSC ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscw => " WRITE_SYSC ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Rbytes => " IO_R ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Wbytes => " IO_W ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cnclwb => " IO_C ",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOReadRate => "  DISK READ ",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOWriteRate => " DISK WRITE ",
+            #[cfg(target_os = "linux")]
+            ProcessField::IORate => "   DISK R/W ",
+            #[cfg(target_os = "linux")]
+            ProcessField::CGroup => "CGROUP (raw)",
+            #[cfg(target_os = "linux")]
+            ProcessField::Oom => " OOM ",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOPriority => "IO ",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentCpuDelay => "CPUD% ",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentIODelay => " IOD% ",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentSwapDelay => "SWPD% ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPss => "  PSS ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MSwap => " SWAP ",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPsswp => " PSSWP ",
+            #[cfg(target_os = "linux")]
+            ProcessField::Ctxt => " CTXT ",
+            #[cfg(target_os = "linux")]
+            ProcessField::SecAttr => "Security Attribute",
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupId => "AGRP",
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupNice => " ANI",
+            #[cfg(target_os = "linux")]
+            ProcessField::CCGroup => "CGROUP (compressed)",
+            #[cfg(target_os = "linux")]
+            ProcessField::Container => "CONTAINER",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPriv => " PRIV ",
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuTime => "GPU_TIME ",
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuPercent => " GPU% ",
+            #[cfg(target_os = "linux")]
+            ProcessField::IsContainer => "CONT ",
+
+            // macOS-specific fields
+            #[cfg(target_os = "macos")]
+            ProcessField::Translated => "T ",
         }
     }
 
     /// Get the description for a process field
     pub fn description(self) -> &'static str {
         match self {
-            ProcessField::Pid => "Process ID",
-            ProcessField::Command => "Command (process name and arguments)",
-            ProcessField::State => "Process state (S sleeping, R running, D disk, Z zombie)",
+            // Common fields
+            ProcessField::Pid => "Process/thread ID",
+            ProcessField::Command => "Command line (insert as last column only)",
+            ProcessField::State => "Process state (S sleeping, R running, D disk, Z zombie, T traced, W paging)",
             ProcessField::Ppid => "Parent process ID",
             ProcessField::Pgrp => "Process group ID",
-            ProcessField::Session => "Session ID",
-            ProcessField::TtyNr => "Controlling terminal",
-            ProcessField::Tpgid => "Foreground process group ID of the controlling terminal",
-            ProcessField::Minflt => "Minor page faults (pages from memory)",
-            ProcessField::Majflt => "Major page faults (pages from disk)",
-            ProcessField::Priority => "Kernel scheduling priority",
-            ProcessField::Nice => {
-                "Nice value (the higher, the more it lets other processes take priority)"
-            }
-            ProcessField::Starttime => "Start time of the process",
-            ProcessField::Processor => "CPU last executed on",
-            ProcessField::MSize => "Virtual memory size",
-            ProcessField::MResident => "Resident set size",
-            ProcessField::MShare => "Shared memory size",
-            ProcessField::MText => "Text (code) memory size",
-            ProcessField::MLib => "Library memory size",
-            ProcessField::MData => "Data + stack memory size",
-            ProcessField::MDirty => "Dirty pages",
-            ProcessField::StUid => "User ID of process owner",
-            ProcessField::User => "Username of process owner",
-            ProcessField::Time => "Total CPU time used",
-            ProcessField::Nlwp => "Number of threads",
-            ProcessField::Tty => "Controlling terminal name",
-            ProcessField::CmdLine => "Full command line",
-            ProcessField::Comm => "Process name (comm)",
-            ProcessField::Exe => "Executable path",
-            ProcessField::Cwd => "Current working directory",
-            ProcessField::PercentCpu => "Percentage of CPU time",
-            ProcessField::PercentMem => "Percentage of resident memory",
-            ProcessField::IOPriority => "I/O priority",
-            ProcessField::IORead => "Bytes of read(2) I/O for the process",
-            ProcessField::IOWrite => "Bytes of write(2) I/O for the process",
+            ProcessField::Session => "Process's session ID",
+            ProcessField::Tty => "Controlling terminal",
+            ProcessField::Tpgid => "Process ID of the fg process group of the controlling terminal",
+            ProcessField::Minflt => "Number of minor faults which have not required loading a memory page from disk",
+            ProcessField::Majflt => "Number of major faults which have required loading a memory page from disk",
+            ProcessField::Priority => "Kernel's internal priority for the process",
+            ProcessField::Nice => "Nice value (the higher the value, the more it lets other processes take priority)",
+            ProcessField::Starttime => "Time the process was started",
+            ProcessField::Processor => "Id of the CPU the process last executed on",
+            ProcessField::MSize => "Total program size in virtual memory",
+            ProcessField::MResident => "Resident set size, size of the text and data sections, plus stack usage",
+            ProcessField::StUid => "User ID of the process owner",
+            ProcessField::PercentCpu => "Percentage of the CPU time the process used in the last sampling",
+            ProcessField::PercentMem => "Percentage of the memory the process is using, based on resident memory size",
+            ProcessField::User => "Username of the process owner (or user ID if name cannot be determined)",
+            ProcessField::Time => "Total time the process has spent in user and system time",
+            ProcessField::Nlwp => "Number of threads in the process",
+            ProcessField::Tgid => "Thread group ID (i.e. process ID)",
+            ProcessField::PercentNormCpu => "Normalized percentage of the CPU time the process used in the last sampling (normalized by cpu count)",
+            ProcessField::Elapsed => "Time since the process was started",
+            ProcessField::SchedulerPolicy => "Current scheduling policy of the process",
+            ProcessField::ProcComm => "comm string of the process from /proc/[pid]/comm",
+            ProcessField::ProcExe => "Basename of exe of the process from /proc/[pid]/exe",
+            ProcessField::Cwd => "The current working directory of the process",
+
+            // Linux-specific fields
+            #[cfg(target_os = "linux")]
+            ProcessField::Cminflt => "Children processes' minor faults",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cmajflt => "Children processes' major faults",
+            #[cfg(target_os = "linux")]
+            ProcessField::Utime => "User CPU time - time the process spent executing in user mode",
+            #[cfg(target_os = "linux")]
+            ProcessField::Stime => "System CPU time - time the kernel spent running system calls for this process",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cutime => "Children processes' user CPU time",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cstime => "Children processes' system CPU time",
+            #[cfg(target_os = "linux")]
+            ProcessField::MShare => "Size of the process's shared pages",
+            #[cfg(target_os = "linux")]
+            ProcessField::MText => "Size of the .text segment of the process (CODE)",
+            #[cfg(target_os = "linux")]
+            ProcessField::MData => "Size of the .data segment plus stack usage of the process (DATA)",
+            #[cfg(target_os = "linux")]
+            ProcessField::MLib => "The library size of the process (calculated from memory maps)",
+            #[cfg(target_os = "linux")]
+            ProcessField::Rchar => "Number of bytes the process has read",
+            #[cfg(target_os = "linux")]
+            ProcessField::Wchar => "Number of bytes the process has written",
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscr => "Number of read(2) syscalls for the process",
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscw => "Number of write(2) syscalls for the process",
+            #[cfg(target_os = "linux")]
+            ProcessField::Rbytes => "Bytes of read(2) I/O for the process",
+            #[cfg(target_os = "linux")]
+            ProcessField::Wbytes => "Bytes of write(2) I/O for the process",
+            #[cfg(target_os = "linux")]
+            ProcessField::Cnclwb => "Bytes of cancelled write(2) I/O",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOReadRate => "The I/O rate of read(2) in bytes per second for the process",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOWriteRate => "The I/O rate of write(2) in bytes per second for the process",
+            #[cfg(target_os = "linux")]
             ProcessField::IORate => "Total I/O rate in bytes per second",
-            ProcessField::IOReadRate => "The I/O rate of read(2) in bytes per second",
-            ProcessField::IOWriteRate => "The I/O rate of write(2) in bytes per second",
-            ProcessField::IOReadOps => "Read operations",
-            ProcessField::IOWriteOps => "Write operations",
+            #[cfg(target_os = "linux")]
+            ProcessField::CGroup => "Which cgroup the process is in",
+            #[cfg(target_os = "linux")]
+            ProcessField::Oom => "OOM (Out-of-Memory) killer score",
+            #[cfg(target_os = "linux")]
+            ProcessField::IOPriority => "I/O priority",
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentCpuDelay => "CPU delay %",
+            #[cfg(target_os = "linux")]
             ProcessField::PercentIODelay => "Block I/O delay %",
+            #[cfg(target_os = "linux")]
             ProcessField::PercentSwapDelay => "Swapin delay %",
-            ProcessField::Ctxt => "Context switches",
-            ProcessField::CGroup => "Control group",
-            ProcessField::OomScore => "OOM killer score",
-            ProcessField::SecAttr => "Security attribute (e.g., SELinux label)",
-            ProcessField::Elapsed => "Time since process started",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPss => "proportional set size, same as M_RESIDENT but each page is divided by the number of processes sharing it",
+            #[cfg(target_os = "linux")]
+            ProcessField::MSwap => "Size of the process's swapped pages",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPsswp => "shows proportional swap share of this mapping, unlike \"Swap\", this does not take into account swapped out page of underlying shmem objects",
+            #[cfg(target_os = "linux")]
+            ProcessField::Ctxt => "Context switches (incremental sum of voluntary_ctxt_switches and nonvoluntary_ctxt_switches)",
+            #[cfg(target_os = "linux")]
+            ProcessField::SecAttr => "Security attribute of the process (e.g. SELinux or AppArmor)",
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupId => "The autogroup identifier of the process",
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupNice => "Nice value (the higher the value, the more other processes take priority) associated with the process autogroup",
+            #[cfg(target_os = "linux")]
+            ProcessField::CCGroup => "Which cgroup the process is in (condensed to essentials)",
+            #[cfg(target_os = "linux")]
+            ProcessField::Container => "Name of the container the process is in (guessed by heuristics)",
+            #[cfg(target_os = "linux")]
+            ProcessField::MPriv => "The private memory size of the process - resident set size minus shared memory",
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuTime => "Total GPU time",
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuPercent => "Percentage of the GPU time the process used in the last sampling",
+            #[cfg(target_os = "linux")]
+            ProcessField::IsContainer => "Whether the process is running inside a child container",
+
+            // macOS-specific fields
+            #[cfg(target_os = "macos")]
+            ProcessField::Translated => "Translation info (T translated, N native)",
         }
     }
 
@@ -336,13 +657,14 @@ impl ProcessField {
     pub fn from_name(name: &str) -> Option<ProcessField> {
         let name_upper = name.to_uppercase();
         match name_upper.as_str() {
+            // Common fields
             "PID" => Some(ProcessField::Pid),
             "COMMAND" => Some(ProcessField::Command),
             "S" | "STATE" => Some(ProcessField::State),
             "PPID" => Some(ProcessField::Ppid),
             "PGRP" => Some(ProcessField::Pgrp),
             "SID" | "SESSION" => Some(ProcessField::Session),
-            "TTY_NR" => Some(ProcessField::TtyNr),
+            "TTY" => Some(ProcessField::Tty),
             "TPGID" => Some(ProcessField::Tpgid),
             "MINFLT" => Some(ProcessField::Minflt),
             "MAJFLT" => Some(ProcessField::Majflt),
@@ -350,52 +672,172 @@ impl ProcessField {
             "NI" | "NICE" => Some(ProcessField::Nice),
             "START" | "STARTTIME" => Some(ProcessField::Starttime),
             "CPU" | "PROCESSOR" => Some(ProcessField::Processor),
-            "VIRT" | "M_SIZE" => Some(ProcessField::MSize),
+            "VIRT" | "M_VIRT" => Some(ProcessField::MSize),
             "RES" | "M_RESIDENT" => Some(ProcessField::MResident),
-            "SHR" | "M_SHARE" => Some(ProcessField::MShare),
-            "CODE" | "M_TRS" => Some(ProcessField::MText),
-            "LIB" | "M_LRS" => Some(ProcessField::MLib),
-            "DATA" | "M_DRS" => Some(ProcessField::MData),
-            "DIRTY" | "M_DT" => Some(ProcessField::MDirty),
             "UID" | "ST_UID" => Some(ProcessField::StUid),
+            "CPU%" | "PERCENT_CPU" => Some(ProcessField::PercentCpu),
+            "MEM%" | "PERCENT_MEM" => Some(ProcessField::PercentMem),
             "USER" => Some(ProcessField::User),
             "TIME" | "TIME+" => Some(ProcessField::Time),
             "NLWP" => Some(ProcessField::Nlwp),
-            "TTY" => Some(ProcessField::Tty),
-            "CMDLINE" => Some(ProcessField::CmdLine),
-            "COMM" => Some(ProcessField::Comm),
-            "EXE" => Some(ProcessField::Exe),
+            "TGID" => Some(ProcessField::Tgid),
+            "NCPU%" | "PERCENT_NORM_CPU" => Some(ProcessField::PercentNormCpu),
+            "ELAPSED" => Some(ProcessField::Elapsed),
+            "SCHED" | "SCHEDULERPOLICY" => Some(ProcessField::SchedulerPolicy),
+            "COMM" => Some(ProcessField::ProcComm),
+            "EXE" => Some(ProcessField::ProcExe),
             "CWD" => Some(ProcessField::Cwd),
-            "CPU%" | "PERCENT_CPU" => Some(ProcessField::PercentCpu),
-            "MEM%" | "PERCENT_MEM" => Some(ProcessField::PercentMem),
-            "IO_RATE" => Some(ProcessField::IORate),
-            "IO_READ_RATE" => Some(ProcessField::IOReadRate),
-            "IO_WRITE_RATE" => Some(ProcessField::IOWriteRate),
-            "IO_PRIORITY" => Some(ProcessField::IOPriority),
-            "PERCENT_IO_DELAY" | "IOD%" => Some(ProcessField::PercentIODelay),
-            "PERCENT_SWAP_DELAY" | "SWPD%" => Some(ProcessField::PercentSwapDelay),
+
+            // Linux-specific fields
+            #[cfg(target_os = "linux")]
+            "CMINFLT" => Some(ProcessField::Cminflt),
+            #[cfg(target_os = "linux")]
+            "CMAJFLT" => Some(ProcessField::Cmajflt),
+            #[cfg(target_os = "linux")]
+            "UTIME" => Some(ProcessField::Utime),
+            #[cfg(target_os = "linux")]
+            "STIME" => Some(ProcessField::Stime),
+            #[cfg(target_os = "linux")]
+            "CUTIME" => Some(ProcessField::Cutime),
+            #[cfg(target_os = "linux")]
+            "CSTIME" => Some(ProcessField::Cstime),
+            #[cfg(target_os = "linux")]
+            "SHR" | "M_SHARE" => Some(ProcessField::MShare),
+            #[cfg(target_os = "linux")]
+            "CODE" | "M_TRS" => Some(ProcessField::MText),
+            #[cfg(target_os = "linux")]
+            "DATA" | "M_DRS" => Some(ProcessField::MData),
+            #[cfg(target_os = "linux")]
+            "LIB" | "M_LRS" => Some(ProcessField::MLib),
+            #[cfg(target_os = "linux")]
+            "RCHAR" => Some(ProcessField::Rchar),
+            #[cfg(target_os = "linux")]
+            "WCHAR" => Some(ProcessField::Wchar),
+            #[cfg(target_os = "linux")]
+            "SYSCR" | "READ_SYSC" => Some(ProcessField::Syscr),
+            #[cfg(target_os = "linux")]
+            "SYSCW" | "WRITE_SYSC" => Some(ProcessField::Syscw),
+            #[cfg(target_os = "linux")]
+            "RBYTES" | "IO_R" => Some(ProcessField::Rbytes),
+            #[cfg(target_os = "linux")]
+            "WBYTES" | "IO_W" => Some(ProcessField::Wbytes),
+            #[cfg(target_os = "linux")]
+            "CNCLWB" | "IO_C" => Some(ProcessField::Cnclwb),
+            #[cfg(target_os = "linux")]
+            "IO_READ_RATE" | "DISK_READ" => Some(ProcessField::IOReadRate),
+            #[cfg(target_os = "linux")]
+            "IO_WRITE_RATE" | "DISK_WRITE" => Some(ProcessField::IOWriteRate),
+            #[cfg(target_os = "linux")]
+            "IO_RATE" | "DISK_R/W" => Some(ProcessField::IORate),
+            #[cfg(target_os = "linux")]
+            "CGROUP" => Some(ProcessField::CGroup),
+            #[cfg(target_os = "linux")]
+            "OOM" => Some(ProcessField::Oom),
+            #[cfg(target_os = "linux")]
+            "IO" | "IO_PRIORITY" => Some(ProcessField::IOPriority),
+            #[cfg(target_os = "linux")]
+            "CPUD%" | "PERCENT_CPU_DELAY" => Some(ProcessField::PercentCpuDelay),
+            #[cfg(target_os = "linux")]
+            "IOD%" | "PERCENT_IO_DELAY" => Some(ProcessField::PercentIODelay),
+            #[cfg(target_os = "linux")]
+            "SWPD%" | "PERCENT_SWAP_DELAY" => Some(ProcessField::PercentSwapDelay),
+            #[cfg(target_os = "linux")]
+            "PSS" | "M_PSS" => Some(ProcessField::MPss),
+            #[cfg(target_os = "linux")]
+            "SWAP" | "M_SWAP" => Some(ProcessField::MSwap),
+            #[cfg(target_os = "linux")]
+            "PSSWP" | "M_PSSWP" => Some(ProcessField::MPsswp),
+            #[cfg(target_os = "linux")]
+            "CTXT" => Some(ProcessField::Ctxt),
+            #[cfg(target_os = "linux")]
+            "SECATTR" => Some(ProcessField::SecAttr),
+            #[cfg(target_os = "linux")]
+            "AGRP" | "AUTOGROUP_ID" => Some(ProcessField::AutogroupId),
+            #[cfg(target_os = "linux")]
+            "ANI" | "AUTOGROUP_NICE" => Some(ProcessField::AutogroupNice),
+            #[cfg(target_os = "linux")]
+            "CCGROUP" => Some(ProcessField::CCGroup),
+            #[cfg(target_os = "linux")]
+            "CONTAINER" => Some(ProcessField::Container),
+            #[cfg(target_os = "linux")]
+            "PRIV" | "M_PRIV" => Some(ProcessField::MPriv),
+            #[cfg(target_os = "linux")]
+            "GPU_TIME" => Some(ProcessField::GpuTime),
+            #[cfg(target_os = "linux")]
+            "GPU%" | "GPU_PERCENT" => Some(ProcessField::GpuPercent),
+            #[cfg(target_os = "linux")]
+            "CONT" | "ISCONTAINER" => Some(ProcessField::IsContainer),
+
+            // macOS-specific fields
+            #[cfg(target_os = "macos")]
+            "T" | "TRANSLATED" => Some(ProcessField::Translated),
+
             _ => None,
         }
     }
 
     /// Should this field sort in descending order by default?
     pub fn default_sort_desc(self) -> bool {
+        match self {
+            // Common fields that sort descending
+            ProcessField::PercentCpu
+            | ProcessField::PercentMem
+            | ProcessField::MSize
+            | ProcessField::MResident
+            | ProcessField::Time
+            | ProcessField::Minflt
+            | ProcessField::Majflt
+            | ProcessField::Nlwp
+            | ProcessField::PercentNormCpu => true,
+
+            // Linux-specific fields that sort descending
+            #[cfg(target_os = "linux")]
+            ProcessField::Cminflt
+            | ProcessField::Cmajflt
+            | ProcessField::Utime
+            | ProcessField::Stime
+            | ProcessField::Cutime
+            | ProcessField::Cstime
+            | ProcessField::MShare
+            | ProcessField::MText
+            | ProcessField::MData
+            | ProcessField::MLib
+            | ProcessField::Rchar
+            | ProcessField::Wchar
+            | ProcessField::Syscr
+            | ProcessField::Syscw
+            | ProcessField::Rbytes
+            | ProcessField::Wbytes
+            | ProcessField::Cnclwb
+            | ProcessField::IOReadRate
+            | ProcessField::IOWriteRate
+            | ProcessField::IORate
+            | ProcessField::Oom
+            | ProcessField::PercentCpuDelay
+            | ProcessField::PercentIODelay
+            | ProcessField::PercentSwapDelay
+            | ProcessField::MPss
+            | ProcessField::MSwap
+            | ProcessField::MPsswp
+            | ProcessField::Ctxt
+            | ProcessField::MPriv
+            | ProcessField::GpuTime
+            | ProcessField::GpuPercent => true,
+
+            _ => false,
+        }
+    }
+
+    /// Check if this field is a PID column (should use PID width formatting)
+    pub fn is_pid_column(self) -> bool {
         matches!(
             self,
-            ProcessField::PercentCpu
-                | ProcessField::PercentMem
-                | ProcessField::MSize
-                | ProcessField::MResident
-                | ProcessField::Time
-                | ProcessField::Minflt
-                | ProcessField::Majflt
-                | ProcessField::IORead
-                | ProcessField::IOWrite
-                | ProcessField::IORate
-                | ProcessField::IOReadRate
-                | ProcessField::IOWriteRate
-                | ProcessField::PercentIODelay
-                | ProcessField::PercentSwapDelay
+            ProcessField::Pid
+                | ProcessField::Ppid
+                | ProcessField::Pgrp
+                | ProcessField::Session
+                | ProcessField::Tpgid
+                | ProcessField::Tgid
         )
     }
 }
@@ -734,12 +1176,13 @@ impl Process {
             ProcessField::Time => self.time.cmp(&other.time),
             ProcessField::MSize => self.m_virt.cmp(&other.m_virt),
             ProcessField::MResident => self.m_resident.cmp(&other.m_resident),
+            #[cfg(target_os = "linux")]
             ProcessField::MShare => self.m_share.cmp(&other.m_share),
             ProcessField::Minflt => self.minflt.cmp(&other.minflt),
             ProcessField::Majflt => self.majflt.cmp(&other.majflt),
             ProcessField::Nlwp => self.nlwp.cmp(&other.nlwp),
             ProcessField::Starttime => self.starttime_ctime.cmp(&other.starttime_ctime),
-            ProcessField::Command | ProcessField::CmdLine | ProcessField::Comm => {
+            ProcessField::Command | ProcessField::ProcComm => {
                 self.get_command().cmp(other.get_command())
             }
             _ => self.pid.cmp(&other.pid),
@@ -772,9 +1215,10 @@ impl Process {
             ProcessField::PercentMem => format!("{:>4.1}", self.percent_mem),
             ProcessField::MSize => Self::format_memory(self.m_virt),
             ProcessField::MResident => Self::format_memory(self.m_resident),
+            #[cfg(target_os = "linux")]
             ProcessField::MShare => Self::format_memory(self.m_share),
             ProcessField::Time => Self::format_time(self.time),
-            ProcessField::Command | ProcessField::CmdLine => self.get_command().to_string(),
+            ProcessField::Command => self.get_command().to_string(),
             ProcessField::Nlwp => format!("{:>4}", self.nlwp),
             ProcessField::Processor => format!("{:>3}", self.processor),
             ProcessField::Tty => self.tty_name.as_deref().unwrap_or("?").to_string(),

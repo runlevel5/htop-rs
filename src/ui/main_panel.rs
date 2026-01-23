@@ -7,8 +7,10 @@ use super::function_bar::FunctionBar;
 use super::panel::HandlerResult;
 use super::rich_string::RichString;
 use super::row_print::{
-    print_kbytes, print_left_aligned, print_percentage, print_rate, print_time,
+    print_kbytes, print_left_aligned, print_percentage, print_time,
 };
+#[cfg(target_os = "linux")]
+use super::row_print::print_rate;
 use super::Crt;
 use crate::core::{highlight_flags, Machine, Process, ProcessField, ProcessState, Settings};
 #[cfg(target_os = "linux")]
@@ -658,6 +660,7 @@ impl MainPanel {
                     crt,
                 );
             }
+            #[cfg(target_os = "linux")]
             ProcessField::MShare => {
                 // SHR: memory in KiB with coloring (disabled if shadowed)
                 print_kbytes(str, process.m_share as u64, coloring && !is_shadowed, crt);
@@ -696,7 +699,7 @@ impl MainPanel {
             ProcessField::Processor => {
                 str.append(&format!("{:>3} ", process.processor), base_color);
             }
-            ProcessField::Command | ProcessField::CmdLine => {
+            ProcessField::Command => {
                 // Draw tree indentation if in tree view mode
                 if self.tree_view && process.indent != 0 {
                     let tree_attr = crt.color(ColorElement::ProcessTree);
@@ -828,78 +831,77 @@ impl MainPanel {
                 };
                 print_left_aligned(str, attr, tty, 8);
             }
+            #[cfg(target_os = "linux")]
             ProcessField::IOPriority => {
                 // IO priority: display class and data
                 // Format: Bn (Best-effort level n), Rn (Realtime level n), id (Idle)
                 // When IOPRIO_CLASS_NONE, derive from nice value: B((nice+20)/5)
-                #[cfg(target_os = "linux")]
-                {
-                    let ioprio = process.io_priority;
-                    if ioprio < 0 {
-                        // Could not read IO priority (permission denied or error)
-                        str.append("?? ", shadow_color);
-                    } else {
-                        let klass = ioprio_class(ioprio);
-                        if klass == IOPRIO_CLASS_NONE {
-                            // No explicit IO priority set - derive from nice
-                            // See note in C htop: when NONE, the kernel uses
-                            // (nice+20)/5 to derive the best-effort level
-                            let derived = (process.nice + 20) / 5;
-                            str.append(&format!("B{} ", derived), base_color);
-                        } else if klass == IOPRIO_CLASS_BE {
-                            // Best-effort class
-                            let data = ioprio_data(ioprio);
-                            str.append(&format!("B{} ", data), base_color);
-                        } else if klass == IOPRIO_CLASS_RT {
-                            // Realtime class - high priority color
-                            let data = ioprio_data(ioprio);
-                            let attr = if is_shadowed {
-                                shadow_color
-                            } else {
-                                crt.color(ColorElement::ProcessHighPriority)
-                            };
-                            str.append(&format!("R{} ", data), attr);
-                        } else if klass == IOPRIO_CLASS_IDLE {
-                            // Idle class - low priority color
-                            let attr = if is_shadowed {
-                                shadow_color
-                            } else {
-                                crt.color(ColorElement::ProcessLowPriority)
-                            };
-                            str.append("id ", attr);
+                let ioprio = process.io_priority;
+                if ioprio < 0 {
+                    // Could not read IO priority (permission denied or error)
+                    str.append("?? ", shadow_color);
+                } else {
+                    let klass = ioprio_class(ioprio);
+                    if klass == IOPRIO_CLASS_NONE {
+                        // No explicit IO priority set - derive from nice
+                        // See note in C htop: when NONE, the kernel uses
+                        // (nice+20)/5 to derive the best-effort level
+                        let derived = (process.nice + 20) / 5;
+                        str.append(&format!("B{} ", derived), base_color);
+                    } else if klass == IOPRIO_CLASS_BE {
+                        // Best-effort class
+                        let data = ioprio_data(ioprio);
+                        str.append(&format!("B{} ", data), base_color);
+                    } else if klass == IOPRIO_CLASS_RT {
+                        // Realtime class - high priority color
+                        let data = ioprio_data(ioprio);
+                        let attr = if is_shadowed {
+                            shadow_color
                         } else {
-                            // Unknown class
-                            str.append("?? ", shadow_color);
-                        }
+                            crt.color(ColorElement::ProcessHighPriority)
+                        };
+                        str.append(&format!("R{} ", data), attr);
+                    } else if klass == IOPRIO_CLASS_IDLE {
+                        // Idle class - low priority color
+                        let attr = if is_shadowed {
+                            shadow_color
+                        } else {
+                            crt.color(ColorElement::ProcessLowPriority)
+                        };
+                        str.append("id ", attr);
+                    } else {
+                        // Unknown class
+                        str.append("?? ", shadow_color);
                     }
                 }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    // IO priority not available on non-Linux
-                    str.append("?? ", shadow_color);
-                }
             }
+            #[cfg(target_os = "linux")]
             ProcessField::IORate => {
                 // Total I/O rate (read + write combined)
                 let total_rate = process.io_read_rate + process.io_write_rate;
                 print_rate(str, total_rate, coloring && !is_shadowed, crt);
             }
+            #[cfg(target_os = "linux")]
             ProcessField::IOReadRate => {
                 // I/O read rate in bytes per second
                 print_rate(str, process.io_read_rate, coloring && !is_shadowed, crt);
             }
+            #[cfg(target_os = "linux")]
             ProcessField::IOWriteRate => {
                 // I/O write rate in bytes per second
                 print_rate(str, process.io_write_rate, coloring && !is_shadowed, crt);
             }
-            ProcessField::IORead => {
+            #[cfg(target_os = "linux")]
+            ProcessField::Rbytes => {
                 // Total bytes read
                 print_kbytes(str, process.io_read_bytes, coloring && !is_shadowed, crt);
             }
-            ProcessField::IOWrite => {
+            #[cfg(target_os = "linux")]
+            ProcessField::Wbytes => {
                 // Total bytes written
                 print_kbytes(str, process.io_write_bytes, coloring && !is_shadowed, crt);
             }
+            #[cfg(target_os = "linux")]
             ProcessField::PercentIODelay => {
                 // Block I/O delay percentage (Linux delay accounting)
                 if is_shadowed {
@@ -911,6 +913,7 @@ impl MainPanel {
                     print_percentage(str, process.blkio_delay_percent, 5, crt);
                 }
             }
+            #[cfg(target_os = "linux")]
             ProcessField::PercentSwapDelay => {
                 // Swapin delay percentage (Linux delay accounting)
                 if is_shadowed {
@@ -922,9 +925,244 @@ impl MainPanel {
                     print_percentage(str, process.swapin_delay_percent, 5, crt);
                 }
             }
+            
+            // === Stub implementations for unimplemented common fields ===
+            ProcessField::Pgrp => {
+                // PGRP: process group ID (5 chars like PID)
+                str.append(&format!("{:>5} ", process.pgrp), base_color);
+            }
+            ProcessField::Session => {
+                // SID: session ID (5 chars)
+                str.append(&format!("{:>5} ", process.session), base_color);
+            }
+            ProcessField::Tpgid => {
+                // TPGID: terminal process group ID (5 chars)
+                str.append(&format!("{:>5} ", process.tpgid), base_color);
+            }
+            ProcessField::Minflt => {
+                // MINFLT: minor faults (11 chars)
+                str.append(&format!("{:>11} ", process.minflt), base_color);
+            }
+            ProcessField::Majflt => {
+                // MAJFLT: major faults (11 chars)
+                str.append(&format!("{:>11} ", process.majflt), base_color);
+            }
+            ProcessField::Starttime => {
+                // START: start time (6 chars) - TODO: format as time
+                str.append("TODO   ", shadow_color);
+            }
+            ProcessField::StUid => {
+                // UID: user ID (5 chars)
+                str.append(&format!("{:>5} ", process.uid), base_color);
+            }
+            ProcessField::Tgid => {
+                // TGID: thread group ID (same as PID for main thread)
+                // For userland threads, tgid == ppid (the main process)
+                // For main processes, tgid == pid
+                let tgid = if process.is_userland_thread {
+                    process.ppid
+                } else {
+                    process.pid
+                };
+                str.append(&format!("{:>5} ", tgid), base_color);
+            }
+            ProcessField::PercentNormCpu => {
+                // NCPU%: normalized CPU percentage (5 chars)
+                // TODO: implement proper normalization
+                str.append("TODO  ", shadow_color);
+            }
+            ProcessField::Elapsed => {
+                // ELAPSED: time since start (9 chars)
+                // TODO: implement elapsed time formatting
+                str.append("TODO      ", shadow_color);
+            }
+            ProcessField::SchedulerPolicy => {
+                // SCHED: scheduler policy (6 chars)
+                // TODO: implement scheduler policy display
+                str.append("TODO   ", shadow_color);
+            }
+            ProcessField::ProcComm => {
+                // COMM: process name from /proc/[pid]/comm (16 chars)
+                let comm = process.comm.as_deref().unwrap_or("?");
+                print_left_aligned(str, base_color, comm, 16);
+            }
+            ProcessField::ProcExe => {
+                // EXE: executable path (16 chars)
+                let exe = process.exe.as_deref().unwrap_or("?");
+                print_left_aligned(str, base_color, exe, 16);
+            }
+            ProcessField::Cwd => {
+                // CWD: current working directory (26 chars)
+                let cwd = process.cwd.as_deref().unwrap_or("?");
+                print_left_aligned(str, base_color, cwd, 26);
+            }
+            
+            // === Stub implementations for unimplemented Linux-specific fields ===
+            #[cfg(target_os = "linux")]
+            ProcessField::Cminflt => {
+                // CMINFLT: children's minor faults (11 chars)
+                str.append("TODO        ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Cmajflt => {
+                // CMAJFLT: children's major faults (11 chars)
+                str.append("TODO        ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Utime => {
+                // UTIME+: user time (9 chars)
+                str.append("TODO      ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Stime => {
+                // STIME+: system time (9 chars)
+                str.append("TODO      ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Cutime => {
+                // CUTIME+: children's user time (9 chars)
+                str.append("TODO      ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Cstime => {
+                // CSTIME+: children's system time (9 chars)
+                str.append("TODO      ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MText => {
+                // CODE: code size (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MData => {
+                // DATA: data size (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MLib => {
+                // LIB: library size (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Rchar => {
+                // RCHAR: chars read (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Wchar => {
+                // WCHAR: chars written (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscr => {
+                // READ_SYSC: read syscalls (12 chars)
+                str.append("TODO         ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Syscw => {
+                // WRITE_SYSC: write syscalls (12 chars)
+                str.append("TODO         ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Cnclwb => {
+                // IO_C: cancelled write bytes (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::CGroup => {
+                // CGROUP: cgroup path (variable, use 20 chars)
+                let cgroup = process.cgroup.as_deref().unwrap_or("?");
+                print_left_aligned(str, base_color, cgroup, 20);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Oom => {
+                // OOM: OOM score (5 chars)
+                str.append(&format!("{:>5} ", process.oom_score), base_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::PercentCpuDelay => {
+                // CPUD%: CPU delay percentage (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MPss => {
+                // PSS: proportional set size (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MSwap => {
+                // SWAP: swap size (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MPsswp => {
+                // PSSWP: PSS + swap (7 chars)
+                str.append("TODO    ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Ctxt => {
+                // CTXT: context switches (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::SecAttr => {
+                // Security Attribute (18 chars)
+                str.append("TODO               ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupId => {
+                // AGRP: autogroup ID (4 chars)
+                str.append("TODO ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::AutogroupNice => {
+                // ANI: autogroup nice (4 chars)
+                str.append("TODO ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::CCGroup => {
+                // CGROUP (compressed) (19 chars)
+                let cgroup = process.cgroup.as_deref().unwrap_or("?");
+                print_left_aligned(str, base_color, cgroup, 19);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::Container => {
+                // CONTAINER (9 chars)
+                str.append("TODO      ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::MPriv => {
+                // PRIV: private memory (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuTime => {
+                // GPU_TIME (9 chars)
+                str.append("TODO      ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::GpuPercent => {
+                // GPU% (6 chars)
+                str.append("TODO   ", shadow_color);
+            }
+            #[cfg(target_os = "linux")]
+            ProcessField::IsContainer => {
+                // CONT: is container (5 chars)
+                str.append("TODO  ", shadow_color);
+            }
+            
+            // === macOS-specific fields ===
+            #[cfg(target_os = "macos")]
+            ProcessField::Translated => {
+                // T: translated process (Rosetta 2) (2 chars)
+                // TODO: need to add translated field to Process struct
+                str.append("- ", shadow_color);
+            }
+            
+            #[allow(unreachable_patterns)]
             _ => {
-                // Default: show placeholder
-                str.append("? ", base_color);
+                // Fallback for any truly unhandled field
+                str.append("N/A ", shadow_color);
             }
         }
     }

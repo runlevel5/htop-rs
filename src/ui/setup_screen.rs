@@ -1791,7 +1791,7 @@ impl SetupScreen {
                 let field = fields[i];
                 let is_selected = has_focus && i == self.columns_selection;
 
-                let display = field.name().unwrap_or("?");
+                let display = field.name();
                 
                 // Add moving indicator (↕) if this item is being moved
                 let display_text = if is_selected && self.columns_moving {
@@ -1883,7 +1883,7 @@ impl SetupScreen {
                 let is_selected = has_focus && item_index == self.available_columns_selection;
 
                 // Show name with description
-                let display = format!("{} - {}", field.name().unwrap_or("?"), field.description());
+                let display = format!("{} - {}", field.name(), field.description());
                 let display_text: String = display.chars().take((w - 1) as usize).collect();
 
                 if is_selected {

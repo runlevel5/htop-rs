@@ -231,22 +231,38 @@ pub struct ScreenSettings {
 impl ScreenSettings {
     /// Create the default "Main" screen
     pub fn main_screen() -> Self {
+        #[cfg(target_os = "linux")]
+        let fields = vec![
+            ProcessField::Pid,
+            ProcessField::User,
+            ProcessField::Priority,
+            ProcessField::Nice,
+            ProcessField::MSize,
+            ProcessField::MResident,
+            ProcessField::MShare,
+            ProcessField::State,
+            ProcessField::PercentCpu,
+            ProcessField::PercentMem,
+            ProcessField::Time,
+            ProcessField::Command,
+        ];
+        #[cfg(not(target_os = "linux"))]
+        let fields = vec![
+            ProcessField::Pid,
+            ProcessField::User,
+            ProcessField::Priority,
+            ProcessField::Nice,
+            ProcessField::MSize,
+            ProcessField::MResident,
+            ProcessField::State,
+            ProcessField::PercentCpu,
+            ProcessField::PercentMem,
+            ProcessField::Time,
+            ProcessField::Command,
+        ];
         ScreenSettings {
             heading: "Main".to_string(),
-            fields: vec![
-                ProcessField::Pid,
-                ProcessField::User,
-                ProcessField::Priority,
-                ProcessField::Nice,
-                ProcessField::MSize,
-                ProcessField::MResident,
-                ProcessField::MShare,
-                ProcessField::State,
-                ProcessField::PercentCpu,
-                ProcessField::PercentMem,
-                ProcessField::Time,
-                ProcessField::Command,
-            ],
+            fields,
             sort_key: ProcessField::PercentCpu,
             tree_sort_key: ProcessField::Pid,
             direction: -1, // descending
