@@ -800,6 +800,8 @@ impl ScreenManager {
                 self.main_panel.invalidate_display_list();
                 // Force full redraw since visible process list changed
                 self.main_panel.needs_redraw = true;
+                // Redraw header so Tasks meter updates immediately (shows thr shadowed/unshadowed)
+                self.header_needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x49 => {
@@ -831,6 +833,8 @@ impl ScreenManager {
                 self.main_panel.invalidate_display_list();
                 // Force full redraw since visible process list changed
                 self.main_panel.needs_redraw = true;
+                // Redraw header so Tasks meter updates immediately (shows kthr shadowed/unshadowed)
+                self.header_needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x4D => {
