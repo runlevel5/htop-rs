@@ -1310,6 +1310,8 @@ impl ScreenManager {
         self.main_panel.move_to(signal_panel_width, panel_y);
         self.main_panel
             .resize(crt.width() - signal_panel_width, panel_height);
+        // Force full redraw since we resized the panel for side-by-side display
+        self.main_panel.needs_redraw = true;
 
         // Event loop
         let mut selected_signal: Option<i32> = None;
@@ -1439,6 +1441,8 @@ impl ScreenManager {
         self.main_panel.move_to(sort_panel_width, panel_y);
         self.main_panel
             .resize(crt.width() - sort_panel_width, panel_height);
+        // Force full redraw since we resized the panel for side-by-side display
+        self.main_panel.needs_redraw = true;
 
         // Event loop
         let mut selected_field: Option<ProcessField> = None;
@@ -3752,6 +3756,8 @@ impl ScreenManager {
         self.main_panel.show_header = false;
         self.main_panel.y = panel_start_y + 1;
         self.main_panel.h = panel_content_height as i32;
+        // Force full redraw since we resized the panel for side-by-side display
+        self.main_panel.needs_redraw = true;
         self.main_panel
             .ensure_visible(machine.processes.len() as i32);
         self.main_panel.draw(crt, machine, &self.settings);
