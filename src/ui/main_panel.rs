@@ -1444,6 +1444,39 @@ impl MainPanel {
         }
     }
 
+    /// Try to select a process by PID, returns true if found and selected
+    /// If not found, does not change selection
+    pub fn try_select_pid(
+        &mut self,
+        pid: i32,
+        machine: &Machine,
+        settings: &Settings,
+    ) -> bool {
+        let processes: Vec<&Process> = if self.tree_view {
+            machine
+                .processes
+                .iter_tree()
+                .filter(|p| self.should_show_process(p, settings, machine))
+                .collect()
+        } else {
+            machine
+                .processes
+                .iter()
+                .filter(|p| self.should_show_process(p, settings, machine))
+                .collect()
+        };
+
+        // Find the process with the given PID
+        for (i, p) in processes.iter().enumerate() {
+            if p.pid == pid {
+                self.selected = i as i32;
+                self.ensure_visible(processes.len() as i32);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Toggle wrap command display
     pub fn toggle_wrap_command(&mut self) {
         self.wrap_command = !self.wrap_command;

@@ -859,12 +859,21 @@ impl ScreenManager {
             }
             0x48 => {
                 // 'H' - hide/show user process threads
+                // Remember currently selected PID before changing filter
+                let selected_pid = self.main_panel.get_selected_pid(machine);
+                
                 self.settings.hide_userland_threads = !self.settings.hide_userland_threads;
                 self.settings.changed = true;
-                // Reset selection when filter changes to ensure visibility
-                self.main_panel.selected = 0;
-                self.main_panel.scroll_v = 0;
                 self.main_panel.invalidate_display_list();
+                
+                // Try to keep the same process selected, fall back to first row if not visible
+                if let Some(pid) = selected_pid {
+                    if !self.main_panel.try_select_pid(pid, machine, &self.settings) {
+                        self.main_panel.selected = 0;
+                        self.main_panel.scroll_v = 0;
+                    }
+                }
+                
                 // Force full redraw since visible process list changed
                 self.main_panel.needs_redraw = true;
                 // Redraw header so Tasks meter updates immediately (shows thr shadowed/unshadowed)
@@ -897,12 +906,21 @@ impl ScreenManager {
             }
             0x4B => {
                 // 'K' - hide/show kernel threads
+                // Remember currently selected PID before changing filter
+                let selected_pid = self.main_panel.get_selected_pid(machine);
+                
                 self.settings.hide_kernel_threads = !self.settings.hide_kernel_threads;
                 self.settings.changed = true;
-                // Reset selection when filter changes to ensure visibility
-                self.main_panel.selected = 0;
-                self.main_panel.scroll_v = 0;
                 self.main_panel.invalidate_display_list();
+                
+                // Try to keep the same process selected, fall back to first row if not visible
+                if let Some(pid) = selected_pid {
+                    if !self.main_panel.try_select_pid(pid, machine, &self.settings) {
+                        self.main_panel.selected = 0;
+                        self.main_panel.scroll_v = 0;
+                    }
+                }
+                
                 // Force full redraw since visible process list changed
                 self.main_panel.needs_redraw = true;
                 // Redraw header so Tasks meter updates immediately (shows kthr shadowed/unshadowed)
