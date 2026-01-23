@@ -100,6 +100,35 @@ impl Default for ProcTaskInfo {
     }
 }
 
+/// vnode_info_path structure from sys/proc_info.h
+/// We only need the path field, but need to include the full vnode_info for correct sizing
+#[repr(C)]
+struct VnodeInfoPath {
+    // vnode_info (vip_vi) - 152 bytes based on struct vinfo_stat + vi_type + vi_pad + vi_fsid
+    _vi_padding: [u8; 152],
+    // The actual path we care about
+    vip_path: [u8; MAXPATHLEN],
+}
+
+impl Default for VnodeInfoPath {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
+/// proc_vnodepathinfo structure from sys/proc_info.h
+#[repr(C)]
+struct ProcVnodePathInfo {
+    pvi_cdir: VnodeInfoPath, // current working directory
+    pvi_rdir: VnodeInfoPath, // root directory
+}
+
+impl Default for ProcVnodePathInfo {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
 struct VmStatistics64 {
@@ -188,6 +217,7 @@ extern "C" {
 
 const PROC_PIDTASKINFO: c_int = 4;
 const PROC_PIDTBSDINFO: c_int = 3;
+const PROC_PIDVNODEPATHINFO: c_int = 9;
 const MAXPATHLEN: usize = 1024;
 const MAXCOMLEN: usize = 16;
 
@@ -634,6 +664,41 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
     }
 }
 
+/// Get the current working directory for a process
+/// This matches C htop's DarwinProcess_updateCwd behavior
+fn get_process_cwd(pid: i32) -> Option<String> {
+    let mut vpi: ProcVnodePathInfo = Default::default();
+    
+    let result = unsafe {
+        proc_pidinfo(
+            pid,
+            PROC_PIDVNODEPATHINFO,
+            0,
+            &mut vpi as *mut _ as *mut c_void,
+            mem::size_of::<ProcVnodePathInfo>() as c_int,
+        )
+    };
+    
+    if result <= 0 {
+        return None;
+    }
+    
+    // Check if path is empty
+    if vpi.pvi_cdir.vip_path[0] == 0 {
+        return None;
+    }
+    
+    // Convert to string
+    let path_bytes = &vpi.pvi_cdir.vip_path;
+    if let Some(pos) = path_bytes.iter().position(|&c| c == 0) {
+        if let Ok(path) = std::str::from_utf8(&path_bytes[..pos]) {
+            return Some(path.to_string());
+        }
+    }
+    
+    None
+}
+
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
     scan_processes_with_settings(machine, false);
@@ -795,6 +860,9 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 process.update_cmdline(comm.clone(), comm.len());
             }
         }
+
+        // Get current working directory (matching C htop DarwinProcess_updateCwd)
+        process.cwd = get_process_cwd(pid);
 
         // Task info
         if task_size > 0 {

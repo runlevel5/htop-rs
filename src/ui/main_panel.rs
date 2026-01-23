@@ -1064,14 +1064,33 @@ impl MainPanel {
                 print_left_aligned(str, base_color, comm, 16);
             }
             ProcessField::ProcExe => {
-                // EXE: executable path (16 chars)
-                let exe = process.exe.as_deref().unwrap_or("?");
-                print_left_aligned(str, base_color, exe, 16);
+                // EXE: executable basename (15 chars + space)
+                // Shows the basename of the executable (not full path), matching C htop
+                if let Some(exe) = process.exe.as_deref() {
+                    // Get basename (after last '/')
+                    let basename = exe.rsplit('/').next().unwrap_or(exe);
+                    // Use ProcessBasename color for the executable name
+                    let exe_color = crt.color(ColorElement::ProcessBasename);
+                    print_left_aligned(str, exe_color, basename, 15);
+                } else if process.is_kernel_thread {
+                    // Kernel threads show as "KERNEL" or similar
+                    print_left_aligned(str, shadow_color, "kernel", 15);
+                } else {
+                    print_left_aligned(str, shadow_color, "N/A", 15);
+                }
             }
             ProcessField::Cwd => {
-                // CWD: current working directory (26 chars)
-                let cwd = process.cwd.as_deref().unwrap_or("?");
-                print_left_aligned(str, base_color, cwd, 26);
+                // CWD: current working directory (25 chars + space), matching C htop
+                if let Some(cwd) = process.cwd.as_deref() {
+                    // Check for deleted main thread case
+                    if cwd.starts_with("/proc/") && cwd.contains(" (deleted)") {
+                        print_left_aligned(str, shadow_color, "main thread terminated", 25);
+                    } else {
+                        print_left_aligned(str, base_color, cwd, 25);
+                    }
+                } else {
+                    print_left_aligned(str, shadow_color, "N/A", 25);
+                }
             }
             
             // === Linux-specific fields ===
