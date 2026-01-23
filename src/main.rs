@@ -187,7 +187,7 @@ fn main() -> Result<()> {
         settings.color_scheme = core::ColorScheme::Monochrome;
     }
     if let Some(delay) = args.delay {
-        settings.delay = delay.max(1).min(100);
+        settings.delay = delay.clamp(1, 100);
     }
     if args.no_mouse {
         settings.enable_mouse = false;
@@ -237,7 +237,7 @@ fn main() -> Result<()> {
 
     // Create screen manager
     let mut screen_manager = ScreenManager::new(header, &mut machine, &settings);
-    screen_manager.add_panel(Box::new(main_panel));
+    screen_manager.add_panel(main_panel);
 
     // Main loop (platform::scan is called inside run())
     screen_manager.run(&mut crt, &mut machine, &RUNNING)?;

@@ -474,10 +474,8 @@ impl Settings {
         if let Some(config_dir) = dirs::config_dir() {
             let htop_dir = config_dir.join("htop");
             Some(htop_dir.join("htoprc"))
-        } else if let Some(home) = dirs::home_dir() {
-            Some(home.join(".config").join("htop").join("htoprc"))
         } else {
-            None
+            dirs::home_dir().map(|home| home.join(".config").join("htop").join("htoprc"))
         }
     }
 
@@ -516,7 +514,7 @@ impl Settings {
         match key {
             "delay" => {
                 if let Ok(v) = value.parse::<u32>() {
-                    self.delay = v.max(1).min(100);
+                    self.delay = v.clamp(1, 100);
                 }
             }
             "color_scheme" => {

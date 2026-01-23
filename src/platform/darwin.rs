@@ -804,7 +804,7 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
 
             // CPU time (in nanoseconds -> convert to hundredths of a second)
             let total_time_ns = task_info.pti_total_user + task_info.pti_total_system;
-            process.time = (total_time_ns / 10_000_000) as u64; // ns to centiseconds
+            process.time = total_time_ns / 10_000_000; // ns to centiseconds
 
             // Thread count
             process.nlwp = task_info.pti_threadnum as i64;

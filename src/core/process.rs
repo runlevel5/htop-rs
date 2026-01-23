@@ -7,8 +7,9 @@ use std::cmp::Ordering;
 use std::time::SystemTime;
 
 /// Process state enum - core states shared by all platforms
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ProcessState {
+    #[default]
     Unknown,
     Runnable,
     Running,
@@ -67,12 +68,6 @@ impl ProcessState {
     }
 }
 
-impl Default for ProcessState {
-    fn default() -> Self {
-        ProcessState::Unknown
-    }
-}
-
 /// Tristate for optional boolean values
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tristate {
@@ -85,6 +80,7 @@ pub enum Tristate {
 /// Process fields for display and sorting
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]
+#[derive(Default)]
 pub enum ProcessField {
     Pid = 1,
     Command,
@@ -116,6 +112,7 @@ pub enum ProcessField {
     Comm,
     Exe,
     Cwd,
+    #[default]
     PercentCpu,
     PercentMem,
     IOPriority,
@@ -400,12 +397,6 @@ impl ProcessField {
                 | ProcessField::PercentIODelay
                 | ProcessField::PercentSwapDelay
         )
-    }
-}
-
-impl Default for ProcessField {
-    fn default() -> Self {
-        ProcessField::PercentCpu
     }
 }
 
@@ -765,8 +756,6 @@ impl Process {
             ProcessField::PercentCpu => {
                 if self.percent_cpu < 10.0 {
                     format!("{:>4.1}", self.percent_cpu)
-                } else if self.percent_cpu < 100.0 {
-                    format!("{:>4.0}", self.percent_cpu)
                 } else {
                     format!("{:>4.0}", self.percent_cpu)
                 }
@@ -963,7 +952,11 @@ impl ProcessList {
             match a_parent.cmp(&b_parent) {
                 std::cmp::Ordering::Equal => {
                     let cmp = a.compare_by_field(b, sort_key);
-                    if ascending { cmp } else { cmp.reverse() }
+                    if ascending {
+                        cmp
+                    } else {
+                        cmp.reverse()
+                    }
                 }
                 other => other,
             }
@@ -994,7 +987,15 @@ impl ProcessList {
             display_list.push(pid);
 
             let show_children = self.processes[idx].show_children;
-            self.build_tree_branch(pid, 0, 0, show_children, sort_key, ascending, &mut display_list);
+            self.build_tree_branch(
+                pid,
+                0,
+                0,
+                show_children,
+                sort_key,
+                ascending,
+                &mut display_list,
+            );
         }
 
         // If PID 1 is not in our list, handle its children specially
@@ -1032,7 +1033,15 @@ impl ProcessList {
                     // Recursively process children
                     let child_indent = if is_last { 0 } else { next_indent };
                     let child_show = process.show_children;
-                    self.build_tree_branch(*pid, 1, child_indent, child_show, sort_key, ascending, &mut display_list);
+                    self.build_tree_branch(
+                        *pid,
+                        1,
+                        child_indent,
+                        child_show,
+                        sort_key,
+                        ascending,
+                        &mut display_list,
+                    );
                 }
             }
         }
@@ -1072,7 +1081,11 @@ impl ProcessList {
             let a = &self.processes[*idx_a];
             let b = &self.processes[*idx_b];
             let cmp = a.compare_by_field(b, sort_key);
-            if ascending { cmp } else { cmp.reverse() }
+            if ascending {
+                cmp
+            } else {
+                cmp.reverse()
+            }
         });
 
         let last_idx = children.len() - 1;
@@ -1091,7 +1104,15 @@ impl ProcessList {
             let child_indent = if is_last { indent } else { next_indent };
             let process = &self.processes[*idx];
             let child_show = show && process.show_children;
-            self.build_tree_branch(*pid, level + 1, child_indent, child_show, sort_key, ascending, display_list);
+            self.build_tree_branch(
+                *pid,
+                level + 1,
+                child_indent,
+                child_show,
+                sort_key,
+                ascending,
+                display_list,
+            );
 
             // NOW set indent on this process (like C htop lines 131-134)
             let process = &mut self.processes[*idx];

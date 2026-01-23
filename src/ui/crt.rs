@@ -328,7 +328,7 @@ impl Crt {
                 let c_str = std::ffi::CString::new(lc).unwrap_or_default();
                 libc::setlocale(libc::LC_ALL, c_str.as_ptr());
             } else {
-                libc::setlocale(libc::LC_ALL, b"\0".as_ptr() as *const libc::c_char);
+                libc::setlocale(libc::LC_ALL, c"".as_ptr());
             }
         }
 
@@ -1542,7 +1542,7 @@ impl Crt {
 
     /// Get scroll wheel amount
     pub fn scroll_wheel_amount(&self) -> i32 {
-        self.scroll_wheel_v_amount as i32
+        self.scroll_wheel_v_amount
     }
 
     /// Clear the screen

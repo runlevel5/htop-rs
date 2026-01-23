@@ -101,8 +101,8 @@ impl CpuMeter {
     fn cpu_range(&self, total_cpus: usize) -> (usize, usize) {
         match self.selection {
             CpuSelection::All => (0, total_cpus),
-            CpuSelection::Left => (0, (total_cpus + 1) / 2),
-            CpuSelection::Right => ((total_cpus + 1) / 2, total_cpus),
+            CpuSelection::Left => (0, total_cpus.div_ceil(2)),
+            CpuSelection::Right => (total_cpus.div_ceil(2), total_cpus),
             CpuSelection::Cpu(n) => (n, n + 1),
             CpuSelection::Average => (0, 0),
         }
@@ -347,11 +347,11 @@ impl Meter for CpuMeter {
 
         let num_cpus = match self.selection {
             CpuSelection::All => self.cpu_count,
-            CpuSelection::Left | CpuSelection::Right => (self.cpu_count + 1) / 2,
+            CpuSelection::Left | CpuSelection::Right => self.cpu_count.div_ceil(2),
             _ => return self.mode.default_height(),
         };
         // Divide by columns, rounding up
-        ((num_cpus + self.columns - 1) / self.columns) as i32
+        num_cpus.div_ceil(self.columns) as i32
     }
 
     fn draw(&self, crt: &Crt, machine: &Machine, settings: &Settings, x: i32, y: i32, width: i32) {
@@ -369,7 +369,7 @@ impl Meter for CpuMeter {
 
                         // Calculate layout (column-first like C htop)
                         let ncol = self.columns;
-                        let nrows = (num_cpus + ncol - 1) / ncol;
+                        let nrows = num_cpus.div_ceil(ncol);
                         let col_width = width / ncol as i32;
                         let diff = (width % ncol as i32) as usize;
 

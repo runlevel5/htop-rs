@@ -100,8 +100,8 @@ impl ScreenManager {
     }
 
     /// Add a panel (for compatibility - we have a single main panel)
-    pub fn add_panel(&mut self, panel: Box<MainPanel>) {
-        self.main_panel = *panel;
+    pub fn add_panel(&mut self, panel: MainPanel) {
+        self.main_panel = panel;
     }
 
     /// Calculate layout based on terminal size
@@ -655,7 +655,8 @@ impl ScreenManager {
                             } else {
                                 // Clicking on different column changes the tree sort field
                                 screen.tree_sort_key = field;
-                                screen.tree_direction = if field.default_sort_desc() { -1 } else { 1 };
+                                screen.tree_direction =
+                                    if field.default_sort_desc() { -1 } else { 1 };
                                 machine.sort_key = field;
                                 machine.sort_descending = field.default_sort_desc();
                                 self.settings.sort_key = Some(field);
@@ -948,9 +949,8 @@ impl ScreenManager {
         }
 
         // Pass to main panel (if not already handled above for inc_search)
-        let result = self.main_panel.on_key(key, machine);
 
-        result
+        self.main_panel.on_key(key, machine)
     }
 
     /// Switch to a different screen tab
@@ -1325,7 +1325,7 @@ impl ScreenManager {
                 }
                 _ => {
                     // Try typing search (jump to signal starting with this char)
-                    if key >= 0x20 && key < 0x7F {
+                    if (0x20..0x7F).contains(&key) {
                         signal_panel.select_by_typing(key as u8 as char);
                     }
                 }
@@ -1447,7 +1447,7 @@ impl ScreenManager {
                 }
                 _ => {
                     // Try typing search (jump to item starting with this char)
-                    if key >= 0x20 && key < 0x7F {
+                    if (0x20..0x7F).contains(&key) {
                         sort_panel.select_by_typing(key as u8 as char);
                     }
                 }
@@ -1512,10 +1512,7 @@ impl ScreenManager {
         mvaddstr(
             line,
             0,
-            &format!(
-                "htop {} - (C) 2026 Trung Le.",
-                env!("CARGO_PKG_VERSION")
-            ),
+            &format!("htop {} - (C) 2026 Trung Le.", env!("CARGO_PKG_VERSION")),
         );
         line += 1;
         mvaddstr(
@@ -2033,7 +2030,7 @@ impl ScreenManager {
                             filter_text.pop();
                         }
                     }
-                    _ if ch >= 32 && ch < 127 => {
+                    _ if (32..127).contains(&ch) => {
                         // Printable character
                         let c = char::from_u32(ch as u32).unwrap_or(' ');
                         if search_active {
@@ -2308,7 +2305,7 @@ impl ScreenManager {
                             filter_text.pop();
                         }
                     }
-                    _ if ch >= 32 && ch < 127 => {
+                    _ if (32..127).contains(&ch) => {
                         let c = char::from_u32(ch as u32).unwrap_or(' ');
                         if search_active {
                             search_text.push(c);
@@ -2627,7 +2624,8 @@ impl ScreenManager {
                 mv(1, 0);
                 attrset(header_attr);
                 hline(' ' as u32, crt.width());
-                let header_display: String = header_str.chars().take(crt.width() as usize).collect();
+                let header_display: String =
+                    header_str.chars().take(crt.width() as usize).collect();
                 let _ = addstr(&header_display);
                 attrset(A_NORMAL);
 
@@ -2653,7 +2651,8 @@ impl ScreenManager {
                         };
                         attrset(attr);
                         hline(' ' as u32, crt.width());
-                        let display_line: String = line.chars().take(crt.width() as usize).collect();
+                        let display_line: String =
+                            line.chars().take(crt.width() as usize).collect();
                         let _ = addstr(&display_line);
                         attrset(A_NORMAL);
                     } else {
@@ -2739,7 +2738,7 @@ impl ScreenManager {
                             scroll_v = 0;
                         }
                     }
-                    _ if ch >= 32 && ch < 127 => {
+                    _ if (32..127).contains(&ch) => {
                         // Printable character
                         let c = char::from_u32(ch as u32).unwrap_or(' ');
                         if search_active {
@@ -2969,11 +2968,7 @@ impl ScreenManager {
                 'o' => {
                     if let Some(ref mut file) = current_file {
                         // Remove "0t" prefix if present
-                        let offset = if value.starts_with("0t") {
-                            &value[2..]
-                        } else {
-                            value
-                        };
+                        let offset = value.strip_prefix("0t").unwrap_or(value);
                         file.offset = offset.to_string();
                     }
                 }
@@ -3535,7 +3530,7 @@ impl ScreenManager {
                             filter_text.pop();
                         }
                     }
-                    _ if ch >= 32 && ch < 127 => {
+                    _ if (32..127).contains(&ch) => {
                         let c = char::from_u32(ch as u32).unwrap_or(' ');
                         if search_active {
                             search_text.push(c);

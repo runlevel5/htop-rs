@@ -316,20 +316,10 @@ pub fn print_rate(str: &mut RichString, rate: f64, coloring: bool, crt: &Crt) {
         (format!("{:>7.2} B/s ", rate), shadow_color)
     } else if rate < ONE_K {
         // Bytes per second
-        let c = if coloring {
-            process_color
-        } else {
-            process_color
-        };
-        (format!("{:>7.2} B/s ", rate), c)
+        (format!("{:>7.2} B/s ", rate), process_color)
     } else if rate < ONE_M {
         // Kilobytes per second
-        let c = if coloring {
-            process_color
-        } else {
-            process_color
-        };
-        (format!("{:>7.2} K/s ", rate / ONE_K), c)
+        (format!("{:>7.2} K/s ", rate / ONE_K), process_color)
     } else if rate < ONE_G {
         // Megabytes per second
         let c = if coloring {

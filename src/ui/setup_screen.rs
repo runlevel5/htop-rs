@@ -2170,13 +2170,13 @@ impl SetupScreen {
         match key {
             // Enter - confirm rename
             KEY_ENTER | 10 | 13 => {
-                if !self.screens_rename_buffer.is_empty() {
-                    if self.screens_selection < settings.screens.len() {
-                        settings.screens[self.screens_selection].heading =
-                            self.screens_rename_buffer.clone();
-                        settings.changed = true;
-                        self.changed = true;
-                    }
+                if !self.screens_rename_buffer.is_empty()
+                    && self.screens_selection < settings.screens.len()
+                {
+                    settings.screens[self.screens_selection].heading =
+                        self.screens_rename_buffer.clone();
+                    settings.changed = true;
+                    self.changed = true;
                 }
                 self.screens_renaming = false;
                 self.screens_rename_buffer.clear();
@@ -2231,7 +2231,7 @@ impl SetupScreen {
             }
             _ => {
                 // Printable characters
-                if key >= 32 && key < 127 && self.screens_rename_buffer.len() < SCREEN_NAME_LEN {
+                if (32..127).contains(&key) && self.screens_rename_buffer.len() < SCREEN_NAME_LEN {
                     let ch = key as u8 as char;
                     self.screens_rename_buffer
                         .insert(self.screens_rename_cursor, ch);
@@ -2383,7 +2383,7 @@ impl SetupScreen {
                 if self.available_columns_selection < num_available.saturating_sub(1) {
                     self.available_columns_selection += 1;
                     // Adjust scroll
-                    let display_height = (self.content_panel.h - 1) as i32;
+                    let display_height = self.content_panel.h - 1;
                     if (self.available_columns_selection as i32)
                         >= self.available_columns_scroll + display_height
                     {
@@ -2584,7 +2584,7 @@ impl SetupScreen {
             if self.meters_available_selection < AVAILABLE_METERS.len().saturating_sub(1) {
                 self.meters_available_selection += 1;
                 // Adjust scroll
-                let display_height = (self.content_panel.h - 1) as i32;
+                let display_height = self.content_panel.h - 1;
                 if (self.meters_available_selection as i32)
                     >= self.meters_available_scroll + display_height
                 {
@@ -2988,7 +2988,7 @@ impl SetupScreen {
     }
 
     fn ensure_content_visible(&mut self, _crt: &Crt) {
-        let display_height = (self.content_panel.h - 1) as i32;
+        let display_height = self.content_panel.h - 1;
         let idx = self.content_index as i32;
 
         if idx < self.content_scroll {
@@ -3055,7 +3055,7 @@ impl SetupScreen {
                         for col_idx in (new_num_cols..old_num_cols).rev() {
                             if let Some(removed_meters) = settings.header_columns.get_mut(col_idx) {
                                 // Take all meters from this column
-                                let meters: Vec<_> = removed_meters.drain(..).collect();
+                                let meters: Vec<_> = std::mem::take(removed_meters);
                                 // Add them to the last remaining column
                                 if let Some(last_col) =
                                     settings.header_columns.get_mut(new_num_cols - 1)

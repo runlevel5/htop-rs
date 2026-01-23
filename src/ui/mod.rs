@@ -25,7 +25,6 @@ pub use crt::*;
 pub use header::*;
 pub use main_panel::*;
 pub use screen_manager::*;
-pub use setup_screen::*;
 
 // Re-export for internal use (used by main_panel and other modules)
 #[allow(unused_imports)]

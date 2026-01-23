@@ -58,9 +58,9 @@ fn get_dist_path_prefix_len(path: &str) -> Option<usize> {
 
     // Special case for NixOS store paths: /nix/store/<hash>-<name>/
     // The hash is 32 chars, so we need to find the next '/' after the package name
-    if path.starts_with("/nix/store/") {
+    if let Some(rest) = path.strip_prefix("/nix/store/") {
         // Find the end of the store path (after the package directory)
-        if let Some(pos) = path["/nix/store/".len()..].find('/') {
+        if let Some(pos) = rest.find('/') {
             return Some("/nix/store/".len() + pos + 1);
         }
     }
@@ -545,7 +545,7 @@ impl MainPanel {
             if is_sort_column {
                 // Replace trailing space with sort indicator (matches C htop Table.c:308-314)
                 // Check if last char is a space, if so replace it with indicator
-                if str.len() > 0 && str.last_char() == Some(' ') {
+                if !str.is_empty() && str.last_char() == Some(' ') {
                     str.rewind(1);
                     // Ascending (small to large): △ (north), Descending (large to small): ▽ (south)
                     let indicator = if ascending {
@@ -980,11 +980,7 @@ impl MainPanel {
                         if cmdline_strip_len < cmdline.len() {
                             // Skip leading space if present after stripping
                             let stripped = &cmdline[cmdline_strip_len..];
-                            if stripped.starts_with(' ') {
-                                &stripped[1..]
-                            } else {
-                                stripped
-                            }
+                            stripped.strip_prefix(' ').unwrap_or(stripped)
                         } else {
                             "" // Entire cmdline was stripped
                         }
@@ -1590,7 +1586,7 @@ impl MainPanel {
                 self.do_incremental_search(machine);
                 HandlerResult::Handled
             }
-            ch if ch >= 0x20 && ch < 0x7F => {
+            ch if (0x20..0x7F).contains(&ch) => {
                 self.inc_search.add_char(ch as u8 as char);
                 if is_filter {
                     // Update filter in real-time
