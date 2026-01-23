@@ -23,6 +23,7 @@ const CTL_VM: c_int = 2;
 const KERN_BOOTTIME: c_int = 21;
 const KERN_PROC: c_int = 14;
 const KERN_PROC_ALL: c_int = 0;
+const KERN_PROC_PID: c_int = 1;
 const KERN_ARGMAX: c_int = 8;
 const KERN_PROCARGS2: c_int = 49;
 
@@ -101,6 +102,97 @@ struct ProcTaskInfo {
 impl Default for ProcTaskInfo {
     fn default() -> Self {
         unsafe { mem::zeroed() }
+    }
+}
+
+/// extern_proc structure from sys/proc.h (subset we need)
+/// This is part of kinfo_proc and contains p_priority
+#[repr(C)]
+struct ExternProc {
+    _p_un: [u8; 16],          // union p_un (pointer + padding)
+    p_vmspace: usize,         // *vm_space
+    p_sigacts: usize,         // *sigacts
+    p_flag: i32,              // P_* flags
+    p_stat: i8,               // S* process status
+    p_pid: i32,               // pid
+    p_oppid: i32,             // old parent on signals (not padded correctly but we don't use it)
+    p_dupfd: i32,             // sideways return value from fdopen
+    _p_cru: [u8; 8],          // user (pointer)
+    p_textvp: usize,          // *vnode
+    p_holdcnt: i32,           // If non-zero, don't swap
+    p_sigmask: u32,           // DEPRECATED signal mask
+    p_sigignore: u32,         // signals being ignored
+    p_sigcatch: u32,          // signals being caught
+    p_priority: u8,           // Process priority
+    p_usrpri: u8,             // User-priority based on p_cpu and p_nice
+    p_nice: i8,               // Process "nice" value
+    p_comm: [u8; MAXCOMLEN + 1],
+    _p_pgrp: usize,           // *pgrp
+    _p_addr: usize,           // *user
+    p_xstat: u16,             // Exit status for wait
+    p_acflag: u16,            // Accounting flags
+    _p_ru: usize,             // *rusage (exit info)
+}
+
+/// eproc structure from sys/sysctl.h (subset we need)
+#[repr(C)]
+struct Eproc {
+    e_paddr: usize,           // *proc
+    e_sess: usize,            // *session
+    _e_pcred: [u8; 72],       // pcred (we don't need this)
+    _e_ucred: [u8; 112],      // ucred (we don't need this)
+    e_vm: [u8; 168],          // vmspace (we don't need details)
+    e_ppid: i32,              // parent process id
+    e_pgid: i32,              // process group id
+    e_jobc: i16,              // job control counter
+    e_tdev: i32,              // controlling tty dev (dev_t)
+    e_tpgid: i32,             // tty process group id
+    e_tsess: usize,           // *session for tty
+    _e_wmesg: [u8; 8],        // wchan message
+    e_xsize: i32,             // text size
+    e_xrssize: i16,           // text rss
+    e_xccount: i16,           // text references
+    e_xswrss: i16,            // text swapped size
+    e_flag: i32,              // flags
+    _e_login: [u8; 12],       // login name
+    _e_spare: [i32; 4],       // spare
+}
+
+/// kinfo_proc structure from sys/sysctl.h
+#[repr(C)]
+struct KinfoProc {
+    kp_proc: ExternProc,      // proc structure
+    kp_eproc: Eproc,          // eproc structure
+}
+
+impl Default for KinfoProc {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
+/// Get process priority from kinfo_proc via sysctl
+/// This matches C htop which uses kp_proc.p_priority
+fn get_process_priority(pid: i32) -> Option<u8> {
+    let mut mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid];
+    let mut kinfo: KinfoProc = Default::default();
+    let mut size = mem::size_of::<KinfoProc>();
+
+    let ret = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            4,
+            &mut kinfo as *mut _ as *mut c_void,
+            &mut size,
+            ptr::null_mut(),
+            0,
+        )
+    };
+
+    if ret == 0 && size > 0 {
+        Some(kinfo.kp_proc.p_priority)
+    } else {
+        None
     }
 }
 
@@ -893,8 +985,14 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             // Thread count
             process.nlwp = task_info.pti_threadnum as i64;
 
-            // Priority
-            process.priority = task_info.pti_priority as i64;
+            // Priority - get from kinfo_proc to match C htop
+            // C htop uses kp_proc.p_priority from KERN_PROC sysctl
+            if let Some(priority) = get_process_priority(pid) {
+                process.priority = priority as i64;
+            } else {
+                // Fallback to task info priority if kinfo_proc fails
+                process.priority = task_info.pti_priority as i64;
+            }
 
             // Page faults
             // pti_faults = total page faults
