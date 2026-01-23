@@ -4,13 +4,16 @@ This document outlines intentional improvements and enhancements made in htop-rs
 
 ## User Interface
 
-### Filtered Mode Visual Indicator
+### Search and Filter Mode Visual Indicator
 
-When using the F4 Filter function, htop-rs provides enhanced visual feedback:
+When using F3 Search or F4 Filter functions, htop-rs provides enhanced visual feedback:
 
-- **Yellow header background**: The column header row turns yellow when a filter is active, making it immediately clear that the process list is filtered
-- **Normal cyan selection**: The selected row uses the standard cyan selection color, keeping the selection consistent with non-filtered mode
+- **Yellow header background**: The column header row turns yellow when search or filter is active, making it immediately clear that the view is in a special mode
 
-This design choice uses the header color change as the primary indicator of filter state, rather than changing the selection color. This provides clear visual feedback without making the selection look different from normal operation.
+For F4 Filter mode specifically:
+- **Normal cyan selection**: The selected row uses the standard cyan selection color, since the yellow header already indicates filtered state
 
-In C htop, there is no visual indication in the header that a filter is active, which can make it unclear whether the process list is currently filtered.
+For F3 Search mode:
+- **Yellow "following" selection**: The selected row uses the yellow selection color to indicate the search match is being followed (same as C htop)
+
+In C htop, there is no visual indication in the header that a search or filter is active, which can make it unclear whether the process list is currently filtered or a search is in progress.

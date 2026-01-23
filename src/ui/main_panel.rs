@@ -900,13 +900,15 @@ impl MainPanel {
     pub fn draw(&mut self, crt: &Crt, machine: &Machine, settings: &Settings) {
         let visible_height = if self.show_header { self.h - 1 } else { self.h };
         let start_y = if self.show_header {
+            // Show yellow header when filter is active OR search bar is open with text
+            let search_active = self.inc_search.is_search() && !self.inc_search.text.is_empty();
             self.draw_header(
                 crt,
                 self.y,
                 settings,
                 machine.sort_key,
                 machine.sort_descending,
-                self.filter.is_some(),
+                self.filter.is_some() || search_active,
             );
             self.y + 1
         } else {
@@ -1247,6 +1249,7 @@ impl MainPanel {
                 self.selected = i;
                 self.ensure_visible(size);
                 self.inc_search.found = true;
+                // Use yellow "following" selection for search mode
                 self.following = true;
                 self.selection_color = ColorElement::PanelSelectionFollow;
                 return;
@@ -1279,8 +1282,8 @@ impl MainPanel {
                 self.selected = i as i32;
                 self.ensure_visible(processes.len() as i32);
                 self.inc_search.found = true;
-                // For filter mode, use cyan selection (header already indicates filtered state)
-                // For search mode, use yellow selection to indicate "following" the match
+                // For filter mode, use cyan selection (header indicates filtered state)
+                // For search mode, use yellow "following" selection
                 if self.inc_search.is_filter() {
                     self.following = false;
                     self.selection_color = ColorElement::PanelSelectionFocus;
