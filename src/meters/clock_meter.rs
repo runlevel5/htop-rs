@@ -55,7 +55,7 @@ impl Meter for ClockMeter {
 
         match self.mode {
             MeterMode::Led => {
-                draw_led(crt, x, y, width, "", &self.time_str);
+                draw_led(crt, x, y, width, self.caption(), &self.time_str);
             }
             _ => {
                 // Text mode (default)

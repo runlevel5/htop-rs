@@ -28,7 +28,7 @@ impl Meter for DateTimeMeter {
     }
 
     fn caption(&self) -> &str {
-        "" // No caption, the datetime is self-explanatory
+        "Date & Time: "
     }
 
     fn supported_modes(&self) -> u32 {
@@ -55,13 +55,17 @@ impl Meter for DateTimeMeter {
 
         match self.mode {
             MeterMode::Led => {
-                draw_led(crt, x, y, width, "", &self.datetime_str);
+                draw_led(crt, x, y, width, self.caption(), &self.datetime_str);
             }
             _ => {
                 // Text mode (default)
+                // Draw caption first with MeterText color
+                let caption_attr = crt.color(ColorElement::MeterText);
                 let value_attr = crt.color(ColorElement::DateTime);
 
                 mv(y, x);
+                attrset(caption_attr);
+                let _ = addstr(self.caption());
                 attrset(value_attr);
                 let _ = addstr(&self.datetime_str);
             }
