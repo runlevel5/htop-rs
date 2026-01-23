@@ -359,51 +359,26 @@ pub fn draw_text(crt: &Crt, x: i32, y: i32, caption: &str, text: &str) {
 }
 
 // ============================================================================
-// Graph Meter Mode
+// Graph Meter Mode (stub - to be implemented)
 // ============================================================================
 
-/// UTF-8 braille graph characters (4 pixels per row)
-/// Index is calculated as: left_dots * 5 + right_dots
-/// where left_dots and right_dots are 0-4 (number of dots filled from bottom)
-const GRAPH_DOTS_UTF8: [char; 25] = [
-    /*00*/ ' ', /*01*/ '⢀', /*02*/ '⢠', /*03*/ '⢰', /*04*/ '⢸',
-    /*10*/ '⡀', /*11*/ '⣀', /*12*/ '⣠', /*13*/ '⣰', /*14*/ '⣸',
-    /*20*/ '⡄', /*21*/ '⣄', /*22*/ '⣤', /*23*/ '⣴', /*24*/ '⣼',
-    /*30*/ '⡆', /*31*/ '⣆', /*32*/ '⣦', /*33*/ '⣶', /*34*/ '⣾',
-    /*40*/ '⡇', /*41*/ '⣇', /*42*/ '⣧', /*43*/ '⣷', /*44*/ '⣿',
-];
-
-/// ASCII graph characters (2 pixels per row)
-/// Index is calculated as: left_dots * 3 + right_dots
-/// where left_dots and right_dots are 0-2 (number of dots filled from bottom)
-const GRAPH_DOTS_ASCII: [char; 9] = [
-    /*00*/ ' ', /*01*/ '.', /*02*/ ':', /*10*/ '.', /*11*/ '.',
-    /*12*/ ':', /*20*/ ':', /*21*/ ':', /*22*/ ':',
-];
-
-/// Pixels per row for UTF-8 mode
-const PIXPERROW_UTF8: i32 = 4;
-
-/// Pixels per row for ASCII mode
-const PIXPERROW_ASCII: i32 = 2;
-
-/// Draw a graph meter
+/// Draw a graph meter (stub implementation)
 ///
 /// # Arguments
 /// * `crt` - Terminal context
 /// * `x` - X position
 /// * `y` - Y position (top of graph)
 /// * `width` - Total width including caption
-/// * `height` - Height in rows
-/// * `graph_data` - Historical data to display
+/// * `_height` - Height in rows (unused in stub)
+/// * `_graph_data` - Historical data to display (unused in stub)
 /// * `caption` - Caption to display (3 chars)
 pub fn draw_graph(
     crt: &Crt,
     x: i32,
     y: i32,
     width: i32,
-    height: i32,
-    graph_data: &GraphData,
+    _height: i32,
+    _graph_data: &GraphData,
     caption: &str,
 ) {
     use crate::ui::ColorElement;
@@ -416,92 +391,9 @@ pub fn draw_graph(
         let _ = mvaddnstr(y, x, caption, caption_len);
     }
 
-    let graph_width = width - caption_len;
-    if graph_width < 1 || height < 1 {
-        attrset(crt.color(ColorElement::ResetColor));
-        return;
-    }
-
-    let graph_x = x + caption_len;
-
-    // Select character set based on UTF-8 support
-    let (dots_utf8, dots_ascii, pix_per_row, dots_per_row) = if crt.utf8 {
-        (Some(&GRAPH_DOTS_UTF8[..]), None, PIXPERROW_UTF8, 5)
-    } else {
-        (None, Some(&GRAPH_DOTS_ASCII[..]), PIXPERROW_ASCII, 3)
-    };
-
-    let total_pix = pix_per_row * height;
-
-    // Calculate how many values we need (2 per column)
-    let n_values = graph_data.values.len();
-    let needed = (graph_width * 2) as usize;
-
-    // Determine starting position in data and on screen
-    let (data_start, col_start) = if n_values >= needed {
-        (n_values - needed, 0)
-    } else {
-        // Not enough data, start drawing from the right
-        let empty_cols = (needed - n_values) / 2;
-        (0, empty_cols as i32)
-    };
-
-    // Helper to draw a single graph cell
-    let draw_cell = |line: i32, col: i32, char_idx: usize, color: ColorElement| {
-        attrset(crt.color(color));
-        if let Some(dots) = dots_utf8 {
-            let ch = dots.get(char_idx).copied().unwrap_or(' ');
-            mvaddch(y + line, graph_x + col, ch as u32);
-        } else if let Some(dots) = dots_ascii {
-            let ch = dots.get(char_idx).copied().unwrap_or(' ');
-            mvaddch(y + line, graph_x + col, ch as u32);
-        }
-    };
-
-    // Draw the graph
-    let mut col = 0i32;
-    let mut i = data_start;
-
-    while col < graph_width && i + 1 < n_values {
-        // Get two values (left and right half of character)
-        let v1 = graph_data.values.get(i).copied().unwrap_or(0.0);
-        let v2 = graph_data.values.get(i + 1).copied().unwrap_or(0.0);
-
-        // Convert to pixel counts
-        // Values are already normalized to 0.0-1.0
-        let pix1 = ((v1 * total_pix as f64).round() as i32).clamp(0, total_pix);
-        let pix2 = ((v2 * total_pix as f64).round() as i32).clamp(0, total_pix);
-
-        // Draw each row of this column
-        let mut color_idx = ColorElement::Graph1;
-        for line in 0..height {
-            // Calculate how many pixels are filled in this row
-            let row_from_bottom = height - 1 - line;
-            let base_pix = row_from_bottom * pix_per_row;
-
-            let line1 = (pix1 - base_pix).clamp(0, pix_per_row);
-            let line2 = (pix2 - base_pix).clamp(0, pix_per_row);
-
-            // Get the character for this cell
-            let char_idx = (line1 * dots_per_row + line2) as usize;
-
-            draw_cell(line, col_start + col, char_idx, color_idx);
-
-            // Alternate colors for visual effect (top row is Graph1, rest is Graph2)
-            color_idx = ColorElement::Graph2;
-        }
-
-        col += 1;
-        i += 2;
-    }
-
-    // Fill any remaining empty columns on the left with spaces
-    for empty_col in 0..col_start {
-        for line in 0..height {
-            draw_cell(line, empty_col, 0, ColorElement::Graph2); // index 0 is space
-        }
-    }
-
+    // Draw stub message
+    attrset(crt.color(ColorElement::MeterValueError));
+    let _ = addstr(" To be implemented");
     attrset(crt.color(ColorElement::ResetColor));
 }
 
