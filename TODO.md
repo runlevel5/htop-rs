@@ -162,3 +162,22 @@ Platform: All
 - `src/meters/mod.rs` - Add `description()` to trait
 - `src/meters/*.rs` - Add descriptions to each meter
 - `src/ui/setup_screen.rs` - Add F1 to function bars, handle key, render help popup
+
+## Rejected Ideas
+
+### thread-priority crate for F7/F8 (nice adjustment)
+
+**Status:** Not adopted
+
+**Reason:** The `thread-priority` crate (v3.0.0) operates on `pthread_t` thread handles, not process IDs. It's designed for setting thread scheduling policies (SCHED_FIFO, SCHED_RR, SCHED_OTHER) and their associated priorities using `pthread_setschedparam()`.
+
+htop's F7/F8 functionality requires changing **nice values** (-20 to 19) for **external processes** using `setpriority(PRIO_PROCESS, pid, nice)`. These are fundamentally different operations:
+
+| Aspect | htop F7/F8 | thread-priority crate |
+|--------|------------|----------------------|
+| Target | External processes by PID | Threads by pthread_t |
+| Mechanism | `setpriority(PRIO_PROCESS, ...)` | `pthread_setschedparam()` |
+| Value range | Nice: -20 to 19 | Policy-specific (1-99 for RT) |
+| Scope | Any process on system | Current process threads only |
+
+**Current implementation:** Direct libc calls in `src/ui/screen_manager.rs:change_priority()` using `libc::getpriority` and `libc::setpriority`. This is the correct approach and matches C htop's implementation.
