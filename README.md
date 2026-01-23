@@ -19,7 +19,7 @@ Goals:
 - Experiment with architectural improvements
 
 Non-goals:
-- Replacing C htop (it works great!)
+- Adopt a memory safety TUI that is different from ncurses
 - Adding features that diverge from htop's design philosophy
 
 ## Building
