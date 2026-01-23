@@ -180,7 +180,8 @@ pub enum ColorElement {
     DynamicYellow,
     DynamicWhite,
     PanelEdit,
-    Last, // Sentinel value for array sizing
+    Disabled, // Dimmed/disabled text (e.g., for actions requiring root)
+    Last,     // Sentinel value for array sizing
 }
 
 /// Special key definitions (using high function key numbers that are unlikely to conflict)
@@ -496,6 +497,8 @@ impl Crt {
         self.colors[ColorElement::FunctionBar as usize] = color_pair(COLOR_BLACK, COLOR_CYAN);
         // FunctionKey: White text on default/black background (for "F1", "F2", etc.)
         self.colors[ColorElement::FunctionKey as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
+        // Disabled: Gray text on cyan background (dimmed function bar items)
+        self.colors[ColorElement::Disabled as usize] = color_pair_gray_black();
         self.colors[ColorElement::PanelHeaderFocus as usize] = color_pair(COLOR_BLACK, COLOR_GREEN);
         self.colors[ColorElement::PanelHeaderUnfocus as usize] =
             color_pair(COLOR_BLACK, COLOR_GREEN);
@@ -634,6 +637,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionFollow as usize] = A_REVERSE;
         self.colors[ColorElement::PanelSelectionUnfocus as usize] = A_BOLD;
         self.colors[ColorElement::PanelEdit as usize] = A_BOLD;
+        self.colors[ColorElement::Disabled as usize] = A_DIM;
 
         // Search/errors
         self.colors[ColorElement::FailedSearch as usize] = A_REVERSE | A_BOLD;
@@ -771,6 +775,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionUnfocus as usize] =
             color_pair(COLOR_BLUE, COLOR_WHITE);
         self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::Disabled as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
         self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
         self.colors[ColorElement::FailedRead as usize] = color_pair(COLOR_RED, COLOR_WHITE);
         self.colors[ColorElement::Paused as usize] = color_pair(COLOR_YELLOW, COLOR_CYAN) | A_BOLD;
@@ -893,6 +898,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionUnfocus as usize] =
             color_pair(COLOR_BLUE, COLOR_BLACK);
         self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::Disabled as usize] = color_pair_gray_black();
         self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
         self.colors[ColorElement::FailedRead as usize] = color_pair(COLOR_RED, COLOR_BLACK);
         self.colors[ColorElement::Paused as usize] = color_pair(COLOR_YELLOW, COLOR_CYAN) | A_BOLD;
@@ -1005,6 +1011,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionUnfocus as usize] =
             color_pair(COLOR_YELLOW, COLOR_BLUE) | A_BOLD;
         self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_BLUE);
+        self.colors[ColorElement::Disabled as usize] = color_pair(COLOR_CYAN, COLOR_BLUE);
         self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_CYAN);
         self.colors[ColorElement::FailedRead as usize] = color_pair(COLOR_RED, COLOR_BLUE) | A_BOLD;
         self.colors[ColorElement::Paused as usize] = color_pair(COLOR_BLACK, COLOR_CYAN) | A_BOLD;
@@ -1137,6 +1144,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionUnfocus as usize] =
             color_pair(COLOR_BLACK, COLOR_WHITE);
         self.colors[ColorElement::PanelEdit as usize] = color_pair(COLOR_WHITE, COLOR_CYAN);
+        self.colors[ColorElement::Disabled as usize] = color_pair_gray_black();
         self.colors[ColorElement::FailedSearch as usize] = color_pair(COLOR_RED, COLOR_GREEN);
         self.colors[ColorElement::FailedRead as usize] =
             color_pair(COLOR_RED, COLOR_BLACK) | A_BOLD;
@@ -1298,6 +1306,7 @@ impl Crt {
         self.colors[ColorElement::PanelSelectionFollow as usize] = A_REVERSE;
         self.colors[ColorElement::PanelSelectionUnfocus as usize] = A_BOLD;
         self.colors[ColorElement::PanelEdit as usize] = A_BOLD;
+        self.colors[ColorElement::Disabled as usize] = COLOR_PAIR(PAIR_GRAY_BLACK) | A_BOLD;
         self.colors[ColorElement::FailedSearch as usize] =
             COLOR_PAIR(PAIR_YELLOW_BLACK) | A_REVERSE | A_BOLD;
         self.colors[ColorElement::FailedRead as usize] = COLOR_PAIR(PAIR_YELLOW_BLACK) | A_BOLD;

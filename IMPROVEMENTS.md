@@ -4,6 +4,16 @@ This document outlines intentional improvements and enhancements made in htop-rs
 
 ## User Interface
 
+### Dimmed F7 "Nice -" When Not Root
+
+htop-rs visually indicates when the F7 "Nice -" action is unavailable by dimming/graying out the function bar item when not running as root.
+
+- **Why**: Decreasing a process's nice value (increasing its priority) requires root privileges on Unix systems
+- **Behavior**: F7 appears dimmed in the function bar when `geteuid() != 0`
+- **C htop behavior**: Shows F7 normally regardless of privileges; users only discover it doesn't work after pressing the key and seeing the operation fail
+
+This provides immediate visual feedback about available actions without requiring trial and error.
+
 ### Search and Filter Mode Visual Indicator
 
 When using F3 Search or F4 Filter functions, htop-rs provides enhanced visual feedback:

@@ -490,6 +490,11 @@ impl ScreenManager {
         self.main_panel.tree_view = self.settings.tree_view;
         self.update_function_bar_labels();
 
+        // Disable F7 "Nice -" when not running as root (requires privileges to lower nice)
+        // F7 is at index 6 (0-based: F1=0, F2=1, ..., F7=6)
+        let is_root = unsafe { libc::geteuid() == 0 };
+        self.main_panel.function_bar.set_enabled(6, is_root);
+
         // Build tree if starting in tree view mode
         if self.settings.tree_view {
             if !self.settings.all_branches_collapsed {

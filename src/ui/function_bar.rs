@@ -27,19 +27,45 @@ pub const DEFAULT_FUNCTIONS: [(&str, &str); 10] = [
     ("F10", "Quit  "),
 ];
 
+/// Function bar item with key, label, and enabled state
+#[derive(Debug, Clone)]
+pub struct FunctionBarItem {
+    pub key: String,
+    pub label: String,
+    pub enabled: bool,
+}
+
+impl FunctionBarItem {
+    pub fn new(key: &str, label: &str) -> Self {
+        FunctionBarItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            enabled: true,
+        }
+    }
+
+    pub fn disabled(key: &str, label: &str) -> Self {
+        FunctionBarItem {
+            key: key.to_string(),
+            label: label.to_string(),
+            enabled: false,
+        }
+    }
+}
+
 /// Function bar at the bottom of the screen
 #[derive(Debug, Clone)]
 pub struct FunctionBar {
-    pub functions: Vec<(String, String)>,
+    pub items: Vec<FunctionBarItem>,
 }
 
 impl FunctionBar {
     /// Create a new function bar with default labels
     pub fn new() -> Self {
         FunctionBar {
-            functions: DEFAULT_FUNCTIONS
+            items: DEFAULT_FUNCTIONS
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .map(|(k, v)| FunctionBarItem::new(k, v))
                 .collect(),
         }
     }
@@ -48,7 +74,7 @@ impl FunctionBar {
     /// labels is an array of (label, key) pairs for F1-F10
     /// Empty label means skip that function key
     pub fn new_with_labels(labels: &[(&str, &str); 10]) -> Self {
-        let functions: Vec<(String, String)> = labels
+        let items: Vec<FunctionBarItem> = labels
             .iter()
             .enumerate()
             .filter_map(|(i, (label, key))| {
@@ -62,33 +88,46 @@ impl FunctionBar {
                     } else {
                         key.to_string()
                     };
-                    Some((key_str, formatted_label))
+                    Some(FunctionBarItem::new(&key_str, &formatted_label))
                 }
             })
             .collect();
 
-        FunctionBar { functions }
+        FunctionBar { items }
     }
 
-    /// Create a function bar with custom labels
+    /// Create a function bar with custom labels (backward compatibility)
     pub fn with_functions(functions: Vec<(String, String)>) -> Self {
-        FunctionBar { functions }
+        FunctionBar {
+            items: functions
+                .into_iter()
+                .map(|(k, v)| FunctionBarItem::new(&k, &v))
+                .collect(),
+        }
     }
 
     /// Create a simple Enter/Esc function bar (like C htop FunctionBar_newEnterEsc)
     pub fn new_enter_esc(enter_label: &str, esc_label: &str) -> Self {
         FunctionBar {
-            functions: vec![
-                ("Enter".to_string(), enter_label.to_string()),
-                ("Esc".to_string(), esc_label.to_string()),
+            items: vec![
+                FunctionBarItem::new("Enter", enter_label),
+                FunctionBarItem::new("Esc", esc_label),
             ],
         }
     }
 
     /// Set a function key label
     pub fn set_function(&mut self, index: usize, key: &str, label: &str) {
-        if index < self.functions.len() {
-            self.functions[index] = (key.to_string(), label.to_string());
+        if index < self.items.len() {
+            self.items[index].key = key.to_string();
+            self.items[index].label = label.to_string();
+        }
+    }
+
+    /// Set whether a function key is enabled (grayed out if disabled)
+    pub fn set_enabled(&mut self, index: usize, enabled: bool) {
+        if index < self.items.len() {
+            self.items[index].enabled = enabled;
         }
     }
 
@@ -97,6 +136,7 @@ impl FunctionBar {
         let width = crt.width();
         let bar_color = crt.color(ColorElement::FunctionBar);
         let key_color = crt.color(ColorElement::FunctionKey);
+        let disabled_color = crt.color(ColorElement::Disabled);
 
         // First fill entire line with spaces in FUNCTION_BAR color
         mv(y, 0);
@@ -107,21 +147,33 @@ impl FunctionBar {
 
         // Draw each key-label pair consecutively (no padding between pairs)
         let mut x = 0i32;
-        for (key, label) in &self.functions {
+        for item in &self.items {
             if x >= width {
                 break;
             }
 
-            // Draw the key (F1, F2, etc.) in FUNCTION_KEY color
-            mv(y, x);
-            attrset(key_color);
-            let _ = addstr(key);
-            x += key.len() as i32;
+            // Use disabled color for disabled items
+            let effective_key_color = if item.enabled {
+                key_color
+            } else {
+                disabled_color
+            };
+            let effective_bar_color = if item.enabled {
+                bar_color
+            } else {
+                disabled_color
+            };
 
-            // Draw the label (Help, Setup, etc.) in FUNCTION_BAR color
-            attrset(bar_color);
-            let _ = addstr(label);
-            x += label.len() as i32;
+            // Draw the key (F1, F2, etc.)
+            mv(y, x);
+            attrset(effective_key_color);
+            let _ = addstr(&item.key);
+            x += item.key.len() as i32;
+
+            // Draw the label (Help, Setup, etc.)
+            attrset(effective_bar_color);
+            let _ = addstr(&item.label);
+            x += item.label.len() as i32;
         }
         attrset(A_NORMAL);
     }
@@ -137,6 +189,7 @@ impl FunctionBar {
         let width = crt.width();
         let bar_color = crt.color(ColorElement::FunctionBar);
         let key_color = crt.color(ColorElement::FunctionKey);
+        let disabled_color = crt.color(ColorElement::Disabled);
 
         // First fill entire line with spaces in FUNCTION_BAR color
         mv(y, 0);
@@ -147,24 +200,44 @@ impl FunctionBar {
 
         // Draw each key-label pair consecutively (no padding between pairs)
         let mut x = 0i32;
-        for (key, label) in &self.functions {
+        for item in &self.items {
             if x >= width {
                 break;
             }
 
-            // Draw the key (F1, F2, etc.) in FUNCTION_KEY color
-            mv(y, x);
-            attrset(key_color);
-            let _ = addstr(key);
-            x += key.len() as i32;
+            // Use disabled color for disabled items
+            let effective_key_color = if item.enabled {
+                key_color
+            } else {
+                disabled_color
+            };
+            let effective_bar_color = if item.enabled {
+                bar_color
+            } else {
+                disabled_color
+            };
 
-            // Draw the label (Help, Setup, etc.) in FUNCTION_BAR color
-            attrset(bar_color);
-            let _ = addstr(label);
-            x += label.len() as i32;
+            // Draw the key (F1, F2, etc.)
+            mv(y, x);
+            attrset(effective_key_color);
+            let _ = addstr(&item.key);
+            x += item.key.len() as i32;
+
+            // Draw the label (Help, Setup, etc.)
+            attrset(effective_bar_color);
+            let _ = addstr(&item.label);
+            x += item.label.len() as i32;
         }
         attrset(A_NORMAL);
         x
+    }
+
+    /// Backward compatibility: get functions as Vec<(String, String)>
+    pub fn functions(&self) -> Vec<(String, String)> {
+        self.items
+            .iter()
+            .map(|item| (item.key.clone(), item.label.clone()))
+            .collect()
     }
 }
 
