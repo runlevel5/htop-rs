@@ -3658,7 +3658,6 @@ impl ScreenManager {
         let orig_main_w = self.main_panel.w;
         let orig_main_y = self.main_panel.y;
         let orig_main_h = self.main_panel.h;
-        let orig_main_scroll_v = self.main_panel.scroll_v;
 
         // Main panel starts after user panel
         self.main_panel.x = user_panel_width;
@@ -3862,7 +3861,11 @@ impl ScreenManager {
         self.main_panel.w = orig_main_w;
         self.main_panel.y = orig_main_y;
         self.main_panel.h = orig_main_h;
-        self.main_panel.scroll_v = orig_main_scroll_v;
+
+        // Reset selection and scroll to top when filter changes
+        // This ensures the selected row is visible in the new filtered list
+        self.main_panel.selected = 0;
+        self.main_panel.scroll_v = 0;
 
         // Re-enable delay for main loop (clear is handled by Redraw handler)
         crt.enable_delay();
