@@ -2095,12 +2095,8 @@ impl ScreenManager {
             }
 
             match ch {
-                27 | 113 => {
-                    // Escape or 'q' - exit
-                    break;
-                }
-                x if x == KEY_F10 => {
-                    // F10 - exit
+                27 | 113 | KEY_F10 => {
+                    // Escape, 'q', or F10 - exit
                     break;
                 }
                 x if x == KEY_F3 => {
@@ -2368,8 +2364,7 @@ impl ScreenManager {
             }
 
             match ch {
-                27 | 113 => break,
-                x if x == KEY_F10 => break,
+                27 | 113 | KEY_F10 => break, // Escape, 'q', or F10 - exit
                 x if x == KEY_F3 => {
                     search_active = true;
                     search_text.clear();
@@ -3323,8 +3318,7 @@ impl ScreenManager {
             }
 
             match ch {
-                27 | 113 => break, // Esc or 'q'
-                x if x == KEY_F10 => break,
+                27 | 113 | KEY_F10 => break, // Esc, 'q', or F10 - exit
                 KEY_F8 | 0x66 => {
                     // F8 or 'f' - toggle auto-scroll/follow
                     follow = !follow;
@@ -3593,8 +3587,7 @@ impl ScreenManager {
             }
 
             match ch {
-                27 | 113 => break, // Esc or 'q'
-                x if x == KEY_F10 => break,
+                27 | 113 | KEY_F10 => break, // Esc, 'q', or F10 - exit
                 x if x == KEY_F3 => {
                     search_active = true;
                     search_text.clear();
