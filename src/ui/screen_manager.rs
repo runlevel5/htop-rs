@@ -1228,7 +1228,7 @@ impl ScreenManager {
 
     /// Change process priority (nice) for tagged processes or selected process
     /// Returns true if at least one operation succeeded, false if all failed
-    fn change_priority_for_processes(&self, machine: &Machine, delta: i32) -> bool {
+    fn change_priority_for_processes(&mut self, machine: &mut Machine, delta: i32) -> bool {
         // Get tagged PIDs, or fall back to selected PID
         let tagged = machine.processes.get_tagged();
         let pids: Vec<i32> = if tagged.is_empty() {
@@ -1247,16 +1247,26 @@ impl ScreenManager {
 
         let mut any_ok = false;
         for pid in pids {
-            if Self::change_priority(pid, delta) {
+            if let Some(new_nice) = Self::change_priority(pid, delta) {
+                // Update the process in memory immediately for instant UI feedback
+                if let Some(process) = machine.processes.get_mut(pid) {
+                    process.nice = new_nice as i64;
+                }
                 any_ok = true;
             }
         }
+
+        if any_ok {
+            // Force redraw to show updated nice values immediately
+            self.main_panel.needs_redraw = true;
+        }
+
         any_ok
     }
 
     /// Change process priority (nice) for a single process
-    /// Returns true on success, false on failure
-    fn change_priority(pid: i32, delta: i32) -> bool {
+    /// Returns Some(new_nice) on success, None on failure
+    fn change_priority(pid: i32, delta: i32) -> Option<i32> {
         #[cfg(unix)]
         {
             use std::io::Error;
@@ -1281,7 +1291,7 @@ impl ScreenManager {
             // Check if getpriority failed
             let err = Error::last_os_error();
             if current_nice == -1 && err.raw_os_error() != Some(0) {
-                return false;
+                return None;
             }
 
             let new_nice = (current_nice + delta).clamp(-20, 19);
@@ -1289,13 +1299,17 @@ impl ScreenManager {
             let result =
                 unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, new_nice) };
 
-            result == 0
+            if result == 0 {
+                Some(new_nice)
+            } else {
+                None
+            }
         }
 
         #[cfg(not(unix))]
         {
             let _ = (pid, delta);
-            false
+            None
         }
     }
 
