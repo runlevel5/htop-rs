@@ -257,9 +257,13 @@ impl Meter for TasksMeter {
                 draw_graph(crt, x, y, width, self.height(), &graph_data, "Tsk");
             }
             MeterMode::Led => {
-                // LED mode: show "R/N" like C htop txtBuffer format
-                let text = format!("{}/{}", self.running, self.total_all);
-                super::draw_led(crt, x, y, width, "Tsk", &text);
+                // LED mode: same format as Text mode (C htop uses display function for LED)
+                // Format: "N, M thr, K kthr; R running"
+                let text = format!(
+                    "{}, {} thr, {} kthr; {} running",
+                    self.total_tasks, self.userland_threads, self.kernel_threads, self.running
+                );
+                super::draw_led(crt, x, y, width, "Tasks: ", &text);
             }
         }
     }
