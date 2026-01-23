@@ -623,16 +623,17 @@ impl SetupScreen {
         // Meters moving mode function bar (matching C htop MetersMovingFunctions)
         // C htop: {"Style ", "Lock  ", "Up    ", "Down  ", "Left  ", "Right ", "       ", "Delete", "Done  "}
         // Keys:   {"Space", "Enter", "Up", "Dn", "<-", "->", "  ", "Del", "F10"}
+        // We use arrow symbols for better visual appearance
         let meters_moving_bar = FunctionBar::new_with_labels(&[
             ("", ""),
             ("", ""),
             ("", ""),
             ("Style", "Space"),
             ("Lock", "Enter"),
-            ("Up", "Up"),
-            ("Down", "Dn"),
-            ("Left", "<-"),
-            ("Right", "->"),
+            ("Up", "↑"),
+            ("Down", "↓"),
+            ("Left", "←"),
+            ("Right", "→"),
             ("Delete", "Del"),
         ]);
 
