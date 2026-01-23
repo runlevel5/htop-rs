@@ -897,11 +897,14 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             process.priority = task_info.pti_priority as i64;
 
             // Page faults
-            // Note: macOS only provides pti_faults (total page faults)
-            // C htop assigns this to majflt and leaves minflt as 0
-            // pti_pageins exists but is not used by C htop
-            process.minflt = 0;
-            process.majflt = task_info.pti_faults as u64;
+            // pti_faults = total page faults
+            // pti_pageins = actual page-ins from disk (major faults)
+            // minflt = total faults - major faults (faults satisfied from memory)
+            // Note: C htop only sets majflt=pti_faults, but we can be more accurate
+            let total_faults = task_info.pti_faults as u64;
+            let pageins = task_info.pti_pageins as u64;
+            process.majflt = pageins;
+            process.minflt = total_faults.saturating_sub(pageins);
 
             // Calculate CPU%
             if !is_new && time_delta > 0.0 && prev_time < process.time {
