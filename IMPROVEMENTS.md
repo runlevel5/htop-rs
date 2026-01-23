@@ -12,3 +12,24 @@ When using F3 Search or F4 Filter functions, htop-rs provides enhanced visual fe
 - **Yellow "following" selection**: The selected row uses the yellow selection color to indicate an active search/filter match
 
 In C htop, there is no visual indication in the header that a search or filter is active, which can make it unclear whether the process list is currently filtered or a search is in progress.
+
+## Platform-Specific Improvements
+
+### macOS: Accurate Minor/Major Page Fault Counts
+
+htop-rs provides more accurate page fault statistics on macOS by properly separating minor and major faults:
+
+| Field | htop-rs | C htop |
+|-------|---------|--------|
+| `MINFLT` | `pti_faults - pti_pageins` | Always 0 |
+| `MAJFLT` | `pti_pageins` | `pti_faults` (total) |
+
+**Explanation:**
+- **Minor faults (MINFLT)**: Page faults satisfied from memory (page was resident but not mapped)
+- **Major faults (MAJFLT)**: Page faults requiring disk I/O (page had to be read from disk)
+
+macOS provides both `pti_faults` (total page faults) and `pti_pageins` (actual page-ins from disk) via `proc_pidinfo`. C htop only uses `pti_faults` for `majflt` and leaves `minflt` as 0, which conflates minor and major faults.
+
+htop-rs correctly calculates:
+- `majflt = pti_pageins` (true major faults)
+- `minflt = pti_faults - pti_pageins` (true minor faults)
