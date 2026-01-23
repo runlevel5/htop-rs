@@ -1939,6 +1939,10 @@ impl ScreenManager {
     fn show_setup(&mut self, crt: &mut Crt, machine: &mut Machine) {
         let mut setup_screen = super::setup_screen::SetupScreen::new();
         setup_screen.run(&mut self.settings, crt, &mut self.header, machine);
+        
+        // Sync main panel fields with current screen's fields (in case columns were changed)
+        let screen = &self.settings.screens[self.settings.active_screen];
+        self.main_panel.fields = screen.fields.clone();
     }
 
     /// Show process environment (like C htop EnvScreen)

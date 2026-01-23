@@ -8,7 +8,7 @@
 
 use ncurses::*;
 
-use super::crt::{ColorElement, KEY_F10, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9};
+use super::crt::{ColorElement, KEY_DEL_MAC, KEY_F10, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9};
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::panel::{HandlerResult, Panel};
@@ -603,8 +603,16 @@ pub struct SetupScreen {
     // === Screens panel state ===
     /// Function bar for Screens panel
     screens_bar: FunctionBar,
+    /// Function bar for Screens panel when only 1 screen (no Remove option)
+    screens_bar_no_remove: FunctionBar,
+    /// Function bar for Screens panel when in moving mode
+    screens_moving_bar: FunctionBar,
     /// Function bar for Active Columns panel
     columns_bar: FunctionBar,
+    /// Function bar for Active Columns panel when only 1 column (no Remove option)
+    columns_bar_no_remove: FunctionBar,
+    /// Function bar for Active Columns panel when in moving mode
+    columns_moving_bar: FunctionBar,
     /// Function bar for Available Columns panel
     available_columns_bar: FunctionBar,
     /// Which panel has focus in Screens category (0=screens, 1=columns, 2=available)
@@ -722,8 +730,9 @@ impl SetupScreen {
 
         // Screens panel function bar (matching C htop ScreensFunctions)
         // C htop: {"      ", "Rename", "      ", "      ", "New   ", "      ", "MoveUp", "MoveDn", "Remove", "Done  "}
+        // Added Enter:Move to indicate moving mode toggle
         let screens_bar = FunctionBar::new_with_labels(&[
-            ("", ""),
+            ("Move", "Enter"),
             ("Rename", "F2"),
             ("", ""),
             ("", ""),
@@ -735,10 +744,39 @@ impl SetupScreen {
             ("Done", "F10"),
         ]);
 
+        // Screens panel function bar when only 1 screen (no Remove option)
+        let screens_bar_no_remove = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("Rename", "F2"),
+            ("", ""),
+            ("", ""),
+            ("New", "F5"),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Done", "F10"),
+        ]);
+
+        // Screens panel function bar when in moving mode
+        let screens_moving_bar = FunctionBar::new_with_labels(&[
+            ("Lock", "Enter"),
+            ("", ""),
+            ("Up", "↑"),
+            ("Down", "↓"),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Delete", "Del"),
+            ("", ""),
+        ]);
+
         // Active Columns panel function bar (matching C htop ColumnsFunctions)
         // C htop: {"      ", "      ", "      ", "      ", "      ", "      ", "MoveUp", "MoveDn", "Remove", "Done  "}
+        // Added Enter:Move to indicate moving mode toggle
         let columns_bar = FunctionBar::new_with_labels(&[
-            ("", ""),
+            ("Move", "Enter"),
             ("", ""),
             ("", ""),
             ("", ""),
@@ -748,6 +786,34 @@ impl SetupScreen {
             ("MoveDn", "F8"),
             ("Remove", "F9"),
             ("Done", "F10"),
+        ]);
+
+        // Active Columns panel function bar when only 1 column (no Move/Remove options)
+        let columns_bar_no_remove = FunctionBar::new_with_labels(&[
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Done", "F10"),
+        ]);
+
+        // Active Columns panel function bar when in moving mode
+        let columns_moving_bar = FunctionBar::new_with_labels(&[
+            ("Lock", "Enter"),
+            ("", ""),
+            ("Up", "↑"),
+            ("Down", "↓"),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("", ""),
+            ("Delete", "Del"),
+            ("", ""),
         ]);
 
         // Available Columns panel function bar (matching C htop AvailableColumnsFunctions)
@@ -788,7 +854,11 @@ impl SetupScreen {
             meters_moving: false,
             // Screens panel state
             screens_bar,
+            screens_bar_no_remove,
+            screens_moving_bar,
             columns_bar,
+            columns_bar_no_remove,
+            columns_moving_bar,
             available_columns_bar,
             screens_panel_focus: 0,
             screens_selection: 0,
@@ -1682,10 +1752,10 @@ impl SetupScreen {
 
             if i < settings.screens.len() {
                 let screen = &settings.screens[i];
-                let is_selected = has_focus && i == self.screens_selection;
+                let is_selected = i == self.screens_selection;
 
                 // Get display name (with renaming support)
-                let display = if is_selected && self.screens_renaming {
+                let display = if is_selected && has_focus && self.screens_renaming {
                     // Show rename buffer with cursor
                     format!("{}_", &self.screens_rename_buffer)
                 } else {
@@ -1693,7 +1763,7 @@ impl SetupScreen {
                 };
 
                 // Add moving indicator (↕) if this item is being moved
-                let display_text = if is_selected && self.screens_moving && !self.screens_renaming {
+                let display_text = if is_selected && has_focus && self.screens_moving && !self.screens_renaming {
                     let prefix = "↕ ";
                     let max_len = (w - 1) as usize;
                     let prefixed = format!("{}{}", prefix, display);
@@ -1789,12 +1859,12 @@ impl SetupScreen {
 
             if i < fields.len() {
                 let field = fields[i];
-                let is_selected = has_focus && i == self.columns_selection;
+                let is_selected = i == self.columns_selection;
 
                 let display = field.name();
                 
                 // Add moving indicator (↕) if this item is being moved
-                let display_text = if is_selected && self.columns_moving {
+                let display_text = if is_selected && has_focus && self.columns_moving {
                     let prefix = "↕ ";
                     let max_len = (w - 1) as usize;
                     let prefixed = format!("{}{}", prefix, display);
@@ -1936,8 +2006,24 @@ impl SetupScreen {
                 }
                 SetupCategory::Screens => {
                     match self.screens_panel_focus {
-                        0 => &self.screens_bar,           // Screens panel
-                        1 => &self.columns_bar,           // Active Columns panel
+                        0 => {
+                            if self.screens_moving {
+                                &self.screens_moving_bar
+                            } else if settings.screens.len() <= 1 {
+                                &self.screens_bar_no_remove
+                            } else {
+                                &self.screens_bar
+                            }
+                        }
+                        1 => {
+                            if self.columns_moving {
+                                &self.columns_moving_bar
+                            } else if self.get_current_screen_fields_len(settings) <= 1 {
+                                &self.columns_bar_no_remove
+                            } else {
+                                &self.columns_bar
+                            }
+                        }
                         2 => &self.available_columns_bar, // Available Columns panel
                         _ => &self.function_bar,
                     }
@@ -1986,6 +2072,10 @@ impl SetupScreen {
                     return HandlerResult::Handled;
                 } else if self.category == SetupCategory::Meters {
                     // Switch to meters panel
+                    self.focus = if self.focus == 0 { 1 } else { 0 };
+                    return HandlerResult::Handled;
+                } else if self.category == SetupCategory::Screens {
+                    // Switch to screens panel
                     self.focus = if self.focus == 0 { 1 } else { 0 };
                     return HandlerResult::Handled;
                 }
@@ -2159,7 +2249,7 @@ impl SetupScreen {
             }
 
             // Delete, F9 - remove meter from column
-            KEY_DC | KEY_F9 => {
+            KEY_DC | KEY_DEL_MAC | KEY_F9 => {
                 if !is_available_panel {
                     self.delete_selected_meter(settings, header);
                     return HandlerResult::Handled;
@@ -2319,7 +2409,27 @@ impl SetupScreen {
                 }
                 return HandlerResult::Handled;
             }
-            KEY_F10 | KEY_ESC => {
+            KEY_F10 => {
+                // F10 is disabled in moving mode, otherwise exits setup
+                if self.columns_moving || self.screens_moving {
+                    return HandlerResult::Handled;
+                }
+                // Exit setup
+                return HandlerResult::BreakLoop;
+            }
+            KEY_ESC => {
+                // Exit setup
+                return HandlerResult::BreakLoop;
+            }
+            KEY_Q => {
+                // q exits moving mode if active, otherwise exits setup
+                if self.columns_moving {
+                    self.columns_moving = false;
+                    return HandlerResult::Handled;
+                } else if self.screens_moving {
+                    self.screens_moving = false;
+                    return HandlerResult::Handled;
+                }
                 // Exit setup
                 return HandlerResult::BreakLoop;
             }
@@ -2416,6 +2526,7 @@ impl SetupScreen {
     /// Handle key events for screens list panel (panel 0)
     fn handle_screens_list_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
         let num_screens = settings.screens.len();
+        let single_screen = num_screens <= 1;
 
         match key {
             // Navigation
@@ -2441,9 +2552,11 @@ impl SetupScreen {
                 }
                 return HandlerResult::Handled;
             }
-            // Enter - toggle moving mode
+            // Enter - toggle moving mode (disabled when only 1 screen)
             KEY_ENTER | 10 | 13 => {
-                self.screens_moving = !self.screens_moving;
+                if !single_screen {
+                    self.screens_moving = !self.screens_moving;
+                }
                 return HandlerResult::Handled;
             }
             // F2 / Ctrl+R - Rename
@@ -2461,21 +2574,27 @@ impl SetupScreen {
                 self.add_new_screen(settings);
                 return HandlerResult::Handled;
             }
-            // F7 / [ / - - Move up
+            // F7 / [ / - - Move up (disabled when only 1 screen)
             KEY_F7 | 91 | 45 => {
                 // [ = 91, - = 45
-                self.move_screen_up(settings);
+                if !single_screen {
+                    self.move_screen_up(settings);
+                }
                 return HandlerResult::Handled;
             }
-            // F8 / ] / + - Move down
+            // F8 / ] / + - Move down (disabled when only 1 screen)
             KEY_F8 | 93 | 43 => {
                 // ] = 93, + = 43
-                self.move_screen_down(settings);
+                if !single_screen {
+                    self.move_screen_down(settings);
+                }
                 return HandlerResult::Handled;
             }
-            // F9 - Remove screen
+            // F9 - Remove screen (disabled when only 1 screen)
             KEY_F9 => {
-                self.remove_screen(settings);
+                if !single_screen {
+                    self.remove_screen(settings);
+                }
                 return HandlerResult::Handled;
             }
             _ => {}
@@ -2486,6 +2605,7 @@ impl SetupScreen {
     /// Handle key events for active columns panel (panel 1)
     fn handle_columns_key(&mut self, key: i32, settings: &mut Settings) -> HandlerResult {
         let num_fields = self.get_current_screen_fields_len(settings);
+        let single_column = num_fields <= 1;
 
         match key {
             // Navigation
@@ -2507,24 +2627,35 @@ impl SetupScreen {
                 }
                 return HandlerResult::Handled;
             }
-            // Enter - toggle moving mode
+            // Enter - toggle moving mode (disabled when only 1 column)
             KEY_ENTER | 10 | 13 => {
-                self.columns_moving = !self.columns_moving;
+                if !single_column {
+                    self.columns_moving = !self.columns_moving;
+                }
                 return HandlerResult::Handled;
             }
-            // F7 / [ / - - Move up
+            // F7 / [ / - - Move up (disabled when only 1 column)
             KEY_F7 | 91 | 45 => {
-                self.move_column_up(settings);
+                if !single_column {
+                    self.move_column_up(settings);
+                }
                 return HandlerResult::Handled;
             }
-            // F8 / ] / + - Move down
+            // F8 / ] / + - Move down (disabled when only 1 column)
             KEY_F8 | 93 | 43 => {
-                self.move_column_down(settings);
+                if !single_column {
+                    self.move_column_down(settings);
+                }
                 return HandlerResult::Handled;
             }
-            // F9 / Delete - Remove column
-            KEY_F9 | KEY_DC => {
-                self.remove_column(settings);
+            // F9 / Delete - Remove column (disabled when only 1 column)
+            // KEY_DC is ncurses delete key, KEY_DEL_MAC is Delete on Mac (fn+backspace)
+            KEY_F9 | KEY_DC | KEY_DEL_MAC => {
+                if !single_column {
+                    self.remove_column(settings);
+                    // Exit moving mode after deletion
+                    self.columns_moving = false;
+                }
                 return HandlerResult::Handled;
             }
             _ => {}
@@ -2703,22 +2834,20 @@ impl SetupScreen {
         }
         let field = all_fields[self.available_columns_selection];
 
-        // Add after current selection in columns panel, or at end if none selected
+        // Add above (before) current selection in columns panel, matching C htop behavior
         let fields = &mut settings.screens[self.screens_selection].fields;
         let insert_pos = if fields.is_empty() {
             0
         } else {
-            (self.columns_selection + 1).min(fields.len())
+            self.columns_selection.min(fields.len())
         };
         fields.insert(insert_pos, field);
-        self.columns_selection = insert_pos;
+        // Move selection down to keep the same element selected after insertion
+        self.columns_selection += 1;
         settings.changed = true;
         self.changed = true;
 
-        // Enter moving mode so user can position the new column
-        self.columns_moving = true;
-        // Switch focus to columns panel
-        self.screens_panel_focus = 1;
+        // Keep focus on Available Columns panel
     }
 
     /// Move meter selection up in current panel

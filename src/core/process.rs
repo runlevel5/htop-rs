@@ -916,6 +916,17 @@ pub struct Process {
     pub starttime_ctime: i64, // epoch seconds
     pub starttime_show: String,
 
+    // Linux-specific time fields (in hundredths of a second)
+    // These are only populated on Linux
+    pub utime: u64,   // User CPU time
+    pub stime: u64,   // System CPU time
+    pub cutime: u64,  // Children's user CPU time
+    pub cstime: u64,  // Children's system CPU time
+
+    // Linux-specific children's page fault counters
+    pub cminflt: u64, // Children's minor page faults
+    pub cmajflt: u64, // Children's major page faults
+
     // Memory information (in KB)
     pub m_virt: i64,
     pub m_resident: i64,
@@ -1012,6 +1023,12 @@ impl Process {
             time: 0,
             starttime_ctime: 0,
             starttime_show: String::new(),
+            utime: 0,
+            stime: 0,
+            cutime: 0,
+            cstime: 0,
+            cminflt: 0,
+            cmajflt: 0,
             m_virt: 0,
             m_resident: 0,
             m_share: 0,

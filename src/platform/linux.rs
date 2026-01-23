@@ -386,6 +386,16 @@ pub fn scan_processes(machine: &mut Machine) {
         let stime = stat.stime;
         let total_ticks = utime + stime;
         process.time = ((total_ticks as f64 / ticks_per_second) * 100.0) as u64;
+        
+        // Store individual time fields (convert from ticks to centiseconds)
+        process.utime = ((utime as f64 / ticks_per_second) * 100.0) as u64;
+        process.stime = ((stime as f64 / ticks_per_second) * 100.0) as u64;
+        process.cutime = ((stat.cutime as f64 / ticks_per_second) * 100.0) as u64;
+        process.cstime = ((stat.cstime as f64 / ticks_per_second) * 100.0) as u64;
+        
+        // Children's page fault counters
+        process.cminflt = stat.cminflt;
+        process.cmajflt = stat.cmajflt;
 
         // Calculate CPU percentage
         if !is_new && time_delta > 0.0 && process.time > prev_time {

@@ -505,6 +505,8 @@ impl MainPanel {
         selected: bool,
         settings: &Settings,
         current_uid: u32,
+        realtime_ms: u64,
+        active_cpus: u32,
     ) {
         let selection_attr = if selected {
             crt.color(self.selection_color)
@@ -535,6 +537,8 @@ impl MainPanel {
                 settings.find_comm_in_cmdline,
                 settings.strip_exe_from_cmdline,
                 is_shadowed,
+                realtime_ms,
+                active_cpus,
             );
         }
 
@@ -573,6 +577,8 @@ impl MainPanel {
         _find_comm_in_cmdline: bool,
         _strip_exe_from_cmdline: bool,
         is_shadowed: bool,
+        realtime_ms: u64,
+        active_cpus: u32,
     ) {
         let process_color = crt.color(ColorElement::Process);
         let shadow_color = crt.color(ColorElement::ProcessShadow);
@@ -948,8 +954,43 @@ impl MainPanel {
                 str.append(&format!("{:>11} ", process.majflt), base_color);
             }
             ProcessField::Starttime => {
-                // START: start time (6 chars) - TODO: format as time
-                str.append("TODO   ", shadow_color);
+                // START: start time (7 chars including trailing space)
+                // Format based on how long ago the process started:
+                // - < 24 hours: "HH:MM " (time today)
+                // - < 365 days: "MmmDD " (month + day, e.g., "Jan23 ")
+                // - >= 365 days: " YYYY " (year, e.g., " 2024 ")
+                use chrono::{Local, TimeZone, Datelike, Timelike};
+                
+                let now = realtime_ms / 1000; // current time in seconds
+                let start = process.starttime_ctime;
+                
+                if start <= 0 {
+                    str.append("   ?   ", shadow_color);
+                } else {
+                    let age_seconds = (now as i64).saturating_sub(start);
+                    
+                    if let Some(dt) = Local.timestamp_opt(start, 0).single() {
+                        let formatted = if age_seconds < 86400 {
+                            // Started within last 24 hours: show time "HH:MM "
+                            format!("{:02}:{:02} ", dt.hour(), dt.minute())
+                        } else if age_seconds < 364 * 86400 {
+                            // Started within last ~year: show "MmmDD "
+                            let month = match dt.month() {
+                                1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr",
+                                5 => "May", 6 => "Jun", 7 => "Jul", 8 => "Aug",
+                                9 => "Sep", 10 => "Oct", 11 => "Nov", 12 => "Dec",
+                                _ => "???",
+                            };
+                            format!("{}{:02} ", month, dt.day())
+                        } else {
+                            // Started more than a year ago: show " YYYY "
+                            format!(" {} ", dt.year())
+                        };
+                        str.append(&formatted, base_color);
+                    } else {
+                        str.append("   ?   ", shadow_color);
+                    }
+                }
             }
             ProcessField::StUid => {
                 // UID: user ID (5 chars)
@@ -967,19 +1008,55 @@ impl MainPanel {
                 str.append(&format!("{:>5} ", tgid), base_color);
             }
             ProcessField::PercentNormCpu => {
-                // NCPU%: normalized CPU percentage (5 chars)
-                // TODO: implement proper normalization
-                str.append("TODO  ", shadow_color);
+                // NCPU%: normalized CPU percentage (6 chars)
+                // This is percent_cpu divided by the number of active CPUs
+                let norm_cpu = if active_cpus > 0 {
+                    process.percent_cpu / active_cpus as f32
+                } else {
+                    process.percent_cpu
+                };
+                
+                if is_shadowed {
+                    str.append(&format!("{:>5.1} ", norm_cpu), shadow_color);
+                } else {
+                    print_percentage(str, norm_cpu, 5, crt);
+                }
             }
             ProcessField::Elapsed => {
-                // ELAPSED: time since start (9 chars)
-                // TODO: implement elapsed time formatting
-                str.append("TODO      ", shadow_color);
+                // ELAPSED: time since process started (9 chars)
+                // Uses the same Row_printTime format as TIME field
+                let now_ms = realtime_ms;
+                let start_ms = (process.starttime_ctime as u64).saturating_mul(1000);
+                let elapsed_ms = if now_ms > start_ms {
+                    now_ms - start_ms
+                } else {
+                    0
+                };
+                // Convert ms to hundredths of a second for print_time
+                let elapsed_hundredths = elapsed_ms / 10;
+                
+                if is_shadowed {
+                    // For shadowed rows, use shadow color version
+                    let formatted = Process::format_time(elapsed_hundredths);
+                    str.append(&formatted, shadow_color);
+                } else {
+                    print_time(str, elapsed_hundredths, coloring, crt);
+                }
             }
             ProcessField::SchedulerPolicy => {
                 // SCHED: scheduler policy (6 chars)
-                // TODO: implement scheduler policy display
-                str.append("TODO   ", shadow_color);
+                // Linux scheduler policies from sched.h
+                let policy_str = match process.scheduling_policy {
+                    0 => "OTHER",  // SCHED_OTHER / SCHED_NORMAL
+                    1 => "FIFO",   // SCHED_FIFO
+                    2 => "RR",     // SCHED_RR
+                    3 => "BATCH",  // SCHED_BATCH
+                    5 => "IDLE",   // SCHED_IDLE
+                    6 => "EDF",    // SCHED_DEADLINE
+                    -1 => "N/A",   // Not available
+                    _ => "???",    // Unknown
+                };
+                str.append(&format!("{:<5} ", policy_str), base_color);
             }
             ProcessField::ProcComm => {
                 // COMM: process name from /proc/[pid]/comm (16 chars)
@@ -997,76 +1074,111 @@ impl MainPanel {
                 print_left_aligned(str, base_color, cwd, 26);
             }
             
-            // === Stub implementations for unimplemented Linux-specific fields ===
+            // === Linux-specific fields ===
             #[cfg(target_os = "linux")]
             ProcessField::Cminflt => {
                 // CMINFLT: children's minor faults (11 chars)
-                str.append("TODO        ", shadow_color);
+                str.append(&format!("{:>11} ", process.cminflt), base_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Cmajflt => {
                 // CMAJFLT: children's major faults (11 chars)
-                str.append("TODO        ", shadow_color);
+                str.append(&format!("{:>11} ", process.cmajflt), base_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Utime => {
                 // UTIME+: user time (9 chars)
-                str.append("TODO      ", shadow_color);
+                if is_shadowed {
+                    let formatted = Process::format_time(process.utime);
+                    str.append(&formatted, shadow_color);
+                } else {
+                    print_time(str, process.utime, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Stime => {
                 // STIME+: system time (9 chars)
-                str.append("TODO      ", shadow_color);
+                if is_shadowed {
+                    let formatted = Process::format_time(process.stime);
+                    str.append(&formatted, shadow_color);
+                } else {
+                    print_time(str, process.stime, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Cutime => {
                 // CUTIME+: children's user time (9 chars)
-                str.append("TODO      ", shadow_color);
+                if is_shadowed {
+                    let formatted = Process::format_time(process.cutime);
+                    str.append(&formatted, shadow_color);
+                } else {
+                    print_time(str, process.cutime, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Cstime => {
                 // CSTIME+: children's system time (9 chars)
-                str.append("TODO      ", shadow_color);
+                if is_shadowed {
+                    let formatted = Process::format_time(process.cstime);
+                    str.append(&formatted, shadow_color);
+                } else {
+                    print_time(str, process.cstime, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::MText => {
-                // CODE: code size (6 chars)
-                str.append("TODO   ", shadow_color);
+                // CODE: code size (6 chars) - m_text is in KB
+                if is_shadowed {
+                    str.append(&format!("{:>5} ", process.m_text), shadow_color);
+                } else {
+                    print_kbytes(str, process.m_text as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::MData => {
-                // DATA: data size (6 chars)
-                str.append("TODO   ", shadow_color);
+                // DATA: data size (6 chars) - m_data is in KB
+                if is_shadowed {
+                    str.append(&format!("{:>5} ", process.m_data), shadow_color);
+                } else {
+                    print_kbytes(str, process.m_data as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::MLib => {
-                // LIB: library size (6 chars)
-                str.append("TODO   ", shadow_color);
+                // LIB: library size (6 chars) - m_lib is in KB
+                // Note: m_lib may be 0 if not computed (requires reading /proc/PID/maps)
+                if process.m_lib == 0 {
+                    str.append("  N/A ", shadow_color);
+                } else if is_shadowed {
+                    str.append(&format!("{:>5} ", process.m_lib), shadow_color);
+                } else {
+                    print_kbytes(str, process.m_lib as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Rchar => {
-                // RCHAR: chars read (6 chars)
-                str.append("TODO   ", shadow_color);
+                // RCHAR: chars read (6 chars) - requires /proc/[pid]/io
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Wchar => {
-                // WCHAR: chars written (6 chars)
-                str.append("TODO   ", shadow_color);
+                // WCHAR: chars written (6 chars) - requires /proc/[pid]/io
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Syscr => {
-                // READ_SYSC: read syscalls (12 chars)
-                str.append("TODO         ", shadow_color);
+                // READ_SYSC: read syscalls (12 chars) - requires /proc/[pid]/io
+                str.append("         N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Syscw => {
-                // WRITE_SYSC: write syscalls (12 chars)
-                str.append("TODO         ", shadow_color);
+                // WRITE_SYSC: write syscalls (12 chars) - requires /proc/[pid]/io
+                str.append("         N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Cnclwb => {
-                // IO_C: cancelled write bytes (6 chars)
-                str.append("TODO   ", shadow_color);
+                // IO_C: cancelled write bytes (6 chars) - requires /proc/[pid]/io
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::CGroup => {
@@ -1081,81 +1193,91 @@ impl MainPanel {
             }
             #[cfg(target_os = "linux")]
             ProcessField::PercentCpuDelay => {
-                // CPUD%: CPU delay percentage (6 chars)
-                str.append("TODO   ", shadow_color);
+                // CPUD%: CPU delay percentage (6 chars) - requires taskstats
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::MPss => {
-                // PSS: proportional set size (6 chars)
-                str.append("TODO   ", shadow_color);
+                // PSS: proportional set size (6 chars) - requires /proc/[pid]/smaps
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::MSwap => {
-                // SWAP: swap size (6 chars)
-                str.append("TODO   ", shadow_color);
+                // SWAP: swap size (6 chars) - requires /proc/[pid]/smaps
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::MPsswp => {
-                // PSSWP: PSS + swap (7 chars)
-                str.append("TODO    ", shadow_color);
+                // PSSWP: PSS + swap (7 chars) - requires /proc/[pid]/smaps
+                str.append("   N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Ctxt => {
                 // CTXT: context switches (6 chars)
-                str.append("TODO   ", shadow_color);
+                // We have ctxt_switches in process struct
+                if process.ctxt_switches == 0 {
+                    str.append("     0 ", shadow_color);
+                } else {
+                    str.append(&format!("{:>6} ", process.ctxt_switches), base_color);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::SecAttr => {
                 // Security Attribute (18 chars)
-                str.append("TODO               ", shadow_color);
+                let sec_attr = process.sec_attr.as_deref().unwrap_or("?");
+                print_left_aligned(str, base_color, sec_attr, 18);
             }
             #[cfg(target_os = "linux")]
             ProcessField::AutogroupId => {
-                // AGRP: autogroup ID (4 chars)
-                str.append("TODO ", shadow_color);
+                // AGRP: autogroup ID (4 chars) - requires /proc/[pid]/autogroup
+                str.append(" N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::AutogroupNice => {
-                // ANI: autogroup nice (4 chars)
-                str.append("TODO ", shadow_color);
+                // ANI: autogroup nice (4 chars) - requires /proc/[pid]/autogroup
+                str.append(" N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::CCGroup => {
                 // CGROUP (compressed) (19 chars)
+                // Show compressed version of cgroup (last component)
                 let cgroup = process.cgroup.as_deref().unwrap_or("?");
-                print_left_aligned(str, base_color, cgroup, 19);
+                // Get last component of cgroup path for compressed display
+                let compressed = cgroup.rsplit('/').next().unwrap_or(cgroup);
+                print_left_aligned(str, base_color, compressed, 19);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Container => {
-                // CONTAINER (9 chars)
-                str.append("TODO      ", shadow_color);
+                // CONTAINER (9 chars) - requires container detection heuristics
+                str.append("     N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::MPriv => {
-                // PRIV: private memory (6 chars)
-                str.append("TODO   ", shadow_color);
+                // PRIV: private memory (6 chars) - requires /proc/[pid]/smaps
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::GpuTime => {
-                // GPU_TIME (9 chars)
-                str.append("TODO      ", shadow_color);
+                // GPU_TIME (9 chars) - requires DRM/GPU support
+                str.append("     N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::GpuPercent => {
-                // GPU% (6 chars)
-                str.append("TODO   ", shadow_color);
+                // GPU% (6 chars) - requires DRM/GPU support
+                str.append("  N/A ", shadow_color);
             }
             #[cfg(target_os = "linux")]
             ProcessField::IsContainer => {
-                // CONT: is container (5 chars)
-                str.append("TODO  ", shadow_color);
+                // CONT: is container (5 chars) - requires container detection
+                str.append("  N/A", shadow_color);
             }
             
             // === macOS-specific fields ===
             #[cfg(target_os = "macos")]
             ProcessField::Translated => {
                 // T: translated process (Rosetta 2) (2 chars)
-                // TODO: need to add translated field to Process struct
+                // Show N for native, T for translated (Rosetta), - for unknown
+                // For now, we don't have this info, so show "-"
                 str.append("- ", shadow_color);
             }
             
@@ -1196,6 +1318,8 @@ impl MainPanel {
 
         // Get current user ID for highlighting
         let current_uid = machine.htop_user_id;
+        let realtime_ms = machine.realtime_ms;
+        let active_cpus = machine.active_cpus;
 
         // Partial vs full redraw logic - matches C htop Panel_draw() exactly
         //
@@ -1222,7 +1346,7 @@ impl MainPanel {
                     let process_idx = self.cached_display_indices[display_idx];
                     if let Some(process) = machine.processes.processes.get(process_idx) {
                         let selected = display_idx as i32 == self.selected;
-                        self.draw_process(crt, y, process, selected, settings, current_uid);
+                        self.draw_process(crt, y, process, selected, settings, current_uid, realtime_ms, active_cpus);
                     }
                 } else {
                     // Empty line
@@ -1251,7 +1375,7 @@ impl MainPanel {
                 if old_row < self.cached_display_indices.len() {
                     let process_idx = self.cached_display_indices[old_row];
                     if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(crt, old_y, process, false, settings, current_uid);
+                        self.draw_process(crt, old_y, process, false, settings, current_uid, realtime_ms, active_cpus);
                     }
                 }
             }
@@ -1263,7 +1387,7 @@ impl MainPanel {
                 if new_row < self.cached_display_indices.len() {
                     let process_idx = self.cached_display_indices[new_row];
                     if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(crt, new_y, process, true, settings, current_uid);
+                        self.draw_process(crt, new_y, process, true, settings, current_uid, realtime_ms, active_cpus);
                     }
                 }
             }
