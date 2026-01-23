@@ -18,7 +18,10 @@ pub struct ClockMeter {
 
 impl ClockMeter {
     pub fn new() -> Self {
-        ClockMeter::default()
+        ClockMeter {
+            mode: MeterMode::Text,
+            time_str: String::new(),
+        }
     }
 }
 
@@ -34,6 +37,10 @@ impl Meter for ClockMeter {
     fn supported_modes(&self) -> u32 {
         // Clock only supports Text and LED modes (no Bar or Graph)
         (1 << MeterMode::Text as u32) | (1 << MeterMode::Led as u32)
+    }
+
+    fn default_mode(&self) -> MeterMode {
+        MeterMode::Text
     }
 
     fn update(&mut self, _machine: &Machine) {

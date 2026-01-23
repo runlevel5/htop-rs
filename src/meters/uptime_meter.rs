@@ -16,7 +16,10 @@ pub struct UptimeMeter {
 
 impl UptimeMeter {
     pub fn new() -> Self {
-        UptimeMeter::default()
+        UptimeMeter {
+            mode: MeterMode::Text,
+            uptime: Duration::default(),
+        }
     }
 
     /// Format uptime exactly like C htop:
@@ -83,6 +86,10 @@ impl Meter for UptimeMeter {
     fn supported_modes(&self) -> u32 {
         // Uptime only supports Text and LED modes (no Bar or Graph)
         (1 << MeterMode::Text as u32) | (1 << MeterMode::Led as u32)
+    }
+
+    fn default_mode(&self) -> MeterMode {
+        MeterMode::Text
     }
 
     fn update(&mut self, machine: &Machine) {

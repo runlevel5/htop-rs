@@ -18,7 +18,10 @@ pub struct DateTimeMeter {
 
 impl DateTimeMeter {
     pub fn new() -> Self {
-        DateTimeMeter::default()
+        DateTimeMeter {
+            mode: MeterMode::Text,
+            datetime_str: String::new(),
+        }
     }
 }
 
@@ -34,6 +37,10 @@ impl Meter for DateTimeMeter {
     fn supported_modes(&self) -> u32 {
         // DateTime only supports Text and LED modes (no Bar or Graph)
         (1 << MeterMode::Text as u32) | (1 << MeterMode::Led as u32)
+    }
+
+    fn default_mode(&self) -> MeterMode {
+        MeterMode::Text
     }
 
     fn update(&mut self, _machine: &Machine) {

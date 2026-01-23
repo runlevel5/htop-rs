@@ -177,6 +177,11 @@ pub trait Meter: std::fmt::Debug {
             | (1 << MeterMode::Led as u32)
     }
 
+    /// Get the default mode for this meter (default: Bar)
+    fn default_mode(&self) -> MeterMode {
+        MeterMode::Bar
+    }
+
     /// Check if a mode is supported
     fn supports_mode(&self, mode: MeterMode) -> bool {
         (self.supported_modes() & (1 << mode as u32)) != 0

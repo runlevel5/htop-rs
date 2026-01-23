@@ -16,7 +16,10 @@ pub struct HostnameMeter {
 
 impl HostnameMeter {
     pub fn new() -> Self {
-        HostnameMeter::default()
+        HostnameMeter {
+            mode: MeterMode::Text,
+            hostname: String::new(),
+        }
     }
 }
 
@@ -32,6 +35,10 @@ impl Meter for HostnameMeter {
     fn supported_modes(&self) -> u32 {
         // Hostname only supports Text mode
         1 << MeterMode::Text as u32
+    }
+
+    fn default_mode(&self) -> MeterMode {
+        MeterMode::Text
     }
 
     fn update(&mut self, machine: &Machine) {
