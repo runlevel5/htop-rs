@@ -1353,13 +1353,14 @@ impl ScreenManager {
                     }
                     break;
                 }
-                0x1B | KEY_F10 => {
-                    // Escape or F10 - cancel
+                0x1B | 0x71 | KEY_F10 => {
+                    // Escape, 'q', or F10 - cancel (matches C htop ScreenManager_run)
                     break;
                 }
                 _ => {
                     // Try typing search (jump to signal starting with this char)
-                    if (0x20..0x7F).contains(&key) {
+                    // Note: 'q' is handled above, so won't trigger typing search
+                    if (0x20..0x7F).contains(&key) && key != 0x71 {
                         signal_panel.select_by_typing(key as u8 as char);
                     }
                 }
@@ -1477,13 +1478,14 @@ impl ScreenManager {
                     }
                     break;
                 }
-                0x1B | KEY_F10 => {
-                    // Escape or F10 - cancel
+                0x1B | 0x71 | KEY_F10 => {
+                    // Escape, 'q', or F10 - cancel (matches C htop ScreenManager_run)
                     break;
                 }
                 _ => {
                     // Try typing search (jump to item starting with this char)
-                    if (0x20..0x7F).contains(&key) {
+                    // Note: 'q' is handled above, so won't trigger typing search
+                    if (0x20..0x7F).contains(&key) && key != 0x71 {
                         sort_panel.select_by_typing(key as u8 as char);
                     }
                 }
@@ -3886,8 +3888,8 @@ impl ScreenManager {
                     machine.filter_user_id = menu_items[selected].0;
                     break;
                 }
-                0x1B => {
-                    // Escape
+                0x1B | 0x71 | KEY_F10 => {
+                    // Escape, 'q', or F10 - cancel (matches C htop ScreenManager_run)
                     break;
                 }
                 _ => {}
