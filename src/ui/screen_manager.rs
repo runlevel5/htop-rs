@@ -239,7 +239,7 @@ impl ScreenManager {
 
                 if x + indicator_width < max_x {
                     let _ = addstr(pause_indicator);
-                    x += indicator_width as i32;
+                    x += indicator_width;
                 }
             }
 

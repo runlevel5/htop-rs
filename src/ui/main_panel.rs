@@ -1,6 +1,7 @@
 //! MainPanel - Main process list panel
 
 #![allow(dead_code)]
+#![allow(clippy::too_many_arguments)] // UI drawing functions naturally have many parameters
 
 use super::crt::{ColorElement, KEY_DEL_MAC, KEY_F10, KEY_F15, KEY_F3, KEY_F4};
 use super::function_bar::FunctionBar;
@@ -801,9 +802,8 @@ impl MainPanel {
                             highlight_deleted_exe
                         } else if hl.flags & highlight_flags::PREFIXDIR != 0 {
                             shadow_dist_path_prefix
-                        } else if hl.flags & highlight_flags::COMM != 0 {
-                            true // Always apply comm highlighting when present
                         } else {
+                            // COMM flag or any other - always apply highlighting
                             true
                         };
 
@@ -826,11 +826,7 @@ impl MainPanel {
 
                     // Apply basename highlighting if enabled
                     if highlight_base_name {
-                        let basename_len = if process.cmdline_basename_end > process.cmdline_basename_start {
-                            process.cmdline_basename_end - process.cmdline_basename_start
-                        } else {
-                            0
-                        };
+                        let basename_len = process.cmdline_basename_end.saturating_sub(process.cmdline_basename_start);
                         if basename_len > 0 {
                             let hl_offset = if show_program_path {
                                 process.cmdline_basename_start
@@ -1068,11 +1064,7 @@ impl MainPanel {
                 // Uses the same Row_printTime format as TIME field
                 let now_ms = realtime_ms;
                 let start_ms = (process.starttime_ctime as u64).saturating_mul(1000);
-                let elapsed_ms = if now_ms > start_ms {
-                    now_ms - start_ms
-                } else {
-                    0
-                };
+                let elapsed_ms = now_ms.saturating_sub(start_ms);
                 // Convert ms to hundredths of a second for print_time
                 let elapsed_hundredths = elapsed_ms / 10;
                 

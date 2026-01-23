@@ -3,6 +3,8 @@
 //! This module contains the Process struct and related types that represent
 //! a single process in the system.
 
+#![allow(clippy::too_many_arguments)] // Tree building functions have many parameters
+
 use std::cmp::Ordering;
 use std::time::SystemTime;
 
@@ -1370,11 +1372,7 @@ impl Process {
         let proc_exe = self.exe.as_deref();
 
         let cmdline_basename_start = self.cmdline_basename_start;
-        let cmdline_basename_len = if self.cmdline_basename_end > self.cmdline_basename_start {
-            self.cmdline_basename_end - self.cmdline_basename_start
-        } else {
-            0
-        };
+        let cmdline_basename_len = self.cmdline_basename_end.saturating_sub(self.cmdline_basename_start);
 
         let exe_basename_offset = self.exe_basename_offset;
         let exe_basename_len = proc_exe.map(|e| e.len() - exe_basename_offset).unwrap_or(0);
@@ -1425,12 +1423,11 @@ impl Process {
         // Case 1: Fallback to cmdline (no merged command or missing exe/comm)
         if !params.show_merged_command || proc_exe.is_none() || proc_comm.is_none() {
             // Check if we should show comm as prefix
-            if (params.show_merged_command
-                || (self.is_userland_thread && params.show_thread_names))
-                && proc_comm.is_some()
-            {
-                let comm = proc_comm.unwrap();
-                if !comm.is_empty() {
+            if let Some(comm) = proc_comm {
+                if (params.show_merged_command
+                    || (self.is_userland_thread && params.show_thread_names))
+                    && !comm.is_empty()
+                {
                     let cmdline_base = &cmdline[cmdline_basename_start..];
                     let cmp_len = comm.len().min(TASK_COMM_LEN - 1);
                     if !cmdline_base.starts_with(&comm[..cmp_len]) {
@@ -1891,7 +1888,7 @@ impl Process {
         let mut pos = cmdline_basename_start;
 
         // Iterate through tokens (space-separated, treating newlines as separators too)
-        for token in search_area.split(|c| c == ' ' || c == '\n') {
+        for token in search_area.split([' ', '\n']) {
             if token.is_empty() {
                 pos += 1; // Account for the separator
                 continue;

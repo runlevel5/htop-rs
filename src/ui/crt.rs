@@ -180,7 +180,7 @@ pub enum ColorElement {
     DynamicYellow,
     DynamicWhite,
     PanelEdit,
-    LastColorElement,
+    Last, // Sentinel value for array sizing
 }
 
 /// Special key definitions (using high function key numbers that are unlikely to conflict)
@@ -361,7 +361,7 @@ impl Crt {
         let tree_str = if utf8 { &TREE_UTF8 } else { &TREE_ASCII };
 
         let mut crt = Crt {
-            colors: vec![0; ColorElement::LastColorElement as usize],
+            colors: vec![0; ColorElement::Last as usize],
             color_scheme: settings.color_scheme,
             tree_str,
             utf8,

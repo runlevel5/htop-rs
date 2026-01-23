@@ -5,6 +5,7 @@
 //! - Content panel(s) on the right depending on selected category
 
 #![allow(dead_code)]
+#![allow(clippy::too_many_arguments)] // UI drawing functions naturally have many parameters
 
 use ncurses::*;
 

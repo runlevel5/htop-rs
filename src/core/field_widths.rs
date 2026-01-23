@@ -76,10 +76,8 @@ impl FieldWidths {
         // Width calculation: we need space for the number + 1 decimal place
         // Examples: "99.9" (4), "100.0" (5), "999.9" (5), "1000.0" (6), "9999.9" (6)
         // C htop initializes to strlen(" CPU%") = 5, and Row_printPercentage needs min 4
-        let width = if max_percent < 100.0 {
-            5 // "XX.X " or "X.X  " - minimum is title width
-        } else if max_percent < 1000.0 {
-            5 // "XXX.X"
+        let width = if max_percent < 1000.0 {
+            5 // "XX.X" to "XXX.X" - minimum is title width (5)
         } else if max_percent < 10000.0 {
             6 // "XXXX.X"
         } else {
@@ -95,10 +93,8 @@ impl FieldWidths {
     /// Update PERCENT_NORM_CPU width (same logic as PERCENT_CPU)
     pub fn update_percent_norm_cpu_width(&mut self, max_percent: f32) {
         // Same logic as PERCENT_CPU - min width is 5 (strlen("NCPU%"))
-        let width = if max_percent < 100.0 {
-            5 // Minimum is title width
-        } else if max_percent < 1000.0 {
-            5 // "XXX.X"
+        let width = if max_percent < 1000.0 {
+            5 // "XX.X" to "XXX.X" - minimum is title width (5)
         } else if max_percent < 10000.0 {
             6 // "XXXX.X"
         } else {

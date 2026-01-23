@@ -2,10 +2,10 @@
 name = "htop-rs"
 version = "0.0.1"
 edition = "2021"
-authors = ["htop-rs contributors"]
+authors = ["Trung Lê"]
 description = "A Rust port of htop - an interactive process viewer"
 license = "GPL-2.0-or-later"
-repository = "https://github.com/htop-dev/htop"
+repository = "https://github.com/runlevel5/htop-rs"
 keywords = ["htop", "process", "monitor", "terminal", "ncurses"]
 categories = ["command-line-utilities", "os"]
 

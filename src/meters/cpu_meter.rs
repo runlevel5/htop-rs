@@ -1,5 +1,7 @@
 //! CPU Meter
 
+#![allow(clippy::too_many_arguments)] // Drawing functions naturally have many parameters
+
 use std::cell::RefCell;
 
 use super::{draw_graph, GraphData, Meter, MeterMode, DEFAULT_GRAPH_HEIGHT};
