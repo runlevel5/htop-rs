@@ -329,11 +329,10 @@ pub struct MainPanel {
     pub w: i32,
     pub h: i32,
 
-    // Selection
+    // Selection (matches C htop Panel struct)
     pub selected: i32,
     old_selected: i32, // Track previous selection for partial redraw optimization
     pub scroll_v: i32,
-    old_scroll_v: i32, // Track previous scroll for partial redraw optimization
     pub scroll_h: i32,
 
     // Process display
@@ -376,7 +375,6 @@ impl MainPanel {
             selected: 0,
             old_selected: 0,
             scroll_v: 0,
-            old_scroll_v: 0,
             scroll_h: 0,
             // Default fields matching C htop darwin/Platform.c
             // "PID USER PRIORITY NICE M_VIRT M_RESIDENT STATE PERCENT_CPU PERCENT_MEM TIME Command"
@@ -529,18 +527,27 @@ impl MainPanel {
     }
 
     /// Ensure the selected process is visible
+    /// Sets needs_redraw if scroll position changed (matches C htop Panel_draw)
     pub fn ensure_visible(&mut self, process_count: i32) {
         let visible_height = if self.show_header { self.h - 1 } else { self.h };
 
+        // Matches C htop Panel_draw() lines 265-271:
+        // When scroll needs to change to keep selection visible, set needsRedraw
         if self.selected < self.scroll_v {
             self.scroll_v = self.selected;
+            self.needs_redraw = true;
         } else if self.selected >= self.scroll_v + visible_height {
             self.scroll_v = self.selected - visible_height + 1;
+            self.needs_redraw = true;
         }
 
-        // Clamp scroll
+        // Clamp scroll (matches C htop Panel_draw() lines 257-263)
         let max_scroll = (process_count - visible_height).max(0);
+        let old_scroll = self.scroll_v;
         self.scroll_v = self.scroll_v.clamp(0, max_scroll);
+        if self.scroll_v != old_scroll {
+            self.needs_redraw = true;
+        }
     }
 
     /// Draw the panel header with sort indicator
@@ -1440,41 +1447,22 @@ impl MainPanel {
         // Get current user ID for highlighting
         let current_uid = machine.htop_user_id;
 
-        // Check if we can do partial redraw (like C htop Panel_draw optimization)
-        // Only redraw old and new selected rows if:
-        // - needs_redraw is false (no full redraw needed)
-        // - scroll position hasn't changed
-        // - both old and new selection are within visible range
-        let scroll_changed = self.scroll_v != self.old_scroll_v;
-        let old_in_range = self.old_selected >= self.scroll_v
-            && self.old_selected < self.scroll_v + visible_height;
-        let new_in_range =
-            self.selected >= self.scroll_v && self.selected < self.scroll_v + visible_height;
-        let can_partial_redraw =
-            !self.needs_redraw && !scroll_changed && old_in_range && new_in_range;
+        // Partial vs full redraw logic - matches C htop Panel_draw() exactly
+        //
+        // C htop Panel_draw() has two paths:
+        // 1. if (needsRedraw || force_redraw) → full redraw of all visible rows
+        // 2. else → partial redraw of just old and new selected rows
+        //
+        // The key insight is that C htop ALWAYS does a partial redraw when
+        // needsRedraw is false, even if selection didn't change. This is because
+        // the old_selected/selected values are updated AFTER draw, so on the next
+        // draw with no input, old_selected == selected and it just redraws that
+        // one row (which is a no-op visually but keeps things consistent).
+        //
+        // For scroll changes, needsRedraw is set by PANEL_SCROLL macro in C htop,
+        // so we don't need special handling here.
 
-        if can_partial_redraw && self.old_selected != self.selected {
-            // Partial redraw: only redraw the two rows that changed
-            // Redraw old selected row (remove highlight)
-            let old_row = (self.old_selected - self.scroll_v) as usize;
-            let old_y = start_y + old_row as i32;
-            if old_row < self.cached_display_indices.len() {
-                let process_idx = self.cached_display_indices[old_row];
-                if let Some(process) = machine.processes.processes.get(process_idx) {
-                    self.draw_process(crt, old_y, process, false, settings, current_uid);
-                }
-            }
-
-            // Redraw new selected row (add highlight)
-            let new_row = (self.selected - self.scroll_v) as usize;
-            let new_y = start_y + new_row as i32;
-            if new_row < self.cached_display_indices.len() {
-                let process_idx = self.cached_display_indices[new_row];
-                if let Some(process) = machine.processes.processes.get(process_idx) {
-                    self.draw_process(crt, new_y, process, true, settings, current_uid);
-                }
-            }
-        } else if self.needs_redraw || scroll_changed {
+        if self.needs_redraw {
             // Full redraw: draw all visible rows
             for i in 0..visible_height {
                 let display_idx = (self.scroll_v + i) as usize;
@@ -1494,12 +1482,45 @@ impl MainPanel {
                     }
                 }
             }
-        }
-        // else: nothing changed, no redraw needed
+        } else {
+            // Partial redraw: only redraw old and new selected rows
+            // This matches C htop Panel_draw() lines 309-332
+            //
+            // Even if old_selected == selected, we still redraw that row to handle
+            // any data changes (like CPU% updates) for the selected process.
+            
+            let old_in_range = self.old_selected >= self.scroll_v
+                && self.old_selected < self.scroll_v + visible_height;
+            let new_in_range =
+                self.selected >= self.scroll_v && self.selected < self.scroll_v + visible_height;
 
-        // Update tracking state for next draw
+            // Redraw old selected row (remove highlight) if in range and different from new
+            if old_in_range && self.old_selected != self.selected {
+                let old_row = (self.old_selected - self.scroll_v) as usize;
+                let old_y = start_y + old_row as i32;
+                if old_row < self.cached_display_indices.len() {
+                    let process_idx = self.cached_display_indices[old_row];
+                    if let Some(process) = machine.processes.processes.get(process_idx) {
+                        self.draw_process(crt, old_y, process, false, settings, current_uid);
+                    }
+                }
+            }
+
+            // Redraw new selected row (add highlight) if in range
+            if new_in_range {
+                let new_row = (self.selected - self.scroll_v) as usize;
+                let new_y = start_y + new_row as i32;
+                if new_row < self.cached_display_indices.len() {
+                    let process_idx = self.cached_display_indices[new_row];
+                    if let Some(process) = machine.processes.processes.get(process_idx) {
+                        self.draw_process(crt, new_y, process, true, settings, current_uid);
+                    }
+                }
+            }
+        }
+
+        // Update tracking state for next draw (matches C htop Panel_draw lines 341-343)
         self.old_selected = self.selected;
-        self.old_scroll_v = self.scroll_v;
         self.needs_redraw = false;
     }
 
@@ -1555,29 +1576,35 @@ impl MainPanel {
 
         match key {
             KEY_UP | 0x10 => {
-                // Up or Ctrl+P
+                // Up or Ctrl+P - does NOT set needsRedraw (matches C htop)
                 self.move_selection(-1, machine);
                 HandlerResult::Handled
             }
             KEY_DOWN | 0x0E => {
-                // Down or Ctrl+N
+                // Down or Ctrl+N - does NOT set needsRedraw (matches C htop)
                 self.move_selection(1, machine);
                 HandlerResult::Handled
             }
             KEY_PPAGE => {
-                self.move_selection(-(self.h - 2), machine);
+                // Page Up - uses PANEL_SCROLL macro in C htop which sets needsRedraw
+                let visible_height = if self.show_header { self.h - 1 } else { self.h };
+                self.scroll_wheel(-visible_height, machine);
                 HandlerResult::Handled
             }
             KEY_NPAGE => {
-                self.move_selection(self.h - 2, machine);
+                // Page Down - uses PANEL_SCROLL macro in C htop which sets needsRedraw
+                let visible_height = if self.show_header { self.h - 1 } else { self.h };
+                self.scroll_wheel(visible_height, machine);
                 HandlerResult::Handled
             }
             KEY_HOME => {
+                // Home - does NOT set needsRedraw in C htop
                 self.selected = 0;
                 self.scroll_v = 0;
                 HandlerResult::Handled
             }
             KEY_END => {
+                // End - does NOT set needsRedraw in C htop
                 let count = self.get_visible_count(machine);
                 self.selected = (count - 1).max(0);
                 self.ensure_visible(count);
@@ -1798,6 +1825,7 @@ impl MainPanel {
 
     /// Scroll by wheel amount (matches C htop PANEL_SCROLL macro)
     /// This moves BOTH selection AND scroll position by the given amount
+    /// Sets needs_redraw = true because the viewport scrolled
     pub fn scroll_wheel(&mut self, amount: i32, machine: &Machine) {
         let count = self.get_visible_count(machine);
         if count == 0 {
@@ -1814,8 +1842,9 @@ impl MainPanel {
         // Clamp selected to valid range
         self.selected = self.selected.clamp(0, count - 1);
 
-        // Ensure selection is still visible after scroll
-        self.ensure_visible(count);
+        // C htop PANEL_SCROLL macro sets needsRedraw = true
+        // because scrolling changes the viewport
+        self.needs_redraw = true;
     }
 
     /// Get count of visible processes
