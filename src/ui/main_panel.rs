@@ -341,13 +341,10 @@ impl MainPanel {
         sort_descending: bool,
         filter_active: bool,
     ) {
-        // Use selection color (yellow) for header when filter is active
-        // This provides visual feedback that the view is filtered
-        let header_attr = if filter_active {
-            crt.color(ColorElement::PanelSelectionFollow)
-        } else {
-            crt.color(ColorElement::PanelHeaderFocus)
-        };
+        // Normal header color (green)
+        let header_attr = crt.color(ColorElement::PanelHeaderFocus);
+        // Yellow for filter indicator on Command column
+        let filter_attr = crt.color(ColorElement::PanelSelectionFollow);
         let sort_attr = crt.color(ColorElement::PanelSelectionFocus);
 
         // Get active sort key and direction matching C htop's ScreenSettings_getActiveSortKey
@@ -380,8 +377,13 @@ impl MainPanel {
         for field in &self.fields {
             let title = field.title();
             let is_sort_column = *field == active_sort_key;
+            // Command column turns yellow when filter is active
+            let is_filter_column = filter_active && *field == ProcessField::Command;
+
             let attr = if is_sort_column {
                 sort_attr
+            } else if is_filter_column {
+                filter_attr
             } else {
                 header_attr
             };
