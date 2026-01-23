@@ -1373,14 +1373,24 @@ impl SetupScreen {
             let screen_y = y + 1 + i as i32;
             mv(screen_y, x);
 
-            if let Some(meters) = meters {
+                if let Some(meters) = meters {
                 if i < meters.len() {
                     let meter = &meters[i];
                     let is_selected = has_focus && i == selection;
 
                     // Get display name with mode
                     let display = meter_display_name(&meter.name, meter.mode);
-                    let display_text: String = display.chars().take((w - 1) as usize).collect();
+                    
+                    // Add moving indicator (↕) if this item is being moved
+                    let display_text = if is_selected && self.meters_moving {
+                        // Use UTF-8 up-down arrow like C htop
+                        let prefix = "↕ ";
+                        let max_len = (w - 1) as usize;
+                        let prefixed = format!("{}{}", prefix, display);
+                        prefixed.chars().take(max_len).collect::<String>()
+                    } else {
+                        display.chars().take((w - 1) as usize).collect::<String>()
+                    };
 
                     if is_selected {
                         attrset(selection_attr);
@@ -1610,7 +1620,15 @@ impl SetupScreen {
                     screen.heading.clone()
                 };
 
-                let display_text: String = display.chars().take((w - 1) as usize).collect();
+                // Add moving indicator (↕) if this item is being moved
+                let display_text = if is_selected && self.screens_moving && !self.screens_renaming {
+                    let prefix = "↕ ";
+                    let max_len = (w - 1) as usize;
+                    let prefixed = format!("{}{}", prefix, display);
+                    prefixed.chars().take(max_len).collect::<String>()
+                } else {
+                    display.chars().take((w - 1) as usize).collect::<String>()
+                };
 
                 if is_selected {
                     attrset(selection_attr);
@@ -1702,7 +1720,16 @@ impl SetupScreen {
                 let is_selected = has_focus && i == self.columns_selection;
 
                 let display = field.name().unwrap_or("?");
-                let display_text: String = display.chars().take((w - 1) as usize).collect();
+                
+                // Add moving indicator (↕) if this item is being moved
+                let display_text = if is_selected && self.columns_moving {
+                    let prefix = "↕ ";
+                    let max_len = (w - 1) as usize;
+                    let prefixed = format!("{}{}", prefix, display);
+                    prefixed.chars().take(max_len).collect::<String>()
+                } else {
+                    display.chars().take((w - 1) as usize).collect::<String>()
+                };
 
                 if is_selected {
                     attrset(selection_attr);
