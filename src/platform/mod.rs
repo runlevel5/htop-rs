@@ -153,5 +153,6 @@ pub fn scan(machine: &mut Machine) {
     scan_network_io(machine);
     scan_processes(machine);
     get_system_info(machine);
-    machine.update_processes();
+    // Note: update_processes() is now called by the UI layer after scan()
+    // so it can pass CommandStrParams for building merged command strings
 }

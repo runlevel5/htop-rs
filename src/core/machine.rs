@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use super::process::{Process, ProcessField, ProcessList};
+use super::process::{CommandStrParams, Process, ProcessField, ProcessList};
 
 /// Memory type alias (in bytes)
 pub type Memory = u64;
@@ -341,9 +341,9 @@ impl Machine {
     }
 
     /// Update the process list after scanning
-    pub fn update_processes(&mut self) {
-        // Clean up processes that no longer exist
-        self.processes.cleanup();
+    pub fn update_processes(&mut self, cmd_params: Option<&CommandStrParams>, tree_separator: &str) {
+        // Clean up processes that no longer exist and build command strings
+        self.processes.cleanup(cmd_params, tree_separator);
 
         // Note: Task counts (total_tasks, running_tasks, userland_threads, kernel_threads)
         // are set by the platform-specific scan_processes() function, not here.

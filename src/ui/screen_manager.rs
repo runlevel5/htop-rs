@@ -17,7 +17,7 @@ use super::header::Header;
 use super::main_panel::MainPanel;
 use super::panel::{HandlerResult, Panel};
 use super::Crt;
-use crate::core::{Machine, ProcessField, Settings};
+use crate::core::{CommandStrParams, Machine, ProcessField, Settings};
 use crate::platform;
 
 /// Convert SPDX license identifier to display string
@@ -100,6 +100,26 @@ impl ScreenManager {
             function_bar_hidden: false,
             header_needs_redraw: true,
             sort_timeout: 0,
+        }
+    }
+
+    /// Build CommandStrParams from current settings and CRT colors
+    fn build_command_str_params(&self, crt: &Crt) -> CommandStrParams {
+        CommandStrParams {
+            show_merged_command: self.settings.show_merged_command,
+            show_program_path: self.settings.show_program_path,
+            find_comm_in_cmdline: self.settings.find_comm_in_cmdline,
+            strip_exe_from_cmdline: self.settings.strip_exe_from_cmdline,
+            show_thread_names: self.settings.show_thread_names,
+            shadow_dist_path_prefix: self.settings.shadow_dist_path_prefix,
+            base_attr: crt.color(ColorElement::ProcessBasename),
+            comm_attr: crt.color(ColorElement::ProcessComm),
+            thread_base_attr: crt.color(ColorElement::ProcessThreadBasename),
+            thread_comm_attr: crt.color(ColorElement::ProcessThreadComm),
+            del_exe_attr: crt.color(ColorElement::FailedRead),
+            del_lib_attr: crt.color(ColorElement::ProcessTag),
+            separator_attr: crt.color(ColorElement::FailedRead),
+            shadow_attr: crt.color(ColorElement::ProcessShadow),
         }
     }
 
@@ -231,7 +251,8 @@ impl ScreenManager {
 
     /// Draw the incremental search/filter bar at the bottom of the screen
     /// Matches C htop IncSet_drawBar and FunctionBar_drawExtra
-    fn draw_inc_bar(&self, crt: &Crt, y: i32) {
+    /// Draw the incremental search/filter bar and return the ending x position
+    fn draw_inc_bar(&self, crt: &Crt, y: i32) -> i32 {
         let bar_color = crt.color(ColorElement::FunctionBar);
         let key_color = crt.color(ColorElement::FunctionKey);
         let width = crt.width();
@@ -247,41 +268,50 @@ impl ScreenManager {
         // Move back to start of line
         mv(y, 0);
 
+        let mut x = 0i32;
+
         if self.main_panel.inc_search.is_filter() {
             // Filter mode: "Enter" "Done  " "Esc" "Clear " "  " " Filter: " [text]
             // Draw "Enter" key
             attrset(key_color);
             let _ = addstr("Enter");
+            x += 5;
             attrset(A_NORMAL);
 
             // Draw "Done  " label
             attrset(bar_color);
             let _ = addstr("Done  ");
+            x += 6;
             attrset(A_NORMAL);
 
             // Draw "Esc" key
             attrset(key_color);
             let _ = addstr("Esc");
+            x += 3;
             attrset(A_NORMAL);
 
             // Draw "Clear " label
             attrset(bar_color);
             let _ = addstr("Clear ");
+            x += 6;
             attrset(A_NORMAL);
 
             // Draw "  " spacer (acts as visual separator)
             attrset(key_color);
             let _ = addstr("  ");
+            x += 2;
             attrset(A_NORMAL);
 
             // Draw " Filter: " label
             attrset(bar_color);
             let _ = addstr(" Filter: ");
+            x += 9;
             attrset(A_NORMAL);
 
             // Draw the filter text
             attrset(bar_color);
             let _ = addstr(&self.main_panel.inc_search.text);
+            x += self.main_panel.inc_search.text.len() as i32;
             attrset(A_NORMAL);
 
             // Show cursor
@@ -298,51 +328,62 @@ impl ScreenManager {
             // Draw "F3" key
             attrset(key_color);
             let _ = addstr("F3");
+            x += 2;
             attrset(A_NORMAL);
 
             // Draw "Next  " label
             attrset(bar_color);
             let _ = addstr("Next  ");
+            x += 6;
             attrset(A_NORMAL);
 
             // Draw "S-F3" key (Shift-F3)
             attrset(key_color);
             let _ = addstr("S-F3");
+            x += 4;
             attrset(A_NORMAL);
 
             // Draw "Prev   " label
             attrset(bar_color);
             let _ = addstr("Prev   ");
+            x += 7;
             attrset(A_NORMAL);
 
             // Draw "Esc" key
             attrset(key_color);
             let _ = addstr("Esc");
+            x += 3;
             attrset(A_NORMAL);
 
             // Draw "Cancel " label
             attrset(bar_color);
             let _ = addstr("Cancel ");
+            x += 7;
             attrset(A_NORMAL);
 
             // Draw "  " spacer
             attrset(key_color);
             let _ = addstr("  ");
+            x += 2;
             attrset(A_NORMAL);
 
             // Draw " Search: " label
             attrset(bar_color);
             let _ = addstr(" Search: ");
+            x += 9;
             attrset(A_NORMAL);
 
             // Draw the search text (with failed search color if not found)
             attrset(text_attr);
             let _ = addstr(&self.main_panel.inc_search.text);
+            x += self.main_panel.inc_search.text.len() as i32;
             attrset(A_NORMAL);
 
             // Show cursor
             curs_set(CURSOR_VISIBILITY::CURSOR_VISIBLE);
         }
+
+        x
     }
 
     /// Draw the entire screen
@@ -379,13 +420,22 @@ impl ScreenManager {
 
         if show_function_bar {
             let y = crt.height() - 1;
-            if self.main_panel.inc_search.active {
+            let end_x = if self.main_panel.inc_search.active {
                 // Draw search/filter bar
-                self.draw_inc_bar(crt, y);
+                self.draw_inc_bar(crt, y)
             } else {
                 // Draw normal function bar and hide cursor
-                self.main_panel.function_bar.draw_simple(crt, y);
+                let x = self.main_panel.function_bar.draw_simple_return_x(crt, y);
                 curs_set(CURSOR_VISIBILITY::CURSOR_INVISIBLE);
+                x
+            };
+
+            // If paused, append "PAUSED" indicator (like C htop MainPanel_drawFunctionBar)
+            if self.paused {
+                let paused_color = crt.color(ColorElement::Paused);
+                ncurses::attrset(paused_color);
+                let _ = ncurses::mvaddstr(y, end_x + 1, "PAUSED");
+                ncurses::attrset(ncurses::A_NORMAL);
             }
         }
 
@@ -415,6 +465,8 @@ impl ScreenManager {
 
         // Initial scan BEFORE layout so we know actual CPU count for meter heights
         platform::scan(machine);
+        let cmd_params = self.build_command_str_params(crt);
+        machine.update_processes(Some(&cmd_params), crt.tree_str.vert);
         self.header.update(machine);
         self.last_update = Instant::now();
 
@@ -468,6 +520,8 @@ impl ScreenManager {
 
                 // Perform platform scan to update system state
                 platform::scan(machine);
+                let cmd_params = self.build_command_str_params(crt);
+                machine.update_processes(Some(&cmd_params), crt.tree_str.vert);
 
                 // Build tree if in tree view mode
                 if self.settings.tree_view {
@@ -818,9 +872,14 @@ impl ScreenManager {
                     screen.direction = -screen.direction;
                     machine.sort_descending = !machine.sort_descending;
                     self.settings.sort_descending = machine.sort_descending;
-                    machine.request_sort();
+                    // Sort immediately so the display updates right away
+                    let ascending = !machine.sort_descending;
+                    machine.processes.sort_by(machine.sort_key, ascending);
                 }
                 self.settings.changed = true;
+                // Process order changed, need full redraw
+                self.main_panel.invalidate_display_list();
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x4B => {
@@ -841,28 +900,44 @@ impl ScreenManager {
                 // 'M' - sort by MEM%
                 machine.sort_key = ProcessField::PercentMem;
                 machine.sort_descending = true;
-                machine.request_sort();
+                // Sort immediately so the display updates right away
+                machine.processes.sort_by(machine.sort_key, false);
+                // Process order changed, need full redraw
+                self.main_panel.invalidate_display_list();
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x4E => {
                 // 'N' - sort by PID
                 machine.sort_key = ProcessField::Pid;
                 machine.sort_descending = false;
-                machine.request_sort();
+                // Sort immediately so the display updates right away
+                machine.processes.sort_by(machine.sort_key, true);
+                // Process order changed, need full redraw
+                self.main_panel.invalidate_display_list();
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x50 => {
                 // 'P' - sort by CPU%
                 machine.sort_key = ProcessField::PercentCpu;
                 machine.sort_descending = true;
-                machine.request_sort();
+                // Sort immediately so the display updates right away
+                machine.processes.sort_by(machine.sort_key, false);
+                // Process order changed, need full redraw
+                self.main_panel.invalidate_display_list();
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x54 => {
                 // 'T' - sort by TIME
                 machine.sort_key = ProcessField::Time;
                 machine.sort_descending = true;
-                machine.request_sort();
+                // Sort immediately so the display updates right away
+                machine.processes.sort_by(machine.sort_key, false);
+                // Process order changed, need full redraw
+                self.main_panel.invalidate_display_list();
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x55 => {
@@ -918,12 +993,22 @@ impl ScreenManager {
                 // 'm' - toggle merged command (like C htop actionToggleMergedCommand)
                 self.settings.show_merged_command = !self.settings.show_merged_command;
                 self.settings.changed = true;
+                // Rebuild command strings immediately with new setting
+                let cmd_params = self.build_command_str_params(crt);
+                machine.update_processes(Some(&cmd_params), crt.tree_str.vert);
+                // Display format changed, need full redraw
+                self.main_panel.invalidate_display_list();
                 return HandlerResult::Handled;
             }
             0x70 => {
                 // 'p' - Toggle program path (like C htop actionToggleProgramPath)
                 self.settings.show_program_path = !self.settings.show_program_path;
                 self.settings.changed = true;
+                // Rebuild command strings immediately with new setting
+                let cmd_params = self.build_command_str_params(crt);
+                machine.update_processes(Some(&cmd_params), crt.tree_str.vert);
+                // Display format changed, need full redraw
+                self.main_panel.invalidate_display_list();
                 return HandlerResult::Handled;
             }
             0x73 => {

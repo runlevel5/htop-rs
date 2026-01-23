@@ -128,6 +128,12 @@ impl FunctionBar {
 
     /// Draw the function bar without settings (backward compatibility)
     pub fn draw_simple(&self, crt: &Crt, y: i32) {
+        self.draw_simple_return_x(crt, y);
+    }
+
+    /// Draw the function bar and return the ending x position
+    /// This allows appending additional content (like "PAUSED") after the bar
+    pub fn draw_simple_return_x(&self, crt: &Crt, y: i32) -> i32 {
         let width = crt.width();
         let bar_color = crt.color(ColorElement::FunctionBar);
         let key_color = crt.color(ColorElement::FunctionKey);
@@ -158,6 +164,7 @@ impl FunctionBar {
             x += label.len() as i32;
         }
         attrset(A_NORMAL);
+        x
     }
 }
 

@@ -400,12 +400,21 @@ impl ProcessField {
     }
 }
 
+/// Command line highlight flags - matches C htop's CMDLINE_HIGHLIGHT_FLAG_* constants
+pub mod highlight_flags {
+    pub const SEPARATOR: u32 = 0x00000001;
+    pub const BASENAME: u32 = 0x00000002;
+    pub const COMM: u32 = 0x00000004;
+    pub const DELETED: u32 = 0x00000008;
+    pub const PREFIXDIR: u32 = 0x00000010;
+}
+
 /// Command line highlight information
 #[derive(Debug, Clone, Default)]
 pub struct CmdlineHighlight {
     pub offset: usize,
     pub length: usize,
-    pub attr: i32,
+    pub attr: u32,
     pub flags: u32,
 }
 
@@ -798,6 +807,664 @@ impl Process {
             format!("{}:{:02}.{:02}", minutes, seconds, centiseconds)
         }
     }
+
+    /// Build the merged command string and highlights
+    /// This matches C htop's Process_makeCommandStr() function
+    ///
+    /// The merged command format depends on settings:
+    /// - When showMergedCommand is true and we have exe: exe│comm│cmdline (with separators)
+    /// - When showMergedCommand is false: just cmdline with optional comm prefix
+    pub fn make_command_str(&mut self, params: &CommandStrParams, tree_separator: &str) {
+        // Skip kernel threads
+        if self.is_kernel_thread {
+            return;
+        }
+        // Skip zombies that we haven't seen before
+        if self.state == ProcessState::Zombie && self.merged_command.str_value.is_none() {
+            return;
+        }
+
+        // Select thread-specific colors if this is a thread (matches C htop behavior)
+        let base_attr = if self.is_thread() {
+            params.thread_base_attr
+        } else {
+            params.base_attr
+        };
+        let comm_attr = if self.is_thread() {
+            params.thread_comm_attr
+        } else {
+            params.comm_attr
+        };
+
+        // Reset highlights
+        self.merged_command.highlights.clear();
+
+        let cmdline = self.cmdline.as_deref().unwrap_or("(zombie)");
+        let proc_comm = self.comm.as_deref();
+        let proc_exe = self.exe.as_deref();
+
+        let cmdline_basename_start = self.cmdline_basename_start;
+        let cmdline_basename_len = if self.cmdline_basename_end > self.cmdline_basename_start {
+            self.cmdline_basename_end - self.cmdline_basename_start
+        } else {
+            0
+        };
+
+        let exe_basename_offset = self.exe_basename_offset;
+        let exe_basename_len = proc_exe.map(|e| e.len() - exe_basename_offset).unwrap_or(0);
+
+        // Calculate match length for stripping exe from cmdline
+        let mut match_len = if let (Some(exe), Some(cl)) = (proc_exe, self.cmdline.as_deref()) {
+            Self::match_cmdline_prefix_with_exe_suffix(
+                cl,
+                cmdline_basename_start,
+                exe,
+                exe_basename_offset,
+                exe_basename_len,
+            )
+        } else {
+            0
+        };
+
+        // Build the command string
+        let mut result = String::with_capacity(
+            cmdline.len()
+                + proc_comm.map(|c| c.len()).unwrap_or(0)
+                + proc_exe.map(|e| e.len()).unwrap_or(0)
+                + 2 * tree_separator.len()
+                + 1,
+        );
+
+        // Track multi-byte character offset mismatch (separator is multi-byte but counts as 1 char for highlighting)
+        let separator_len = tree_separator.len();
+        let mut mb_mismatch: usize = 0;
+
+        // Macro-like closure to add a highlight
+        let add_highlight =
+            |highlights: &mut Vec<CmdlineHighlight>,
+             str_pos: usize,
+             offset: usize,
+             length: usize,
+             attr: u32,
+             flags: u32,
+             mb_mismatch: usize| {
+                highlights.push(CmdlineHighlight {
+                    offset: str_pos + offset - mb_mismatch,
+                    length,
+                    attr,
+                    flags,
+                });
+            };
+
+        // Case 1: Fallback to cmdline (no merged command or missing exe/comm)
+        if !params.show_merged_command || proc_exe.is_none() || proc_comm.is_none() {
+            // Check if we should show comm as prefix
+            if (params.show_merged_command
+                || (self.is_userland_thread && params.show_thread_names))
+                && proc_comm.is_some()
+            {
+                let comm = proc_comm.unwrap();
+                if !comm.is_empty() {
+                    let cmdline_base = &cmdline[cmdline_basename_start..];
+                    let cmp_len = comm.len().min(TASK_COMM_LEN - 1);
+                    if !cmdline_base.starts_with(&comm[..cmp_len]) {
+                        // comm differs from cmdline basename - show comm prefix
+                        add_highlight(
+                            &mut self.merged_command.highlights,
+                            result.len(),
+                            0,
+                            comm.len(),
+                            comm_attr,
+                            highlight_flags::COMM,
+                            mb_mismatch,
+                        );
+                        result.push_str(comm);
+
+                        if !params.show_merged_command {
+                            // Not showing merged command, just comm prefix
+                            self.merged_command.str_value = Some(result);
+                            return;
+                        }
+
+                        // Add separator
+                        add_highlight(
+                            &mut self.merged_command.highlights,
+                            result.len(),
+                            0,
+                            1,
+                            params.separator_attr,
+                            highlight_flags::SEPARATOR,
+                            mb_mismatch,
+                        );
+                        mb_mismatch += separator_len - 1;
+                        result.push_str(tree_separator);
+                    }
+                }
+            }
+
+            // Add dist path prefix shadow if enabled
+            if params.shadow_dist_path_prefix && params.show_program_path {
+                if let Some(prefix_len) = Self::get_dist_path_prefix_len(cmdline) {
+                    add_highlight(
+                        &mut self.merged_command.highlights,
+                        result.len(),
+                        0,
+                        prefix_len,
+                        params.shadow_attr,
+                        highlight_flags::PREFIXDIR,
+                        mb_mismatch,
+                    );
+                }
+            }
+
+            // Add basename highlight
+            if cmdline_basename_len > 0 {
+                let hl_offset = if params.show_program_path {
+                    cmdline_basename_start
+                } else {
+                    0
+                };
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    hl_offset,
+                    cmdline_basename_len,
+                    base_attr,
+                    highlight_flags::BASENAME,
+                    mb_mismatch,
+                );
+
+                // Add deleted exe highlight
+                if self.exe_deleted {
+                    add_highlight(
+                        &mut self.merged_command.highlights,
+                        result.len(),
+                        hl_offset,
+                        cmdline_basename_len,
+                        params.del_exe_attr,
+                        highlight_flags::DELETED,
+                        mb_mismatch,
+                    );
+                } else if self.uses_deleted_lib {
+                    add_highlight(
+                        &mut self.merged_command.highlights,
+                        result.len(),
+                        hl_offset,
+                        cmdline_basename_len,
+                        params.del_lib_attr,
+                        highlight_flags::DELETED,
+                        mb_mismatch,
+                    );
+                }
+            }
+
+            // Append cmdline (from basename start if not showing path)
+            let cmdline_to_append = if params.show_program_path {
+                cmdline
+            } else {
+                &cmdline[cmdline_basename_start.min(cmdline.len())..]
+            };
+            // Convert newlines to spaces
+            for c in cmdline_to_append.chars() {
+                result.push(if c == '\n' { ' ' } else { c });
+            }
+
+            self.merged_command.str_value = Some(result);
+            return;
+        }
+
+        // Case 2: Full merged command with exe
+        let exe = proc_exe.unwrap();
+        let comm = proc_comm.unwrap();
+
+        // Check if comm is in exe basename
+        let mut have_comm_in_exe = false;
+        if !self.is_userland_thread || params.show_thread_names {
+            let exe_basename = &exe[exe_basename_offset..];
+            let cmp_len = comm.len().min(TASK_COMM_LEN - 1);
+            have_comm_in_exe = exe_basename.starts_with(&comm[..cmp_len]);
+        }
+
+        let comm_len = if have_comm_in_exe { exe_basename_len } else { 0 };
+
+        // Check if comm is in cmdline
+        let mut have_comm_in_cmdline = false;
+        let mut comm_start: usize = 0;
+        let mut comm_len_cmdline: usize = 0;
+
+        if !have_comm_in_exe
+            && self.cmdline.is_some()
+            && params.find_comm_in_cmdline
+            && (!self.is_userland_thread || params.show_thread_names)
+        {
+            if let Some((start, len)) =
+                Self::find_comm_in_cmdline(comm, cmdline, cmdline_basename_start)
+            {
+                have_comm_in_cmdline = true;
+                comm_start = start;
+                comm_len_cmdline = len;
+            }
+        }
+
+        // Strip exe from cmdline if enabled
+        if !params.strip_exe_from_cmdline {
+            match_len = 0;
+        }
+
+        let cmdline_remainder = if match_len > 0 {
+            // Adjust comm_start if we're stripping
+            if have_comm_in_cmdline {
+                if comm_start == cmdline_basename_start {
+                    have_comm_in_exe = true;
+                    have_comm_in_cmdline = false;
+                } else if comm_start >= match_len {
+                    comm_start -= match_len;
+                }
+            }
+            &cmdline[match_len..]
+        } else {
+            cmdline
+        };
+
+        // Start with copying exe
+        if params.show_program_path {
+            // Add dist path prefix shadow
+            if params.shadow_dist_path_prefix {
+                if let Some(prefix_len) = Self::get_dist_path_prefix_len(exe) {
+                    add_highlight(
+                        &mut self.merged_command.highlights,
+                        result.len(),
+                        0,
+                        prefix_len,
+                        params.shadow_attr,
+                        highlight_flags::PREFIXDIR,
+                        mb_mismatch,
+                    );
+                }
+            }
+            // Comm highlight in exe
+            if have_comm_in_exe {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    exe_basename_offset,
+                    comm_len,
+                    comm_attr,
+                    highlight_flags::COMM,
+                    mb_mismatch,
+                );
+            }
+            // Basename highlight
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                exe_basename_offset,
+                exe_basename_len,
+                base_attr,
+                highlight_flags::BASENAME,
+                mb_mismatch,
+            );
+            // Deleted highlight
+            if self.exe_deleted {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    exe_basename_offset,
+                    exe_basename_len,
+                    params.del_exe_attr,
+                    highlight_flags::DELETED,
+                    mb_mismatch,
+                );
+            } else if self.uses_deleted_lib {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    exe_basename_offset,
+                    exe_basename_len,
+                    params.del_lib_attr,
+                    highlight_flags::DELETED,
+                    mb_mismatch,
+                );
+            }
+            result.push_str(exe);
+        } else {
+            // Just basename
+            let exe_basename = &exe[exe_basename_offset..];
+            if have_comm_in_exe {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    0,
+                    comm_len,
+                    comm_attr,
+                    highlight_flags::COMM,
+                    mb_mismatch,
+                );
+            }
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                0,
+                exe_basename_len,
+                base_attr,
+                highlight_flags::BASENAME,
+                mb_mismatch,
+            );
+            if self.exe_deleted {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    0,
+                    exe_basename_len,
+                    params.del_exe_attr,
+                    highlight_flags::DELETED,
+                    mb_mismatch,
+                );
+            } else if self.uses_deleted_lib {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    0,
+                    exe_basename_len,
+                    params.del_lib_attr,
+                    highlight_flags::DELETED,
+                    mb_mismatch,
+                );
+            }
+            result.push_str(exe_basename);
+        }
+
+        // Add comm as separate field if not found in exe or cmdline
+        let mut have_comm_field = false;
+        if !have_comm_in_exe
+            && !have_comm_in_cmdline
+            && (!self.is_userland_thread || params.show_thread_names)
+        {
+            // Add separator
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                0,
+                1,
+                params.separator_attr,
+                highlight_flags::SEPARATOR,
+                mb_mismatch,
+            );
+            mb_mismatch += separator_len - 1;
+            result.push_str(tree_separator);
+
+            // Add comm highlight
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                0,
+                comm.len(),
+                comm_attr,
+                highlight_flags::COMM,
+                mb_mismatch,
+            );
+            result.push_str(comm);
+            have_comm_field = true;
+        }
+
+        // Add separator before cmdline if needed
+        if match_len == 0 || (have_comm_field && !cmdline_remainder.is_empty()) {
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                0,
+                1,
+                params.separator_attr,
+                highlight_flags::SEPARATOR,
+                mb_mismatch,
+            );
+            mb_mismatch += separator_len - 1;
+            result.push_str(tree_separator);
+        }
+
+        // Add dist path prefix shadow for cmdline
+        if params.shadow_dist_path_prefix {
+            if let Some(prefix_len) = Self::get_dist_path_prefix_len(cmdline_remainder) {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    0,
+                    prefix_len,
+                    params.shadow_attr,
+                    highlight_flags::PREFIXDIR,
+                    mb_mismatch,
+                );
+            }
+        }
+
+        // Add comm highlight in cmdline if found there
+        if !have_comm_in_exe
+            && have_comm_in_cmdline
+            && !have_comm_field
+            && (!self.is_userland_thread || params.show_thread_names)
+        {
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                comm_start,
+                comm_len_cmdline,
+                comm_attr,
+                highlight_flags::COMM,
+                mb_mismatch,
+            );
+        }
+
+        // Append remaining cmdline
+        if !cmdline_remainder.is_empty() {
+            for c in cmdline_remainder.chars() {
+                result.push(if c == '\n' { ' ' } else { c });
+            }
+        }
+
+        self.merged_command.str_value = Some(result);
+    }
+
+    /// Match cmdline prefix with exe suffix to determine how much to strip
+    /// Returns the number of bytes to strip from cmdline if they match, 0 otherwise
+    fn match_cmdline_prefix_with_exe_suffix(
+        cmdline: &str,
+        cmdline_basename_start: usize,
+        exe: &str,
+        exe_base_offset: usize,
+        exe_base_len: usize,
+    ) -> usize {
+        if cmdline.is_empty() || exe.is_empty() {
+            return 0;
+        }
+
+        // Case 1: cmdline prefix is an absolute path - must match whole exe
+        if cmdline.starts_with('/') {
+            let match_len = exe_base_len + exe_base_offset;
+            if cmdline.len() >= match_len && cmdline.starts_with(exe) {
+                let delim = cmdline.chars().nth(match_len).unwrap_or('\0');
+                if delim == '\0' || delim == '\n' || delim == ' ' {
+                    return match_len;
+                }
+            }
+            return 0;
+        }
+
+        // Case 2: cmdline prefix is a relative path
+        let exe_basename = &exe[exe_base_offset..];
+        let mut cmdline_base_offset = cmdline_basename_start;
+        let mut delim_found = true;
+
+        while delim_found {
+            // Match basename
+            let match_len = exe_base_len + cmdline_base_offset;
+            if cmdline_base_offset < exe_base_offset
+                && cmdline.len() >= cmdline_base_offset + exe_base_len
+            {
+                let cmdline_segment =
+                    &cmdline[cmdline_base_offset..cmdline_base_offset + exe_base_len];
+                if cmdline_segment == exe_basename {
+                    let delim = cmdline.chars().nth(match_len).unwrap_or('\0');
+                    if delim == '\0' || delim == '\n' || delim == ' ' {
+                        // Reverse match the cmdline prefix with exe suffix
+                        let mut i = cmdline_base_offset;
+                        let mut j = exe_base_offset;
+                        let cmdline_bytes = cmdline.as_bytes();
+                        let exe_bytes = exe.as_bytes();
+
+                        while i >= 1 && j >= 1 && cmdline_bytes[i - 1] == exe_bytes[j - 1] {
+                            i -= 1;
+                            j -= 1;
+                        }
+
+                        // Full match with exe suffix being a valid relative path
+                        if i < 1 && j >= 1 && exe_bytes[j - 1] == b'/' {
+                            return match_len;
+                        }
+                    }
+                }
+            }
+
+            // Try to find previous potential cmdlineBaseOffset
+            delim_found = false;
+            if cmdline_base_offset <= 2 {
+                return 0;
+            }
+
+            let cmdline_bytes = cmdline.as_bytes();
+            cmdline_base_offset -= 2;
+            while cmdline_base_offset > 0 {
+                if delim_found {
+                    if cmdline_bytes[cmdline_base_offset - 1] == b'/' {
+                        break;
+                    }
+                } else if cmdline_bytes[cmdline_base_offset] == b' '
+                    || cmdline_bytes[cmdline_base_offset] == b'\n'
+                {
+                    delim_found = true;
+                }
+                cmdline_base_offset -= 1;
+            }
+        }
+
+        0
+    }
+
+    /// Try to find comm within cmdline arguments
+    /// Returns Some((start_offset, length)) if found, None otherwise
+    fn find_comm_in_cmdline(
+        comm: &str,
+        cmdline: &str,
+        cmdline_basename_start: usize,
+    ) -> Option<(usize, usize)> {
+        let comm_len = comm.len();
+        if comm_len == 0 || cmdline_basename_start >= cmdline.len() {
+            return None;
+        }
+
+        let search_area = &cmdline[cmdline_basename_start..];
+        let mut pos = cmdline_basename_start;
+
+        // Iterate through tokens (space-separated, treating newlines as separators too)
+        for token in search_area.split(|c| c == ' ' || c == '\n') {
+            if token.is_empty() {
+                pos += 1; // Account for the separator
+                continue;
+            }
+
+            // Find basename of this token
+            let token_basename = if let Some(slash_pos) = token.rfind('/') {
+                &token[slash_pos + 1..]
+            } else {
+                token
+            };
+
+            let token_len = token_basename.len();
+            let basename_offset = token.len() - token_basename.len();
+
+            // Check if this token matches comm
+            let matches = if token_len == comm_len {
+                token_basename == comm
+            } else if token_len > comm_len && comm_len == TASK_COMM_LEN - 1 {
+                token_basename.starts_with(comm)
+            } else {
+                false
+            };
+
+            if matches {
+                return Some((pos + basename_offset, token_len));
+            }
+
+            pos += token.len() + 1; // +1 for separator
+        }
+
+        None
+    }
+
+    /// Get distribution path prefix length for shadowing
+    /// Returns the length of common distribution paths like /usr/bin/, /lib/, etc.
+    fn get_dist_path_prefix_len(path: &str) -> Option<usize> {
+        if !path.starts_with('/') {
+            return None;
+        }
+
+        const PREFIXES: &[&str] = &[
+            "/bin/",
+            "/lib/",
+            "/lib32/",
+            "/lib64/",
+            "/libx32/",
+            "/sbin/",
+            "/usr/bin/",
+            "/usr/libexec/",
+            "/usr/lib/",
+            "/usr/lib32/",
+            "/usr/lib64/",
+            "/usr/libx32/",
+            "/usr/local/bin/",
+            "/usr/local/lib/",
+            "/usr/local/sbin/",
+            "/usr/sbin/",
+            "/run/current-system/",
+        ];
+
+        for prefix in PREFIXES {
+            if path.starts_with(prefix) {
+                return Some(prefix.len());
+            }
+        }
+
+        // Special case for NixOS store paths
+        if let Some(rest) = path.strip_prefix("/nix/store/") {
+            if let Some(pos) = rest.find('/') {
+                return Some("/nix/store/".len() + pos + 1);
+            }
+        }
+
+        None
+    }
+}
+
+/// Linux TASK_COMM_LEN is 16, so comm is truncated to 15 chars + NUL
+const TASK_COMM_LEN: usize = 16;
+
+/// Parameters for building the command string
+/// This avoids circular dependencies with Settings
+#[derive(Debug, Clone)]
+pub struct CommandStrParams {
+    pub show_merged_command: bool,
+    pub show_program_path: bool,
+    pub find_comm_in_cmdline: bool,
+    pub strip_exe_from_cmdline: bool,
+    pub show_thread_names: bool,
+    pub shadow_dist_path_prefix: bool,
+    pub base_attr: u32,
+    pub comm_attr: u32,
+    pub thread_base_attr: u32,
+    pub thread_comm_attr: u32,
+    pub del_exe_attr: u32,
+    pub del_lib_attr: u32,
+    pub separator_attr: u32,
+    pub shadow_attr: u32,
 }
 
 impl Default for Process {
@@ -852,15 +1519,19 @@ impl ProcessList {
     }
 
     /// Remove processes that weren't updated in the last scan
-    pub fn cleanup(&mut self) {
+    /// Also builds command strings for each process if params are provided
+    pub fn cleanup(&mut self, cmd_params: Option<&CommandStrParams>, tree_separator: &str) {
         self.processes.retain(|p| p.updated);
         // Rebuild the existence set
         self.by_pid.clear();
         for process in self.processes.iter() {
             self.by_pid.insert(process.pid);
         }
-        // Mark all as not updated for next scan
+        // Build command strings and mark as not updated for next scan
         for process in &mut self.processes {
+            if let Some(params) = cmd_params {
+                process.make_command_str(params, tree_separator);
+            }
             process.updated = false;
         }
     }

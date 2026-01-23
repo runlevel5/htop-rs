@@ -3150,6 +3150,8 @@ impl SetupScreen {
             if elapsed >= delay {
                 // Scan machine for updated system data
                 platform::scan(machine);
+                // In setup screen, we don't need merged command strings
+                machine.update_processes(None, "│");
 
                 // Always update header meters to avoid gaps in graph meters
                 // This matches C htop's checkRecalculation() which always calls Header_updateData()
