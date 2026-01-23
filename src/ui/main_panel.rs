@@ -357,6 +357,9 @@ pub struct MainPanel {
 
     // PID search
     pub pid_search: Option<String>,
+
+    // Cached count of visible processes (updated in draw)
+    visible_count: i32,
 }
 
 impl MainPanel {
@@ -395,6 +398,7 @@ impl MainPanel {
             needs_redraw: true,
             wrap_command: false,
             pid_search: None,
+            visible_count: 0,
         }
     }
 
@@ -1395,6 +1399,7 @@ impl MainPanel {
         };
 
         let process_count = processes.len() as i32;
+        self.visible_count = process_count; // Cache for use in on_key
         self.ensure_visible(process_count);
 
         // Get current user ID for highlighting
@@ -1506,6 +1511,7 @@ impl MainPanel {
             KEY_END => {
                 let count = self.get_visible_count(machine);
                 self.selected = (count - 1).max(0);
+                self.ensure_visible(count);
                 HandlerResult::Handled
             }
             KEY_F3 | 0x2F => {
@@ -1733,15 +1739,26 @@ impl MainPanel {
 
         // Clamp selected to valid range
         self.selected = self.selected.clamp(0, count - 1);
+
+        // Ensure selection is still visible after scroll
+        self.ensure_visible(count);
     }
 
     /// Get count of visible processes
+    /// Uses cached count from last draw() which includes all filtering
     fn get_visible_count(&self, machine: &Machine) -> i32 {
-        machine
-            .processes
-            .iter()
-            .filter(|p| self.matches_filter(p))
-            .count() as i32
+        // Use cached count if available (set in draw())
+        // This ensures we use the same filtering as draw()
+        if self.visible_count > 0 {
+            self.visible_count
+        } else {
+            // Fallback: count with text filter only (before first draw)
+            machine
+                .processes
+                .iter()
+                .filter(|p| self.matches_filter(p))
+                .count() as i32
+        }
     }
 
     /// Get the currently selected process
