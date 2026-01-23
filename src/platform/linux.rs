@@ -495,23 +495,8 @@ pub fn scan_processes(machine: &mut Machine) {
         }
 
         // IO statistics (requires root or same user)
-        if let Ok(io) = proc.io() {
-            let prev_read = process.io_read_bytes;
-            let prev_write = process.io_write_bytes;
-
-            process.io_read_bytes = io.read_bytes;
-            process.io_write_bytes = io.write_bytes;
-
-            if !is_new && time_delta > 0.0 {
-                if process.io_read_bytes >= prev_read {
-                    process.io_read_rate = (process.io_read_bytes - prev_read) as f64 / time_delta;
-                }
-                if process.io_write_bytes >= prev_write {
-                    process.io_write_rate =
-                        (process.io_write_bytes - prev_write) as f64 / time_delta;
-                }
-            }
-        }
+        // Read full /proc/[pid]/io data (more complete than procfs crate provides)
+        read_io_file(&mut process, pid, machine.realtime_ms, is_new);
 
         // Check for deleted libraries by scanning /proc/PID/maps
         // Only check if exe is not deleted (if exe is deleted, no need to check libs)
@@ -534,8 +519,27 @@ pub fn scan_processes(machine: &mut Machine) {
         // CGroup
         if let Ok(cgroups) = proc.cgroups() {
             if let Some(cgroup) = cgroups.0.first() {
-                process.cgroup = Some(cgroup.pathname.clone());
+                let cgroup_path = cgroup.pathname.clone();
+                // Generate compressed cgroup name and detect container
+                process.cgroup_short = Some(filter_cgroup_name(&cgroup_path));
+                process.container_short = filter_container(&cgroup_path);
+                process.cgroup = Some(cgroup_path);
             }
+        }
+
+        // Smaps data (PSS, Swap, SwapPss) - expensive, only read for non-kernel processes
+        // TODO: Could be optimized to only read when these columns are displayed
+        if !process.is_kernel_thread {
+            read_smaps_file(&mut process, pid);
+        }
+
+        // Autogroup data
+        read_autogroup(&mut process, pid);
+
+        // Library size from maps (expensive)
+        // TODO: Could be optimized to only read when M_LIB column is displayed
+        if !process.is_kernel_thread && !process.is_userland_thread {
+            read_maps_for_lib_size(&mut process, pid, page_size);
         }
 
         // Track max values for dynamic column widths
@@ -989,4 +993,385 @@ pub fn scan_network_io(machine: &mut Machine) {
     machine.net_io_packets_received = packets_received;
     machine.net_io_packets_transmitted = packets_transmitted;
     machine.net_io_last_update = now_ms;
+}
+
+/// Read /proc/[pid]/io for detailed IO statistics
+/// This matches C htop's LinuxProcessTable_readIoFile behavior
+fn read_io_file(process: &mut Process, pid: i32, realtime_ms: u64, is_new: bool) {
+    use std::io::{BufRead, BufReader};
+
+    let io_path = format!("/proc/{}/io", pid);
+    let file = match std::fs::File::open(&io_path) {
+        Ok(f) => f,
+        Err(_) => {
+            // Can't read IO file - mark all values as unavailable
+            process.io_rate_read_bps = f64::NAN;
+            process.io_rate_write_bps = f64::NAN;
+            process.io_rchar = u64::MAX;
+            process.io_wchar = u64::MAX;
+            process.io_syscr = u64::MAX;
+            process.io_syscw = u64::MAX;
+            process.io_read_bytes = u64::MAX;
+            process.io_write_bytes = u64::MAX;
+            process.io_cancelled_write_bytes = u64::MAX;
+            process.io_last_scan_time_ms = realtime_ms;
+            return;
+        }
+    };
+
+    // Store previous values for rate calculation
+    let last_read = process.io_read_bytes;
+    let last_write = process.io_write_bytes;
+    let time_delta = if process.io_last_scan_time_ms > 0 {
+        realtime_ms.saturating_sub(process.io_last_scan_time_ms)
+    } else {
+        0
+    };
+
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // Parse format: "key: value"
+        // Keys: rchar, wchar, syscr, syscw, read_bytes, write_bytes, cancelled_write_bytes
+        if let Some((key, value)) = line.split_once(':') {
+            let value = value.trim();
+            match key {
+                "rchar" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_rchar = v;
+                    }
+                }
+                "wchar" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_wchar = v;
+                    }
+                }
+                "syscr" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_syscr = v;
+                    }
+                }
+                "syscw" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_syscw = v;
+                    }
+                }
+                "read_bytes" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_read_bytes = v;
+                        // Calculate read rate
+                        if !is_new && time_delta > 0 && v >= last_read {
+                            process.io_rate_read_bps =
+                                (v - last_read) as f64 * 1000.0 / time_delta as f64;
+                            process.io_read_rate = process.io_rate_read_bps; // Legacy alias
+                        } else if is_new {
+                            process.io_rate_read_bps = f64::NAN;
+                        }
+                    }
+                }
+                "write_bytes" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_write_bytes = v;
+                        // Calculate write rate
+                        if !is_new && time_delta > 0 && v >= last_write {
+                            process.io_rate_write_bps =
+                                (v - last_write) as f64 * 1000.0 / time_delta as f64;
+                            process.io_write_rate = process.io_rate_write_bps; // Legacy alias
+                        } else if is_new {
+                            process.io_rate_write_bps = f64::NAN;
+                        }
+                    }
+                }
+                "cancelled_write_bytes" => {
+                    if let Ok(v) = value.parse::<u64>() {
+                        process.io_cancelled_write_bytes = v;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    process.io_last_scan_time_ms = realtime_ms;
+}
+
+/// Read /proc/[pid]/smaps_rollup or /proc/[pid]/smaps for PSS, Swap, SwapPss
+/// This matches C htop's LinuxProcessTable_readSmapsFile behavior
+fn read_smaps_file(process: &mut Process, pid: i32) {
+    use std::io::{BufRead, BufReader};
+
+    // Try smaps_rollup first (faster, available since Linux 4.14)
+    let smaps_path = format!("/proc/{}/smaps_rollup", pid);
+    let file = match std::fs::File::open(&smaps_path) {
+        Ok(f) => f,
+        Err(_) => {
+            // Fall back to full smaps
+            let smaps_path = format!("/proc/{}/smaps", pid);
+            match std::fs::File::open(&smaps_path) {
+                Ok(f) => f,
+                Err(_) => return,
+            }
+        }
+    };
+
+    process.m_pss = 0;
+    process.m_swap = 0;
+    process.m_psswp = 0;
+
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // Parse lines like "Pss:           1234 kB"
+        if line.starts_with("Pss:") {
+            if let Some(value) = parse_smaps_value(&line, 4) {
+                process.m_pss += value;
+            }
+        } else if line.starts_with("Swap:") {
+            if let Some(value) = parse_smaps_value(&line, 5) {
+                process.m_swap += value;
+            }
+        } else if line.starts_with("SwapPss:") {
+            if let Some(value) = parse_smaps_value(&line, 8) {
+                process.m_psswp += value;
+            }
+        }
+    }
+}
+
+/// Parse a value from smaps line like "Pss:           1234 kB"
+fn parse_smaps_value(line: &str, skip: usize) -> Option<i64> {
+    line.get(skip..)?
+        .trim()
+        .split_whitespace()
+        .next()?
+        .parse::<i64>()
+        .ok()
+}
+
+/// Read /proc/[pid]/autogroup for autogroup ID and nice value
+/// This matches C htop's LinuxProcessTable_readAutogroup behavior
+fn read_autogroup(process: &mut Process, pid: i32) {
+    let autogroup_path = format!("/proc/{}/autogroup", pid);
+    let content = match std::fs::read_to_string(&autogroup_path) {
+        Ok(c) => c,
+        Err(_) => {
+            process.autogroup_id = -1;
+            return;
+        }
+    };
+
+    // Format: "/autogroup-123 nice 0"
+    process.autogroup_id = -1;
+    process.autogroup_nice = 0;
+
+    // Parse using sscanf-like approach
+    if content.starts_with("/autogroup-") {
+        let rest = &content[11..]; // Skip "/autogroup-"
+        let parts: Vec<&str> = rest.split_whitespace().collect();
+        if parts.len() >= 3 && parts[1] == "nice" {
+            if let Ok(id) = parts[0].parse::<i64>() {
+                process.autogroup_id = id;
+            }
+            if let Ok(nice) = parts[2].parse::<i32>() {
+                process.autogroup_nice = nice;
+            }
+        }
+    }
+}
+
+/// Read /proc/[pid]/maps to calculate library size (m_lib)
+/// This matches C htop's LinuxProcessTable_readMaps behavior for calcSize
+fn read_maps_for_lib_size(process: &mut Process, pid: i32, page_size_kb: i64) {
+    use std::collections::HashMap;
+    use std::io::{BufRead, BufReader};
+
+    let maps_path = format!("/proc/{}/maps", pid);
+    let file = match std::fs::File::open(&maps_path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+
+    // Track library sizes by inode to avoid counting duplicates
+    // Key: inode, Value: (size, is_executable)
+    let mut libs: HashMap<u64, (u64, bool)> = HashMap::new();
+
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        // Skip lines without a path (no '/')
+        if !line.contains('/') {
+            continue;
+        }
+
+        // Maps format: address perms offset dev inode pathname
+        // Example: 7f1234-7f5678 r-xp 00000000 08:01 12345 /lib/libc.so.6
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            continue;
+        }
+
+        // Parse address range
+        let addr_parts: Vec<&str> = parts[0].split('-').collect();
+        if addr_parts.len() != 2 {
+            continue;
+        }
+        let map_start = match u64::from_str_radix(addr_parts[0], 16) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let map_end = match u64::from_str_radix(addr_parts[1], 16) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // Check if executable (3rd char of perms)
+        let perms = parts[1];
+        let is_exec = perms.len() >= 3 && perms.chars().nth(2) == Some('x');
+
+        // Parse device (skip if 00:00 - no file backing)
+        let dev_parts: Vec<&str> = parts[3].split(':').collect();
+        if dev_parts.len() == 2 {
+            let devmaj = u32::from_str_radix(dev_parts[0], 16).unwrap_or(0);
+            let devmin = u32::from_str_radix(dev_parts[1], 16).unwrap_or(0);
+            if devmaj == 0 && devmin == 0 {
+                continue;
+            }
+        }
+
+        // Parse inode
+        let inode = match parts[4].parse::<u64>() {
+            Ok(v) if v > 0 => v,
+            _ => continue,
+        };
+
+        // Update library tracking
+        let entry = libs.entry(inode).or_insert((0, false));
+        entry.0 += map_end - map_start;
+        entry.1 |= is_exec;
+    }
+
+    // Sum up executable library sizes
+    let total_size: u64 = libs
+        .values()
+        .filter(|(_, is_exec)| *is_exec)
+        .map(|(size, _)| size)
+        .sum();
+
+    // Convert to KB (divide by page_size to get pages, then multiply by page_size_kb)
+    // Actually C htop divides by pageSize (in bytes), so we convert bytes to KB
+    process.m_lib = (total_size / 1024) as i64;
+}
+
+/// Filter and compress cgroup path for display
+/// This matches C htop's CGroup_filterName behavior
+pub fn filter_cgroup_name(cgroup: &str) -> String {
+    // Remove common prefixes and compress the path
+    let mut result = cgroup.to_string();
+
+    // Remove leading /
+    if result.starts_with('/') {
+        result = result[1..].to_string();
+    }
+
+    // Common patterns to compress (from C htop CGroupUtils.c)
+    // Remove "system.slice/" prefix
+    if result.starts_with("system.slice/") {
+        result = result.replacen("system.slice/", "", 1);
+    }
+    // Remove "user.slice/" prefix
+    if result.starts_with("user.slice/") {
+        result = result.replacen("user.slice/", "", 1);
+    }
+
+    // Truncate .service suffix
+    if let Some(pos) = result.find(".service") {
+        result.truncate(pos);
+    }
+
+    // Truncate .scope suffix
+    if let Some(pos) = result.find(".scope") {
+        result.truncate(pos);
+    }
+
+    result
+}
+
+/// Detect container name from cgroup path
+/// This matches C htop's CGroup_filterContainer behavior
+pub fn filter_container(cgroup: &str) -> Option<String> {
+    // Docker container detection
+    // Pattern: /docker/<container_id> or /system.slice/docker-<id>.scope
+    if cgroup.contains("/docker/") {
+        if let Some(id_start) = cgroup.rfind("/docker/") {
+            let id = &cgroup[id_start + 8..];
+            // Truncate to first 12 chars like docker does
+            let short_id = if id.len() > 12 { &id[..12] } else { id };
+            return Some(format!("docker:{}", short_id));
+        }
+    }
+
+    // Docker with systemd cgroup driver
+    // Pattern: docker-<id>.scope
+    if cgroup.contains("docker-") {
+        if let Some(start) = cgroup.find("docker-") {
+            let rest = &cgroup[start + 7..];
+            if let Some(end) = rest.find('.') {
+                let id = &rest[..end];
+                let short_id = if id.len() > 12 { &id[..12] } else { id };
+                return Some(format!("docker:{}", short_id));
+            }
+        }
+    }
+
+    // Podman container detection
+    if cgroup.contains("/libpod-") {
+        if let Some(start) = cgroup.find("/libpod-") {
+            let id = &cgroup[start + 8..];
+            let short_id = if id.len() > 12 { &id[..12] } else { id };
+            return Some(format!("podman:{}", short_id));
+        }
+    }
+
+    // LXC container detection
+    // Pattern: /lxc/<name> or /lxc.payload.<name>
+    if cgroup.contains("/lxc/") {
+        if let Some(start) = cgroup.rfind("/lxc/") {
+            let name = &cgroup[start + 5..];
+            let name = name.split('/').next().unwrap_or(name);
+            return Some(format!("lxc:{}", name));
+        }
+    }
+
+    if cgroup.contains("/lxc.payload.") {
+        if let Some(start) = cgroup.find("/lxc.payload.") {
+            let name = &cgroup[start + 13..];
+            let name = name.split('/').next().unwrap_or(name);
+            return Some(format!("lxc:{}", name));
+        }
+    }
+
+    // systemd-nspawn container detection
+    // Pattern: /machine.slice/machine-<name>.scope
+    if cgroup.contains("/machine.slice/machine-") {
+        if let Some(start) = cgroup.find("/machine.slice/machine-") {
+            let name = &cgroup[start + 23..];
+            if let Some(end) = name.find('.') {
+                return Some(format!("nspawn:{}", &name[..end]));
+            }
+        }
+    }
+
+    None
 }

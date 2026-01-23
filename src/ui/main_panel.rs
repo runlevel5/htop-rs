@@ -10,7 +10,7 @@ use super::row_print::{
     print_kbytes, print_left_aligned, print_percentage, print_time,
 };
 #[cfg(target_os = "linux")]
-use super::row_print::print_rate;
+use super::row_print::{print_bytes, print_count, print_rate};
 use super::Crt;
 use crate::core::{highlight_flags, FieldWidths, Machine, Process, ProcessField, ProcessState, Settings};
 #[cfg(target_os = "linux")]
@@ -909,28 +909,38 @@ impl MainPanel {
             #[cfg(target_os = "linux")]
             ProcessField::IORate => {
                 // Total I/O rate (read + write combined)
-                let total_rate = process.io_read_rate + process.io_write_rate;
+                let read_rate = if process.io_rate_read_bps.is_nan() { 0.0 } else { process.io_rate_read_bps };
+                let write_rate = if process.io_rate_write_bps.is_nan() { 0.0 } else { process.io_rate_write_bps };
+                let total_rate = read_rate + write_rate;
                 print_rate(str, total_rate, coloring && !is_shadowed, crt);
             }
             #[cfg(target_os = "linux")]
             ProcessField::IOReadRate => {
                 // I/O read rate in bytes per second
-                print_rate(str, process.io_read_rate, coloring && !is_shadowed, crt);
+                print_rate(str, process.io_rate_read_bps, coloring && !is_shadowed, crt);
             }
             #[cfg(target_os = "linux")]
             ProcessField::IOWriteRate => {
                 // I/O write rate in bytes per second
-                print_rate(str, process.io_write_rate, coloring && !is_shadowed, crt);
+                print_rate(str, process.io_rate_write_bps, coloring && !is_shadowed, crt);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Rbytes => {
-                // Total bytes read
-                print_kbytes(str, process.io_read_bytes, coloring && !is_shadowed, crt);
+                // Total bytes read (from io_read_bytes, in bytes)
+                if process.io_read_bytes == u64::MAX {
+                    str.append("  N/A ", shadow_color);
+                } else {
+                    print_bytes(str, process.io_read_bytes, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Wbytes => {
-                // Total bytes written
-                print_kbytes(str, process.io_write_bytes, coloring && !is_shadowed, crt);
+                // Total bytes written (from io_write_bytes, in bytes)
+                if process.io_write_bytes == u64::MAX {
+                    str.append("  N/A ", shadow_color);
+                } else {
+                    print_bytes(str, process.io_write_bytes, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::PercentIODelay => {
@@ -1208,28 +1218,48 @@ impl MainPanel {
             }
             #[cfg(target_os = "linux")]
             ProcessField::Rchar => {
-                // RCHAR: chars read (6 chars) - requires /proc/[pid]/io
-                str.append("  N/A ", shadow_color);
+                // RCHAR: chars read (6 chars) - from /proc/[pid]/io
+                if process.io_rchar == u64::MAX {
+                    str.append("  N/A ", shadow_color);
+                } else {
+                    print_bytes(str, process.io_rchar, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Wchar => {
-                // WCHAR: chars written (6 chars) - requires /proc/[pid]/io
-                str.append("  N/A ", shadow_color);
+                // WCHAR: chars written (6 chars) - from /proc/[pid]/io
+                if process.io_wchar == u64::MAX {
+                    str.append("  N/A ", shadow_color);
+                } else {
+                    print_bytes(str, process.io_wchar, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Syscr => {
-                // READ_SYSC: read syscalls (12 chars) - requires /proc/[pid]/io
-                str.append("         N/A ", shadow_color);
+                // READ_SYSC: read syscalls (12 chars) - from /proc/[pid]/io
+                if process.io_syscr == u64::MAX {
+                    str.append("         N/A ", shadow_color);
+                } else {
+                    print_count(str, process.io_syscr, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Syscw => {
-                // WRITE_SYSC: write syscalls (12 chars) - requires /proc/[pid]/io
-                str.append("         N/A ", shadow_color);
+                // WRITE_SYSC: write syscalls (12 chars) - from /proc/[pid]/io
+                if process.io_syscw == u64::MAX {
+                    str.append("         N/A ", shadow_color);
+                } else {
+                    print_count(str, process.io_syscw, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Cnclwb => {
-                // IO_C: cancelled write bytes (6 chars) - requires /proc/[pid]/io
-                str.append("  N/A ", shadow_color);
+                // IO_C: cancelled write bytes (6 chars) - from /proc/[pid]/io
+                if process.io_cancelled_write_bytes == u64::MAX {
+                    str.append("  N/A ", shadow_color);
+                } else {
+                    print_bytes(str, process.io_cancelled_write_bytes, coloring && !is_shadowed, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::CGroup => {
@@ -1244,23 +1274,47 @@ impl MainPanel {
             }
             #[cfg(target_os = "linux")]
             ProcessField::PercentCpuDelay => {
-                // CPUD%: CPU delay percentage (6 chars) - requires taskstats
-                str.append("  N/A ", shadow_color);
+                // CPUD%: CPU delay percentage (6 chars) - requires taskstats (netlink)
+                // This is complex to implement, keep as N/A for now
+                if process.cpu_delay_percent.is_nan() {
+                    str.append("  N/A ", shadow_color);
+                } else {
+                    str.append(&format!("{:>5.1} ", process.cpu_delay_percent), base_color);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::MPss => {
-                // PSS: proportional set size (6 chars) - requires /proc/[pid]/smaps
-                str.append("  N/A ", shadow_color);
+                // PSS: proportional set size (6 chars) - from /proc/[pid]/smaps
+                if process.m_pss < 0 {
+                    str.append("  N/A ", shadow_color);
+                } else if is_shadowed {
+                    str.append(&format!("{:>5} ", process.m_pss), shadow_color);
+                } else {
+                    print_kbytes(str, process.m_pss as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::MSwap => {
-                // SWAP: swap size (6 chars) - requires /proc/[pid]/smaps
-                str.append("  N/A ", shadow_color);
+                // SWAP: swap size (6 chars) - from /proc/[pid]/smaps
+                if process.m_swap < 0 {
+                    str.append("  N/A ", shadow_color);
+                } else if is_shadowed {
+                    str.append(&format!("{:>5} ", process.m_swap), shadow_color);
+                } else {
+                    print_kbytes(str, process.m_swap as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::MPsswp => {
-                // PSSWP: PSS + swap (7 chars) - requires /proc/[pid]/smaps
-                str.append("   N/A ", shadow_color);
+                // PSSWP: proportional swap share (7 chars) - from /proc/[pid]/smaps
+                if process.m_psswp < 0 {
+                    str.append("   N/A ", shadow_color);
+                } else if is_shadowed {
+                    str.append(&format!("{:>6} ", process.m_psswp), shadow_color);
+                } else {
+                    // Use 6-char width + space like other memory fields
+                    print_kbytes(str, process.m_psswp as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::Ctxt => {
@@ -1280,32 +1334,55 @@ impl MainPanel {
             }
             #[cfg(target_os = "linux")]
             ProcessField::AutogroupId => {
-                // AGRP: autogroup ID (4 chars) - requires /proc/[pid]/autogroup
-                str.append(" N/A ", shadow_color);
+                // AGRP: autogroup ID (4 chars) - from /proc/[pid]/autogroup
+                if process.autogroup_id == -1 {
+                    str.append(" N/A ", shadow_color);
+                } else {
+                    str.append(&format!("{:>4} ", process.autogroup_id), base_color);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::AutogroupNice => {
-                // ANI: autogroup nice (4 chars) - requires /proc/[pid]/autogroup
-                str.append(" N/A ", shadow_color);
+                // ANI: autogroup nice (4 chars) - from /proc/[pid]/autogroup
+                if process.autogroup_id == -1 {
+                    str.append("N/A ", shadow_color);
+                } else {
+                    // Color based on nice value (like regular nice)
+                    let color = if process.autogroup_nice < 0 {
+                        crt.color(ColorElement::ProcessHighPriority)
+                    } else if process.autogroup_nice > 0 {
+                        crt.color(ColorElement::ProcessLowPriority)
+                    } else {
+                        shadow_color
+                    };
+                    str.append(&format!("{:>3} ", process.autogroup_nice), color);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::CCGroup => {
                 // CGROUP (compressed) (19 chars)
-                // Show compressed version of cgroup (last component)
-                let cgroup = process.cgroup.as_deref().unwrap_or("?");
-                // Get last component of cgroup path for compressed display
-                let compressed = cgroup.rsplit('/').next().unwrap_or(cgroup);
+                // Use the pre-computed cgroup_short from parsing
+                let compressed = process.cgroup_short.as_deref()
+                    .or(process.cgroup.as_deref())
+                    .unwrap_or("?");
                 print_left_aligned(str, base_color, compressed, 19);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Container => {
-                // CONTAINER (9 chars) - requires container detection heuristics
-                str.append("     N/A ", shadow_color);
+                // CONTAINER (9 chars) - from container detection heuristics
+                let container = process.container_short.as_deref().unwrap_or("/");
+                print_left_aligned(str, base_color, container, 9);
             }
             #[cfg(target_os = "linux")]
             ProcessField::MPriv => {
-                // PRIV: private memory (6 chars) - requires /proc/[pid]/smaps
-                str.append("  N/A ", shadow_color);
+                // PRIV: private memory (6 chars) - m_resident - m_share
+                // Calculate: m_resident - m_share (both in KB)
+                let m_priv = process.m_resident.saturating_sub(process.m_share);
+                if is_shadowed {
+                    str.append(&format!("{:>5} ", m_priv), shadow_color);
+                } else {
+                    print_kbytes(str, m_priv as u64, coloring, crt);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::GpuTime => {
@@ -1319,17 +1396,28 @@ impl MainPanel {
             }
             #[cfg(target_os = "linux")]
             ProcessField::IsContainer => {
-                // CONT: is container (5 chars) - requires container detection
-                str.append("  N/A", shadow_color);
+                // CONT: is container (5 chars) - based on container detection
+                // YES if container_short is not "/" or empty, NO otherwise
+                let is_container = process.container_short.as_ref()
+                    .map(|s| !s.is_empty() && s != "/")
+                    .unwrap_or(false);
+                if is_container {
+                    str.append("YES  ", base_color);
+                } else {
+                    str.append("NO   ", shadow_color);
+                }
             }
             
             // === macOS-specific fields ===
             #[cfg(target_os = "macos")]
             ProcessField::Translated => {
                 // T: translated process (Rosetta 2) (2 chars)
-                // Show N for native, T for translated (Rosetta), - for unknown
-                // For now, we don't have this info, so show "-"
-                str.append("- ", shadow_color);
+                // Show N for native, T for translated (Rosetta)
+                if process.translated {
+                    str.append("T ", base_color);
+                } else {
+                    str.append("N ", shadow_color);
+                }
             }
             
             #[allow(unreachable_patterns)]

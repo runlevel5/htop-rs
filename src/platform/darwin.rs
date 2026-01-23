@@ -32,6 +32,10 @@ const HW_PAGESIZE: c_int = 7;
 
 const VM_SWAPUSAGE: c_int = 5;
 
+// Process flags from <sys/proc.h>
+// P_TRANSLATED indicates process is running under Rosetta 2 translation (x86_64 on ARM)
+const P_TRANSLATED: u32 = 0x00020000;
+
 // Host statistics
 const HOST_VM_INFO64: c_int = 4;
 const HOST_CPU_LOAD_INFO: c_int = 3;
@@ -812,6 +816,9 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             0
         };
         process.state = determine_process_state(bsd_info.pbi_status, pti_numrunning);
+
+        // Check if process is running under Rosetta 2 translation (x86_64 on ARM)
+        process.translated = (bsd_info.pbi_flags & P_TRANSLATED) != 0;
 
         // Get username
         process.user = Some(machine.get_username(process.uid));

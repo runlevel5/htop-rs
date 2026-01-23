@@ -356,3 +356,69 @@ pub fn print_rate(str: &mut RichString, rate: f64, coloring: bool, crt: &Crt) {
 
     str.append(&formatted, color);
 }
+
+/// Format a value in bytes with appropriate unit prefix and coloring
+/// Matches C htop's Row_printBytes (converts to KB and uses Row_printKBytes)
+/// 6 columns width total
+pub fn print_bytes(str: &mut RichString, number: u64, coloring: bool, crt: &Crt) {
+    if number == u64::MAX {
+        print_kbytes(str, u64::MAX, coloring, crt);
+    } else {
+        print_kbytes(str, number / 1024, coloring, crt);
+    }
+}
+
+/// Format a large count (syscalls, etc.) with appropriate coloring
+/// Matches C htop's Row_printCount (12 columns width: "%11llu ")
+///
+/// Colors by magnitude:
+/// - >= 100000T: LARGE_NUMBER only
+/// - >= 100T: LARGE_NUMBER + PROCESS_MEGABYTES
+/// - >= 10G: LARGE_NUMBER + MEGABYTES + PROCESS
+/// - else: LARGE_NUMBER + MEGABYTES + PROCESS + SHADOW
+pub fn print_count(str: &mut RichString, number: u64, coloring: bool, crt: &Crt) {
+    let process_color = crt.color(ColorElement::Process);
+    let megabytes_color = crt.color(ColorElement::ProcessMegabytes);
+    let large_number_color = crt.color(ColorElement::LargeNumber);
+    let shadow_color = crt.color(ColorElement::ProcessShadow);
+
+    // Constants for decimal scaling (1000-based)
+    const ONE_DECIMAL_K: u64 = 1000;
+    const ONE_DECIMAL_M: u64 = ONE_DECIMAL_K * 1000;
+    const ONE_DECIMAL_G: u64 = ONE_DECIMAL_M * 1000;
+    const ONE_DECIMAL_T: u64 = ONE_DECIMAL_G * 1000;
+
+    // Handle invalid values
+    if number == u64::MAX {
+        str.append("        N/A ", shadow_color);
+        return;
+    }
+
+    let buffer = format!("{:>11} ", number);
+
+    if number >= 100_000 * ONE_DECIMAL_T {
+        // Very large: all LARGE_NUMBER
+        let scaled = number / ONE_DECIMAL_G;
+        let formatted = format!("{:>11} ", scaled);
+        str.append(&formatted, if coloring { large_number_color } else { process_color });
+    } else if number >= 100 * ONE_DECIMAL_T {
+        // Large: first 8 chars LARGE_NUMBER, last 4 MEGABYTES
+        let scaled = number / ONE_DECIMAL_M;
+        let formatted = format!("{:>11} ", scaled);
+        str.append(&formatted[..8], if coloring { large_number_color } else { process_color });
+        str.append(&formatted[8..], if coloring { megabytes_color } else { process_color });
+    } else if number >= 10 * ONE_DECIMAL_G {
+        // Medium-large: 5 chars LARGE_NUMBER, 3 MEGABYTES, 4 PROCESS
+        let scaled = number / ONE_DECIMAL_K;
+        let formatted = format!("{:>11} ", scaled);
+        str.append(&formatted[..5], if coloring { large_number_color } else { process_color });
+        str.append(&formatted[5..8], if coloring { megabytes_color } else { process_color });
+        str.append(&formatted[8..], process_color);
+    } else {
+        // Small: 2 LARGE_NUMBER, 3 MEGABYTES, 3 PROCESS, 4 SHADOW
+        str.append(&buffer[..2], if coloring { large_number_color } else { process_color });
+        str.append(&buffer[2..5], if coloring { megabytes_color } else { process_color });
+        str.append(&buffer[5..8], process_color);
+        str.append(&buffer[8..], if coloring { shadow_color } else { process_color });
+    }
+}

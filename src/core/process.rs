@@ -975,27 +975,51 @@ pub struct Process {
     pub is_visible: bool,
     pub is_root: bool, // True if this is a root process in the tree
 
-    // I/O statistics
-    pub io_read_bytes: u64,
-    pub io_write_bytes: u64,
+    // I/O statistics (from /proc/[pid]/io on Linux)
+    pub io_rchar: u64,              // Characters read (includes cached)
+    pub io_wchar: u64,              // Characters written (includes cached)
+    pub io_syscr: u64,              // Read syscalls
+    pub io_syscw: u64,              // Write syscalls
+    pub io_read_bytes: u64,         // Bytes read from storage
+    pub io_write_bytes: u64,        // Bytes written to storage
+    pub io_cancelled_write_bytes: u64, // Cancelled write bytes
+    pub io_rate_read_bps: f64,      // Read rate in bytes/sec
+    pub io_rate_write_bps: f64,     // Write rate in bytes/sec
+    pub io_last_scan_time_ms: u64,  // Last scan time for rate calculation
+    // Legacy aliases for compatibility
     pub io_read_rate: f64,
     pub io_write_rate: f64,
 
     // Delay accounting (Linux-specific, requires CONFIG_TASKSTATS)
-    pub blkio_delay_percent: f32,  // Block I/O delay %
-    pub swapin_delay_percent: f32, // Swapin delay %
+    pub cpu_delay_percent: f32,     // CPU delay %
+    pub blkio_delay_percent: f32,   // Block I/O delay %
+    pub swapin_delay_percent: f32,  // Swapin delay %
 
     // Context switches
     pub ctxt_switches: u64,
 
     // CGroup
     pub cgroup: Option<String>,
+    pub cgroup_short: Option<String>,    // Compressed cgroup path
+    pub container_short: Option<String>, // Container name (from cgroup heuristics)
 
     // OOM
     pub oom_score: i32,
 
     // IO Priority (Linux-specific, from ioprio_get syscall)
     pub io_priority: i32,
+
+    // Memory (from /proc/[pid]/smaps_rollup on Linux)
+    pub m_pss: i64,    // Proportional Set Size (KB)
+    pub m_swap: i64,   // Swap usage (KB)
+    pub m_psswp: i64,  // Proportional swap share (KB)
+
+    // Autogroup (from /proc/[pid]/autogroup on Linux)
+    pub autogroup_id: i64,   // Autogroup ID (-1 = N/A)
+    pub autogroup_nice: i32, // Autogroup nice value
+
+    // macOS-specific
+    pub translated: bool, // Running under Rosetta 2 translation
 
     // Security
     pub sec_attr: Option<String>,
@@ -1069,16 +1093,33 @@ impl Process {
             show_children: true,
             is_visible: true,
             is_root: false,
+            io_rchar: 0,
+            io_wchar: 0,
+            io_syscr: 0,
+            io_syscw: 0,
             io_read_bytes: 0,
             io_write_bytes: 0,
+            io_cancelled_write_bytes: 0,
+            io_rate_read_bps: f64::NAN,
+            io_rate_write_bps: f64::NAN,
+            io_last_scan_time_ms: 0,
             io_read_rate: 0.0,
             io_write_rate: 0.0,
+            cpu_delay_percent: f32::NAN,
             blkio_delay_percent: f32::NAN,
             swapin_delay_percent: f32::NAN,
             ctxt_switches: 0,
             cgroup: None,
+            cgroup_short: None,
+            container_short: None,
             oom_score: 0,
             io_priority: -1, // -1 indicates not yet read
+            m_pss: -1,   // -1 indicates not yet read
+            m_swap: -1,  // -1 indicates not yet read
+            m_psswp: -1, // -1 indicates not yet read
+            autogroup_id: -1,   // -1 indicates not available
+            autogroup_nice: 0,
+            translated: false,
             sec_attr: None,
             merged_command: MergedCommand::default(),
             updated: false,
