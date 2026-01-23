@@ -1496,26 +1496,6 @@ impl ScreenManager {
         let bar_border = crt.color(ColorElement::BarBorder);
         let bar_shadow = crt.color(ColorElement::BarShadow);
 
-        // DEBUG: Log attribute values to file
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::File::create("/tmp/htop-rs-debug.log") {
-            writeln!(f, "=== htop-rs Help Screen Debug ===").ok();
-            writeln!(f, "ColorScheme: {:?}", crt.color_scheme).ok();
-            writeln!(f, "default_color: 0x{:08X} ({})", default_color, default_color).ok();
-            writeln!(f, "bold (HelpBold): 0x{:08X} ({})", bold, bold).ok();
-            writeln!(f, "bar_border: 0x{:08X} ({})", bar_border, bar_border).ok();
-            writeln!(f, "bar_shadow: 0x{:08X} ({})", bar_shadow, bar_shadow).ok();
-            writeln!(f, "").ok();
-            writeln!(f, "Expected values for Monochrome:").ok();
-            writeln!(f, "  A_NORMAL  = 0x{:08X} ({})", A_NORMAL, A_NORMAL).ok();
-            writeln!(f, "  A_DIM     = 0x{:08X} ({})", A_DIM, A_DIM).ok();
-            writeln!(f, "  A_BOLD    = 0x{:08X} ({})", A_BOLD, A_BOLD).ok();
-            writeln!(f, "  A_REVERSE = 0x{:08X} ({})", A_REVERSE, A_REVERSE).ok();
-            writeln!(f, "").ok();
-            writeln!(f, "bar_shadow should be A_DIM in Monochrome mode").ok();
-            writeln!(f, "bar_shadow == A_DIM: {}", bar_shadow == A_DIM).ok();
-        }
-
         // Fill screen with HELP_BOLD background (like C htop)
         attrset(bold);
         for i in 0..crt.height() - 1 {
@@ -2535,14 +2515,6 @@ impl ScreenManager {
         // Parse lsof output using -F (machine-readable format)
         let lsof_data = Self::run_lsof(pid);
 
-        // Create function bar: Search, Filter, Refresh, Done
-        let _function_bar = FunctionBar::with_functions(vec![
-            ("F3".to_string(), "Search ".to_string()),
-            ("F4".to_string(), "Filter ".to_string()),
-            ("F5".to_string(), "Refresh".to_string()),
-            ("Esc".to_string(), "Done   ".to_string()),
-        ]);
-
         // Build lines from parsed data
         let mut lines: Vec<String> = Vec::new();
         let mut col_widths = [5usize, 7, 4, 6, 8, 8, 8]; // FD, TYPE, MODE, DEVICE, SIZE, OFFSET, NODE
@@ -2603,9 +2575,11 @@ impl ScreenManager {
         let mut search_text = String::new();
         let mut filter_active = false;
         let mut search_active = false;
+        let mut needs_redraw = true;
+        let mut filtered_indices: Vec<usize> = (0..lines.len()).collect();
 
-        // Get filtered lines
-        let get_filtered_lines = |lines: &[String], filter: &str| -> Vec<usize> {
+        // Helper to recalculate filtered indices
+        let calc_filtered_indices = |lines: &[String], filter: &str| -> Vec<usize> {
             if filter.is_empty() {
                 (0..lines.len()).collect()
             } else {
@@ -2620,7 +2594,6 @@ impl ScreenManager {
         };
 
         loop {
-            let filtered_indices = get_filtered_lines(&lines, &filter_text);
             let panel_height = crt.height() - 3; // Title + header + function bar
             let panel_y = 2; // After title and header
 
@@ -2637,105 +2610,109 @@ impl ScreenManager {
             let max_scroll = (filtered_indices.len() as i32 - panel_height).max(0);
             scroll_v = scroll_v.clamp(0, max_scroll);
 
-            // Draw title
-            let title_attr = crt.color(ColorElement::MeterText);
-            mv(0, 0);
-            attrset(title_attr);
-            let title = format!("Snapshot of files open in process {} - {}", pid, command);
-            let title_display: String = title.chars().take(crt.width() as usize).collect();
-            hline(' ' as u32, crt.width());
-            let _ = addstr(&title_display);
-            attrset(A_NORMAL);
-
-            // Draw header
-            let header_attr = crt.color(ColorElement::PanelHeaderFocus);
-            mv(1, 0);
-            attrset(header_attr);
-            hline(' ' as u32, crt.width());
-            let header_display: String = header_str.chars().take(crt.width() as usize).collect();
-            let _ = addstr(&header_display);
-            attrset(A_NORMAL);
-
-            // Draw lines
-            let default_attr = crt.color(ColorElement::DefaultColor);
-            let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
-
-            for row in 0..panel_height {
-                let y = panel_y + row;
-                let line_idx = (scroll_v + row) as usize;
-
-                mv(y, 0);
-
-                if line_idx < filtered_indices.len() {
-                    let actual_idx = filtered_indices[line_idx];
-                    let line = &lines[actual_idx];
-                    let is_selected = (scroll_v + row) == selected;
-
-                    let attr = if is_selected {
-                        selection_attr
-                    } else {
-                        default_attr
-                    };
-                    attrset(attr);
-                    hline(' ' as u32, crt.width());
-                    let display_line: String = line.chars().take(crt.width() as usize).collect();
-                    let _ = addstr(&display_line);
-                    attrset(A_NORMAL);
-                } else {
-                    attrset(default_attr);
-                    hline(' ' as u32, crt.width());
-                    attrset(A_NORMAL);
-                }
-            }
-
-            // Draw function bar or search/filter bar
-            let fb_y = crt.height() - 1;
-            mv(fb_y, 0);
-
-            if search_active || filter_active {
-                let bar_attr = crt.color(ColorElement::FunctionBar);
-                let key_attr = crt.color(ColorElement::FunctionKey);
-                attrset(bar_attr);
+            // Only redraw when needed
+            if needs_redraw {
+                // Draw title
+                let title_attr = crt.color(ColorElement::MeterText);
+                mv(0, 0);
+                attrset(title_attr);
+                let title = format!("Snapshot of files open in process {} - {}", pid, command);
+                let title_display: String = title.chars().take(crt.width() as usize).collect();
                 hline(' ' as u32, crt.width());
+                let _ = addstr(&title_display);
                 attrset(A_NORMAL);
+
+                // Draw header
+                let header_attr = crt.color(ColorElement::PanelHeaderFocus);
+                mv(1, 0);
+                attrset(header_attr);
+                hline(' ' as u32, crt.width());
+                let header_display: String = header_str.chars().take(crt.width() as usize).collect();
+                let _ = addstr(&header_display);
+                attrset(A_NORMAL);
+
+                // Draw lines
+                let default_attr = crt.color(ColorElement::DefaultColor);
+                let selection_attr = crt.color(ColorElement::PanelSelectionFocus);
+
+                for row in 0..panel_height {
+                    let y = panel_y + row;
+                    let line_idx = (scroll_v + row) as usize;
+
+                    mv(y, 0);
+
+                    if line_idx < filtered_indices.len() {
+                        let actual_idx = filtered_indices[line_idx];
+                        let line = &lines[actual_idx];
+                        let is_selected = (scroll_v + row) == selected;
+
+                        let attr = if is_selected {
+                            selection_attr
+                        } else {
+                            default_attr
+                        };
+                        attrset(attr);
+                        hline(' ' as u32, crt.width());
+                        let display_line: String = line.chars().take(crt.width() as usize).collect();
+                        let _ = addstr(&display_line);
+                        attrset(A_NORMAL);
+                    } else {
+                        attrset(default_attr);
+                        hline(' ' as u32, crt.width());
+                        attrset(A_NORMAL);
+                    }
+                }
+
+                // Draw function bar or search/filter bar
+                let fb_y = crt.height() - 1;
                 mv(fb_y, 0);
 
-                if search_active {
-                    attrset(key_attr);
-                    let _ = addstr("Search: ");
-                    attrset(A_NORMAL);
+                if search_active || filter_active {
+                    let bar_attr = crt.color(ColorElement::FunctionBar);
+                    let key_attr = crt.color(ColorElement::FunctionKey);
                     attrset(bar_attr);
-                    let _ = addstr(&search_text);
+                    hline(' ' as u32, crt.width());
                     attrset(A_NORMAL);
-                } else {
-                    attrset(key_attr);
-                    let _ = addstr("Filter: ");
-                    attrset(A_NORMAL);
-                    attrset(bar_attr);
-                    let _ = addstr(&filter_text);
-                    attrset(A_NORMAL);
-                }
-            } else {
-                // Update F4 label based on filter state
-                let f4_label = if filter_text.is_empty() {
-                    "Filter "
-                } else {
-                    "FILTER "
-                };
-                let fb = FunctionBar::with_functions(vec![
-                    ("F3".to_string(), "Search ".to_string()),
-                    ("F4".to_string(), f4_label.to_string()),
-                    ("F5".to_string(), "Refresh".to_string()),
-                    ("Esc".to_string(), "Done   ".to_string()),
-                ]);
-                fb.draw_simple(crt, fb_y);
-            }
+                    mv(fb_y, 0);
 
-            crt.refresh();
+                    if search_active {
+                        attrset(key_attr);
+                        let _ = addstr("Search: ");
+                        attrset(A_NORMAL);
+                        attrset(bar_attr);
+                        let _ = addstr(&search_text);
+                        attrset(A_NORMAL);
+                    } else {
+                        attrset(key_attr);
+                        let _ = addstr("Filter: ");
+                        attrset(A_NORMAL);
+                        attrset(bar_attr);
+                        let _ = addstr(&filter_text);
+                        attrset(A_NORMAL);
+                    }
+                } else {
+                    // Update F4 label based on filter state
+                    let f4_label = if filter_text.is_empty() {
+                        "Filter "
+                    } else {
+                        "FILTER "
+                    };
+                    let fb = FunctionBar::with_functions(vec![
+                        ("F3".to_string(), "Search ".to_string()),
+                        ("F4".to_string(), f4_label.to_string()),
+                        ("F5".to_string(), "Refresh".to_string()),
+                        ("Esc".to_string(), "Done   ".to_string()),
+                    ]);
+                    fb.draw_simple(crt, fb_y);
+                }
+
+                crt.refresh();
+            }
 
             // Handle input
             nodelay(stdscr(), false);
             let ch = getch();
+            needs_redraw = true; // Assume we need redraw, unless proven otherwise
 
             if search_active || filter_active {
                 match ch {
@@ -2757,6 +2734,9 @@ impl ScreenManager {
                             search_text.pop();
                         } else if filter_active && !filter_text.is_empty() {
                             filter_text.pop();
+                            filtered_indices = calc_filtered_indices(&lines, &filter_text);
+                            selected = 0;
+                            scroll_v = 0;
                         }
                     }
                     _ if ch >= 32 && ch < 127 => {
@@ -2774,11 +2754,14 @@ impl ScreenManager {
                             }
                         } else if filter_active {
                             filter_text.push(c);
+                            filtered_indices = calc_filtered_indices(&lines, &filter_text);
                             selected = 0;
                             scroll_v = 0;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        needs_redraw = false;
+                    }
                 }
                 continue;
             }
@@ -2841,8 +2824,10 @@ impl ScreenManager {
                             lines.push(msg);
                         }
                     }
+                    // Recalculate filtered indices
+                    filtered_indices = calc_filtered_indices(&lines, &filter_text);
                     // Restore selection, clamped to new list size
-                    let max_idx = (lines.len() as i32 - 1).max(0);
+                    let max_idx = (filtered_indices.len() as i32 - 1).max(0);
                     selected = saved_selected.min(max_idx);
                     crt.clear();
                 }
@@ -2851,10 +2836,18 @@ impl ScreenManager {
                     crt.clear();
                 }
                 KEY_UP => {
+                    let old_selected = selected;
                     selected = (selected - 1).max(0);
+                    if selected == old_selected {
+                        needs_redraw = false;
+                    }
                 }
                 KEY_DOWN => {
+                    let old_selected = selected;
                     selected = (selected + 1).min(max_selected);
+                    if selected == old_selected {
+                        needs_redraw = false;
+                    }
                 }
                 KEY_PPAGE => {
                     selected = (selected - panel_height).max(0);
@@ -2874,7 +2867,9 @@ impl ScreenManager {
                 KEY_WHEELDOWN => {
                     selected = (selected + 3).min(max_selected);
                 }
-                _ => {}
+                _ => {
+                    needs_redraw = false;
+                }
             }
         }
 
