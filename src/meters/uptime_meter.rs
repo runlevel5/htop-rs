@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use super::{Meter, MeterMode};
+use super::{draw_led, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -47,6 +47,28 @@ impl UptimeMeter {
 
         format!("{}{:02}:{:02}:{:02}", days_str, hours, minutes, seconds)
     }
+
+    /// Format uptime for LED mode (compact format for LED digits)
+    /// Shows days as "N days, " prefix if > 0, then HH:MM:SS
+    fn format_uptime_led(&self) -> String {
+        let total_secs = self.uptime.as_secs();
+        if total_secs == 0 {
+            return "00:00:00".to_string();
+        }
+
+        let seconds = total_secs % 60;
+        let minutes = (total_secs / 60) % 60;
+        let hours = (total_secs / 3600) % 24;
+        let days = total_secs / 86400;
+
+        if days > 1 {
+            format!("{} days, {:02}:{:02}:{:02}", days, hours, minutes, seconds)
+        } else if days == 1 {
+            format!("1 day, {:02}:{:02}:{:02}", hours, minutes, seconds)
+        } else {
+            format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+        }
+    }
 }
 
 impl Meter for UptimeMeter {
@@ -56,6 +78,11 @@ impl Meter for UptimeMeter {
 
     fn caption(&self) -> &str {
         "Uptime: "
+    }
+
+    fn supported_modes(&self) -> u32 {
+        // Uptime only supports Text and LED modes (no Bar or Graph)
+        (1 << MeterMode::Text as u32) | (1 << MeterMode::Led as u32)
     }
 
     fn update(&mut self, machine: &Machine) {
@@ -69,19 +96,28 @@ impl Meter for UptimeMeter {
         _settings: &Settings,
         x: i32,
         y: i32,
-        _width: i32,
+        width: i32,
     ) {
         use ncurses::*;
 
-        let caption_attr = crt.color(ColorElement::MeterText);
-        let value_attr = crt.color(ColorElement::Uptime);
+        match self.mode {
+            MeterMode::Led => {
+                let text = self.format_uptime_led();
+                draw_led(crt, x, y, width, "Uptime: ", &text);
+            }
+            _ => {
+                // Text mode (default)
+                let caption_attr = crt.color(ColorElement::MeterText);
+                let value_attr = crt.color(ColorElement::Uptime);
 
-        mv(y, x);
-        attrset(caption_attr);
-        let _ = addstr("Uptime: ");
+                mv(y, x);
+                attrset(caption_attr);
+                let _ = addstr("Uptime: ");
 
-        attrset(value_attr);
-        let _ = addstr(&self.format_uptime());
+                attrset(value_attr);
+                let _ = addstr(&self.format_uptime());
+            }
+        }
     }
 
     fn mode(&self) -> MeterMode {

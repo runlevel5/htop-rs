@@ -2689,7 +2689,7 @@ impl SetupScreen {
         self.meters_moving = false;
     }
 
-    /// Cycle the meter style (Bar -> Text -> Graph -> Led -> Bar)
+    /// Cycle the meter style, skipping unsupported modes
     fn cycle_meter_style(&mut self, settings: &mut Settings, header: &mut Header) {
         let col_idx = self.meters_column_focus;
         let selection = self
@@ -2698,14 +2698,34 @@ impl SetupScreen {
             .copied()
             .unwrap_or(0);
 
+        // Get the supported modes for this meter
+        let supported_modes = header
+            .get_meter_supported_modes(col_idx, selection)
+            .unwrap_or(0xFFFF); // Default to all modes if not found
+
         if let Some(column) = settings.header_columns.get_mut(col_idx) {
             if let Some(meter) = column.get_mut(selection) {
-                meter.mode = match meter.mode {
-                    MeterMode::Bar => MeterMode::Text,
-                    MeterMode::Text => MeterMode::Graph,
-                    MeterMode::Graph => MeterMode::Led,
-                    MeterMode::Led => MeterMode::Bar,
-                };
+                // Cycle order: Bar -> Text -> Graph -> Led -> Bar
+                let modes = [
+                    MeterMode::Bar,
+                    MeterMode::Text,
+                    MeterMode::Graph,
+                    MeterMode::Led,
+                ];
+
+                // Find current mode index
+                let current_idx = modes.iter().position(|&m| m == meter.mode).unwrap_or(0);
+
+                // Find next supported mode
+                for i in 1..=modes.len() {
+                    let next_idx = (current_idx + i) % modes.len();
+                    let next_mode = modes[next_idx];
+                    if (supported_modes & (1 << next_mode as u32)) != 0 {
+                        meter.mode = next_mode;
+                        break;
+                    }
+                }
+
                 settings.changed = true;
                 self.changed = true;
 

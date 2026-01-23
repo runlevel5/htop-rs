@@ -167,6 +167,20 @@ pub trait Meter: std::fmt::Debug {
 
     /// Set the display mode
     fn set_mode(&mut self, mode: MeterMode);
+
+    /// Get supported modes for this meter (default: all modes)
+    fn supported_modes(&self) -> u32 {
+        // Default: all modes supported (Bar, Text, Graph, Led)
+        (1 << MeterMode::Bar as u32)
+            | (1 << MeterMode::Text as u32)
+            | (1 << MeterMode::Graph as u32)
+            | (1 << MeterMode::Led as u32)
+    }
+
+    /// Check if a mode is supported
+    fn supports_mode(&self, mode: MeterMode) -> bool {
+        (self.supported_modes() & (1 << mode as u32)) != 0
+    }
 }
 
 /// Meter type enum for creating meters by name

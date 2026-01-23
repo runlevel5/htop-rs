@@ -209,4 +209,12 @@ impl Header {
         }
         self.calculate_height();
     }
+
+    /// Get the supported modes for a meter at a specific position
+    pub fn get_meter_supported_modes(&self, column: usize, index: usize) -> Option<u32> {
+        self.columns
+            .get(column)
+            .and_then(|col| col.get(index))
+            .map(|meter| meter.supported_modes())
+    }
 }

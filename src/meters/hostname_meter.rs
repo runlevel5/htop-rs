@@ -29,6 +29,11 @@ impl Meter for HostnameMeter {
         "Hostname: "
     }
 
+    fn supported_modes(&self) -> u32 {
+        // Hostname only supports Text mode
+        1 << MeterMode::Text as u32
+    }
+
     fn update(&mut self, machine: &Machine) {
         self.hostname = machine.hostname.clone();
     }
