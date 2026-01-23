@@ -798,6 +798,8 @@ impl ScreenManager {
                 self.main_panel.selected = 0;
                 self.main_panel.scroll_v = 0;
                 self.main_panel.invalidate_display_list();
+                // Force full redraw since visible process list changed
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x49 => {
@@ -827,6 +829,8 @@ impl ScreenManager {
                 self.main_panel.selected = 0;
                 self.main_panel.scroll_v = 0;
                 self.main_panel.invalidate_display_list();
+                // Force full redraw since visible process list changed
+                self.main_panel.needs_redraw = true;
                 return HandlerResult::Handled;
             }
             0x4D => {
@@ -1048,6 +1052,8 @@ impl ScreenManager {
 
         // Invalidate display list since tree/list order is different
         self.main_panel.invalidate_display_list();
+        // Force full redraw since the entire process list display changed
+        self.main_panel.needs_redraw = true;
 
         // Mark settings as changed for saving
         self.settings.changed = true;
