@@ -339,8 +339,15 @@ impl MainPanel {
         settings: &Settings,
         sort_key: ProcessField,
         sort_descending: bool,
+        filter_active: bool,
     ) {
-        let header_attr = crt.color(ColorElement::PanelHeaderFocus);
+        // Use selection color (yellow) for header when filter is active
+        // This provides visual feedback that the view is filtered
+        let header_attr = if filter_active {
+            crt.color(ColorElement::PanelSelectionFollow)
+        } else {
+            crt.color(ColorElement::PanelHeaderFocus)
+        };
         let sort_attr = crt.color(ColorElement::PanelSelectionFocus);
 
         // Get active sort key and direction matching C htop's ScreenSettings_getActiveSortKey
@@ -899,6 +906,7 @@ impl MainPanel {
                 settings,
                 machine.sort_key,
                 machine.sort_descending,
+                self.filter.is_some(),
             );
             self.y + 1
         } else {
@@ -1181,10 +1189,14 @@ impl MainPanel {
                         Some(self.inc_search.text.clone())
                     };
                     self.invalidate_display_list();
+                    // In filter mode, use normal selection color (cyan) since the header
+                    // already indicates filtered state with yellow background
+                    self.following = false;
+                    self.selection_color = ColorElement::PanelSelectionFocus;
                 }
                 self.inc_search.stop();
-                // Keep following state if filter is active, otherwise reset
-                if self.filter.is_none() {
+                // Keep following state if in search mode with active search, otherwise reset
+                if self.filter.is_none() && !is_search {
                     self.following = false;
                     self.selection_color = ColorElement::PanelSelectionFocus;
                 }
@@ -1267,9 +1279,15 @@ impl MainPanel {
                 self.selected = i as i32;
                 self.ensure_visible(processes.len() as i32);
                 self.inc_search.found = true;
-                // Match found - set following state (yellow highlight)
-                self.following = true;
-                self.selection_color = ColorElement::PanelSelectionFollow;
+                // For filter mode, use cyan selection (header already indicates filtered state)
+                // For search mode, use yellow selection to indicate "following" the match
+                if self.inc_search.is_filter() {
+                    self.following = false;
+                    self.selection_color = ColorElement::PanelSelectionFocus;
+                } else {
+                    self.following = true;
+                    self.selection_color = ColorElement::PanelSelectionFollow;
+                }
                 return;
             }
         }
