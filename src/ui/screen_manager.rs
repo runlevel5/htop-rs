@@ -168,6 +168,7 @@ impl ScreenManager {
     }
 
     /// Draw screen tabs (like "[Main] [I/O]" above the process panel)
+    /// When paused, shows "⏸ [Main] [I/O]" with pause icon before the tabs
     fn draw_screen_tabs(&self, crt: &Crt) {
         const SCREEN_TAB_MARGIN_LEFT: i32 = 2;
 
@@ -185,6 +186,24 @@ impl ScreenManager {
 
         if x >= max_x {
             return;
+        }
+
+        // Draw pause indicator before tabs if paused
+        if self.paused {
+            let paused_color = crt.color(ColorElement::Paused);
+            // U+23F8 is ⏸ (double vertical bar / pause symbol)
+            // Fallback to "[PAUSED]" for non-UTF8 terminals
+            let pause_indicator = if crt.utf8 { "⏸ " } else { "[PAUSED] " };
+
+            attrset(paused_color);
+            mv(y, x);
+            let _ = addstr(pause_indicator);
+            x += if crt.utf8 { 3 } else { 9 }; // icon + space, or "[PAUSED] "
+
+            if x >= max_x {
+                attrset(reset_color);
+                return;
+            }
         }
 
         // Colors for current and other tabs
@@ -228,19 +247,6 @@ impl ScreenManager {
             if x >= max_x {
                 attrset(reset_color);
                 return;
-            }
-
-            // If paused and this is the current tab, append pause indicator
-            if self.paused && is_current {
-                // U+23F8 is ⏸ (double vertical bar / pause symbol)
-                // Fallback to "(PAUSED)" for non-UTF8 terminals
-                let pause_indicator = if crt.utf8 { " ⏸" } else { " (PAUSED)" };
-                let indicator_width = if crt.utf8 { 2 } else { 9 }; // space + indicator
-
-                if x + indicator_width < max_x {
-                    let _ = addstr(pause_indicator);
-                    x += indicator_width;
-                }
             }
 
             // Draw ']'

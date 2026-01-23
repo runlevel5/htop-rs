@@ -14,19 +14,19 @@ htop-rs visually indicates when the F7 "Nice -" action is unavailable by dimming
 
 This provides immediate visual feedback about available actions without requiring trial and error.
 
-### Pause Indicator in Screen Tab
+### Pause Indicator in Screen Tab Row
 
-When updates are paused (Z key), htop-rs shows a pause icon directly in the screen tab:
+When updates are paused (Z key), htop-rs shows a pause icon before the screen tabs:
 
-- **UTF-8 terminals**: `[Main ⏸]` - uses the ⏸ (U+23F8) pause symbol
-- **Non-UTF-8 terminals**: `[Main (PAUSED)]` - text fallback
+- **UTF-8 terminals**: `⏸ [Main] [I/O]` - uses the ⏸ (U+23F8) pause symbol
+- **Non-UTF-8 terminals**: `[PAUSED] [Main] [I/O]` - text fallback
 
-This makes the paused state visible at all times, even when scrolling through the process list.
+This makes the paused state visible at all times, regardless of which tab is active or where you're scrolling in the process list.
 
 - **C htop behavior**: Only shows "PAUSED" text appended to the function bar at the bottom of the screen
-- **htop-rs behavior**: Shows both the tab indicator AND the function bar text (matching C htop's bottom indicator)
+- **htop-rs behavior**: Shows both the tab row indicator AND the function bar text (matching C htop's bottom indicator)
 
-The tab indicator is particularly useful because it remains visible regardless of whether the function bar is hidden (via `hide_function_bar` setting).
+The tab row indicator is particularly useful because it remains visible regardless of whether the function bar is hidden (via `hide_function_bar` setting).
 
 ### Search and Filter Mode Visual Indicator
 
