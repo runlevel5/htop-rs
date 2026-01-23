@@ -15,6 +15,7 @@ mod diskio_meter;
 mod diskio_rate_meter;
 mod diskio_time_meter;
 mod filedescriptors_meter;
+mod gpu_meter;
 mod hostname_meter;
 mod hugepages_meter;
 mod load_meter;
@@ -46,6 +47,7 @@ pub use diskio_meter::*;
 pub use diskio_rate_meter::*;
 pub use diskio_time_meter::*;
 pub use filedescriptors_meter::*;
+pub use gpu_meter::*;
 pub use hostname_meter::*;
 pub use hugepages_meter::*;
 pub use load_meter::*;
@@ -275,6 +277,7 @@ impl MeterType {
             "DiskIORate" => Some(Box::new(DiskIORateMeter::new())),
             "DiskIOTime" => Some(Box::new(DiskIOTimeMeter::new())),
             "FileDescriptors" => Some(Box::new(FileDescriptorsMeter::new())),
+            "GPU" => Some(Box::new(GpuMeter::new())),
             "HugePages" => Some(Box::new(HugePagesMeter::new())),
             "PressureStallCPUSome" => Some(Box::new(PressureStallCPUSomeMeter::new())),
             "PressureStallIOSome" => Some(Box::new(PressureStallIOSomeMeter::new())),

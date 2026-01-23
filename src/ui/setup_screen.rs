@@ -367,25 +367,22 @@ impl MeterInfo {
 }
 
 /// Common meters available on all platforms
+/// Order matches C htop darwin/Platform.c Platform_meterTypes[]
 const COMMON_METERS: &[MeterInfo] = &[
+    MeterInfo::with_param("CPU", "CPU", "CPU average"),
     MeterInfo::new("Clock", "Clock", "Clock"),
     MeterInfo::new("Date", "Date", "Date"),
     MeterInfo::new("DateTime", "Date and Time", "Date and Time"),
     MeterInfo::new("LoadAverage", "Load average", "Load averages: 1 minute, 5 minutes, 15 minutes"),
     MeterInfo::new("Load", "Load", "Load: average of ready processes in the last minute"),
     MeterInfo::new("Memory", "Memory", "Memory"),
-    MeterInfo::new("MemorySwap", "Memory & Swap", "Memory & Swap"),
     MeterInfo::new("Swap", "Swap", "Swap"),
-    MeterInfo::new("System", "System", "System"),
+    MeterInfo::new("MemorySwap", "Memory & Swap", "Memory & Swap"),
     MeterInfo::new("Tasks", "Task counter", "Task counter"),
     MeterInfo::new("Battery", "Battery", "Battery"),
     MeterInfo::new("Hostname", "Hostname", "Hostname"),
+    MeterInfo::new("System", "System", "System"),
     MeterInfo::new("Uptime", "Uptime", "Uptime"),
-    MeterInfo::new("DiskIO", "Disk IO", "Disk IO"),
-    MeterInfo::new("DiskIORate", "Disk IO Rate", "Disk IO read & write bytes per second"),
-    MeterInfo::new("DiskIOTime", "Disk IO Time", "Disk percent time busy"),
-    MeterInfo::new("NetworkIO", "Network IO", "Network IO"),
-    MeterInfo::new("FileDescriptors", "File Descriptors", "Number of allocated/available file descriptors"),
     // AllCPUs variants
     MeterInfo::new("AllCPUs", "CPUs (1/1)", "CPUs (1/1): all CPUs"),
     MeterInfo::new("AllCPUs2", "CPUs (1&2/2)", "CPUs (1&2/2): all CPUs in 2 shorter columns"),
@@ -400,11 +397,10 @@ const COMMON_METERS: &[MeterInfo] = &[
     MeterInfo::new("RightCPUs4", "CPUs (5-8/8)", "CPUs (5-8/8): second half in 4 shorter columns"),
     MeterInfo::new("LeftCPUs8", "CPUs (1-8/16)", "CPUs (1-8/16): first half in 8 shorter columns"),
     MeterInfo::new("RightCPUs8", "CPUs (9-16/16)", "CPUs (9-16/16): second half in 8 shorter columns"),
-    // Blank meter
-    MeterInfo::new("Blank", "Blank", "Blank"),
 ];
 
 /// ZFS meters - available on Linux, macOS, FreeBSD
+/// Position in list matches C htop (after CPU variants, before DiskIO)
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
 const ZFS_METERS: &[MeterInfo] = &[
     MeterInfo::new("ZFSARC", "ZFS ARC", "ZFS ARC"),
@@ -414,7 +410,31 @@ const ZFS_METERS: &[MeterInfo] = &[
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
 const ZFS_METERS: &[MeterInfo] = &[];
 
-/// Linux-specific meters
+/// DiskIO and NetworkIO meters - available on all platforms
+/// Position in list matches C htop darwin (after ZFS, before FileDescriptor)
+const DISKIO_NETWORK_METERS: &[MeterInfo] = &[
+    MeterInfo::new("DiskIORate", "Disk IO Rate", "Disk IO read & write bytes per second"),
+    MeterInfo::new("DiskIOTime", "Disk IO Time", "Disk percent time busy"),
+    MeterInfo::new("DiskIO", "Disk IO", "Disk IO"),
+    MeterInfo::new("NetworkIO", "Network IO", "Network IO"),
+    MeterInfo::new("FileDescriptors", "File Descriptors", "Number of allocated/available file descriptors"),
+];
+
+/// GPU meter - available on Linux and macOS (via IOKit on macOS, various backends on Linux)
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const GPU_METERS: &[MeterInfo] = &[
+    MeterInfo::new("GPU", "GPU", "GPU"),
+];
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+const GPU_METERS: &[MeterInfo] = &[];
+
+/// Blank meter - available on all platforms (last in list like C htop)
+const BLANK_METER: &[MeterInfo] = &[
+    MeterInfo::new("Blank", "Blank", "Blank"),
+];
+
+/// Linux-specific meters (inserted at appropriate position for Linux builds)
 #[cfg(target_os = "linux")]
 const LINUX_METERS: &[MeterInfo] = &[
     MeterInfo::new("HugePages", "HugePages", "HugePages"),
@@ -433,34 +453,40 @@ const LINUX_METERS: &[MeterInfo] = &[
 #[cfg(not(target_os = "linux"))]
 const LINUX_METERS: &[MeterInfo] = &[];
 
-/// CPU meter (with param support) - available on all platforms
-const CPU_METER: &[MeterInfo] = &[
-    MeterInfo::with_param("CPU", "CPU", "CPU average"),
-];
-
 /// Get available meters for the current platform
-/// This combines common meters with platform-specific ones at runtime,
-/// but the platform-specific arrays are determined at compile time.
+/// Order matches C htop darwin/Platform.c Platform_meterTypes[] for macOS
 fn available_meters_for_platform() -> Vec<&'static MeterInfo> {
     let mut meters: Vec<&'static MeterInfo> = Vec::new();
     
-    // Add common meters
+    // Add common meters (CPU through RightCPUs8)
     for m in COMMON_METERS {
         meters.push(m);
     }
     
-    // Add Linux-specific meters (empty on other platforms)
-    for m in LINUX_METERS {
-        meters.push(m);
-    }
-    
-    // Add ZFS meters (available on Linux, macOS, FreeBSD)
+    // Add ZFS meters (after CPU variants)
     for m in ZFS_METERS {
         meters.push(m);
     }
     
-    // Add CPU meter at the end (like C htop)
-    for m in CPU_METER {
+    // Add DiskIO/NetworkIO/FileDescriptors meters
+    for m in DISKIO_NETWORK_METERS {
+        meters.push(m);
+    }
+    
+    // Add GPU meter (Linux and macOS only)
+    for m in GPU_METERS {
+        meters.push(m);
+    }
+    
+    // Add Blank meter (always last)
+    for m in BLANK_METER {
+        meters.push(m);
+    }
+    
+    // Note: Linux-specific meters are not added here to match macOS order
+    // For Linux, we would need a different ordering function
+    // For now, Linux meters are appended after Blank for simplicity
+    for m in LINUX_METERS {
         meters.push(m);
     }
     
