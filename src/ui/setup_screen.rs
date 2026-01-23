@@ -2139,9 +2139,33 @@ impl SetupScreen {
                     // Move meter to left column
                     self.move_meter_left(settings, header);
                 } else {
-                    // Move focus to left panel
+                    // Move focus to left panel, skipping empty columns
                     if self.meters_column_focus > 0 {
-                        self.meters_column_focus -= 1;
+                        let mut new_focus = self.meters_column_focus - 1;
+                        // Skip empty columns when navigating left
+                        while new_focus > 0 {
+                            let col_is_empty = settings
+                                .header_columns
+                                .get(new_focus)
+                                .map(|c| c.is_empty())
+                                .unwrap_or(true);
+                            if !col_is_empty {
+                                break;
+                            }
+                            new_focus -= 1;
+                        }
+                        // Check if the final column is also empty - if so, go to categories
+                        let final_col_empty = settings
+                            .header_columns
+                            .get(new_focus)
+                            .map(|c| c.is_empty())
+                            .unwrap_or(true);
+                        if final_col_empty && new_focus == 0 {
+                            // Column 0 is empty, go to categories
+                            self.focus = 0;
+                        } else {
+                            self.meters_column_focus = new_focus;
+                        }
                     } else {
                         // Go back to categories panel
                         self.focus = 0;
@@ -2155,9 +2179,22 @@ impl SetupScreen {
                     // Move meter to right column
                     self.move_meter_right(settings, header);
                 } else {
-                    // Move focus to right panel
+                    // Move focus to right panel, skipping empty columns
                     if self.meters_column_focus < num_columns {
-                        self.meters_column_focus += 1;
+                        let mut new_focus = self.meters_column_focus + 1;
+                        // Skip empty columns when navigating right (but not the Available panel)
+                        while new_focus < num_columns {
+                            let col_is_empty = settings
+                                .header_columns
+                                .get(new_focus)
+                                .map(|c| c.is_empty())
+                                .unwrap_or(true);
+                            if !col_is_empty {
+                                break;
+                            }
+                            new_focus += 1;
+                        }
+                        self.meters_column_focus = new_focus;
                     }
                 }
                 return HandlerResult::Handled;
