@@ -189,16 +189,23 @@ impl ScreenManager {
         }
 
         // Draw pause indicator before tabs if paused
+        // Uses the same color as the active tab for visual cohesion
         if self.paused {
-            let paused_color = crt.color(ColorElement::Paused);
+            let paused_color = crt.color(ColorElement::ScreensCurText);
             // U+23F8 is ⏸ (double vertical bar / pause symbol)
-            // Fallback to "[PAUSED]" for non-UTF8 terminals
-            let pause_indicator = if crt.utf8 { "⏸ " } else { "[PAUSED] " };
+            // Fallback to "PAUSED" for non-UTF8 terminals
+            // Format: " ⏸ " or " PAUSED " with padding on both sides
+            let pause_indicator = if crt.utf8 { " ⏸ " } else { " PAUSED " };
 
             attrset(paused_color);
             mv(y, x);
             let _ = addstr(pause_indicator);
-            x += if crt.utf8 { 3 } else { 9 }; // icon + space, or "[PAUSED] "
+            x += if crt.utf8 { 4 } else { 8 }; // space + icon + space + trailing space, or " PAUSED "
+
+            // Add a space after the indicator (with reset color)
+            attrset(reset_color);
+            let _ = addstr(" ");
+            x += 1;
 
             if x >= max_x {
                 attrset(reset_color);

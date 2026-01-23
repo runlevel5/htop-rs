@@ -18,8 +18,9 @@ This provides immediate visual feedback about available actions without requirin
 
 When updates are paused (Z key), htop-rs shows a pause icon before the screen tabs:
 
-- **UTF-8 terminals**: `⏸ [Main] [I/O]` - uses the ⏸ (U+23F8) pause symbol
-- **Non-UTF-8 terminals**: `[PAUSED] [Main] [I/O]` - text fallback
+- **UTF-8 terminals**: ` ⏸ ` followed by `[Main] [I/O]` - uses the ⏸ (U+23F8) pause symbol
+- **Non-UTF-8 terminals**: ` PAUSED ` followed by `[Main] [I/O]` - text fallback
+- **Color**: Uses the same color as the active tab for visual cohesion
 
 This makes the paused state visible at all times, regardless of which tab is active or where you're scrolling in the process list.
 
