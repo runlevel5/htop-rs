@@ -1,5 +1,6 @@
 # htop-rs
 
+![logo](./logo.jp2)
 A Rust port of [htop](https://htop.dev/), the beloved interactive process viewer.
 
 ## What is this?
