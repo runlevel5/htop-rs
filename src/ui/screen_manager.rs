@@ -771,6 +771,9 @@ impl ScreenManager {
                 // 'H' - hide/show user process threads
                 self.settings.hide_userland_threads = !self.settings.hide_userland_threads;
                 self.settings.changed = true;
+                // Reset selection when filter changes to ensure visibility
+                self.main_panel.selected = 0;
+                self.main_panel.scroll_v = 0;
                 return HandlerResult::Handled;
             }
             0x49 => {
@@ -796,6 +799,9 @@ impl ScreenManager {
                 // 'K' - hide/show kernel threads
                 self.settings.hide_kernel_threads = !self.settings.hide_kernel_threads;
                 self.settings.changed = true;
+                // Reset selection when filter changes to ensure visibility
+                self.main_panel.selected = 0;
+                self.main_panel.scroll_v = 0;
                 return HandlerResult::Handled;
             }
             0x4D => {
