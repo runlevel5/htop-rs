@@ -496,21 +496,31 @@ impl MainPanel {
     /// Rebuild the cached display list (like C htop's Table_rebuildPanel)
     /// This filters processes once per update cycle instead of on every draw
     pub fn rebuild_display_list(&mut self, machine: &Machine, settings: &Settings) {
+        use std::collections::HashMap;
+        
         self.cached_display_indices.clear();
 
+        // Build PID→index map for O(1) lookups (avoids O(n²) linear search)
+        // This is built fresh each time since indices change after sorting
+        let pid_to_idx: HashMap<i32, usize> = machine
+            .processes
+            .processes
+            .iter()
+            .enumerate()
+            .map(|(idx, p)| (p.pid, idx))
+            .collect();
+
         if self.tree_view {
-            // In tree view, use tree display order
-            for process in machine.processes.iter_tree() {
-                if self.should_show_process(process, settings, machine) {
-                    // Find the actual index in the processes vec
-                    // iter_tree returns processes in tree order, we need their indices
-                    if let Some(idx) = machine
-                        .processes
-                        .processes
-                        .iter()
-                        .position(|p| p.pid == process.pid)
-                    {
-                        self.cached_display_indices.push(idx);
+            // In tree view, iterate tree_display_order directly (PIDs in tree order)
+            // We use the PID→index map to avoid the O(n²) lookup that iter_tree() does
+            for &pid in &machine.processes.tree_display_order {
+                // O(1) lookup to get process index
+                if let Some(&idx) = pid_to_idx.get(&pid) {
+                    if let Some(process) = machine.processes.processes.get(idx) {
+                        // Only include visible processes (show_children handling)
+                        if process.is_visible && self.should_show_process(process, settings, machine) {
+                            self.cached_display_indices.push(idx);
+                        }
                     }
                 }
             }
