@@ -325,41 +325,6 @@ pub const COLOR_SCHEME_NAMES: &[&str] = &[
     "Nord",
 ];
 
-/// Platform requirement for a meter
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeterPlatform {
-    /// Available on all platforms
-    All,
-    /// Linux only
-    Linux,
-    /// Platforms with ZFS support (Linux, FreeBSD, Solaris)
-    Zfs,
-}
-
-impl MeterPlatform {
-    /// Check if this meter is available on the current platform
-    #[cfg(target_os = "linux")]
-    pub const fn is_available(&self) -> bool {
-        // Linux supports all meter types
-        true
-    }
-
-    #[cfg(target_os = "macos")]
-    pub const fn is_available(&self) -> bool {
-        matches!(self, MeterPlatform::All)
-    }
-
-    #[cfg(target_os = "freebsd")]
-    pub const fn is_available(&self) -> bool {
-        matches!(self, MeterPlatform::All | MeterPlatform::Zfs)
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
-    pub const fn is_available(&self) -> bool {
-        matches!(self, MeterPlatform::All)
-    }
-}
-
 /// Available meter information
 #[derive(Debug, Clone)]
 pub struct MeterInfo {
@@ -371,8 +336,6 @@ pub struct MeterInfo {
     pub description: &'static str,
     /// Whether this meter type supports a parameter (e.g., CPU number)
     pub supports_param: bool,
-    /// Platform requirement
-    pub platform: MeterPlatform,
 }
 
 impl MeterInfo {
@@ -386,7 +349,6 @@ impl MeterInfo {
             display_name,
             description,
             supports_param: false,
-            platform: MeterPlatform::All,
         }
     }
 
@@ -400,45 +362,12 @@ impl MeterInfo {
             display_name,
             description,
             supports_param: true,
-            platform: MeterPlatform::All,
-        }
-    }
-
-    const fn linux(
-        name: &'static str,
-        display_name: &'static str,
-        description: &'static str,
-    ) -> Self {
-        MeterInfo {
-            name,
-            display_name,
-            description,
-            supports_param: false,
-            platform: MeterPlatform::Linux,
-        }
-    }
-
-    const fn zfs(
-        name: &'static str,
-        display_name: &'static str,
-        description: &'static str,
-    ) -> Self {
-        MeterInfo {
-            name,
-            display_name,
-            description,
-            supports_param: false,
-            platform: MeterPlatform::Zfs,
         }
     }
 }
 
-/// List of all available meters (matching C htop Platform_meterTypes order)
-/// Note: C htop adds individual CPU meters at the end via AvailableMetersPanel_addCPUMeters
-/// The description field is what's shown in the Available Meters panel.
-/// C htop shows description if set, otherwise falls back to uiName.
-pub const AVAILABLE_METERS: &[MeterInfo] = &[
-    // Regular meters - description matches C htop (uiName if no description set)
+/// Common meters available on all platforms
+const COMMON_METERS: &[MeterInfo] = &[
     MeterInfo::new("Clock", "Clock", "Clock"),
     MeterInfo::new("Date", "Date", "Date"),
     MeterInfo::new("DateTime", "Date and Time", "Date and Time"),
@@ -457,7 +386,7 @@ pub const AVAILABLE_METERS: &[MeterInfo] = &[
     MeterInfo::new("DiskIOTime", "Disk IO Time", "Disk percent time busy"),
     MeterInfo::new("NetworkIO", "Network IO", "Network IO"),
     MeterInfo::new("FileDescriptors", "File Descriptors", "Number of allocated/available file descriptors"),
-    // AllCPUs variants - C htop has descriptions for these
+    // AllCPUs variants
     MeterInfo::new("AllCPUs", "CPUs (1/1)", "CPUs (1/1): all CPUs"),
     MeterInfo::new("AllCPUs2", "CPUs (1&2/2)", "CPUs (1&2/2): all CPUs in 2 shorter columns"),
     MeterInfo::new("AllCPUs4", "CPUs (1&2&3&4/4)", "CPUs (1&2&3&4/4): all CPUs in 4 shorter columns"),
@@ -473,31 +402,69 @@ pub const AVAILABLE_METERS: &[MeterInfo] = &[
     MeterInfo::new("RightCPUs8", "CPUs (9-16/16)", "CPUs (9-16/16): second half in 8 shorter columns"),
     // Blank meter
     MeterInfo::new("Blank", "Blank", "Blank"),
-    // Linux-specific meters
-    MeterInfo::linux("HugePages", "HugePages", "HugePages"),
-    MeterInfo::linux("PressureStallCPUSome", "PSI some CPU", "Pressure Stall Information, some cpu"),
-    MeterInfo::linux("PressureStallIOSome", "PSI some IO", "Pressure Stall Information, some io"),
-    MeterInfo::linux("PressureStallIOFull", "PSI full IO", "Pressure Stall Information, full io"),
-    MeterInfo::linux("PressureStallIRQFull", "PSI full IRQ", "Pressure Stall Information, full irq"),
-    MeterInfo::linux("PressureStallMemorySome", "PSI some memory", "Pressure Stall Information, some memory"),
-    MeterInfo::linux("PressureStallMemoryFull", "PSI full memory", "Pressure Stall Information, full memory"),
-    MeterInfo::linux("Zram", "Zram", "Zram"),
-    MeterInfo::linux("SELinux", "SELinux", "SELinux state overview"),
-    MeterInfo::linux("Systemd", "Systemd state", "Systemd system state and unit overview"),
-    MeterInfo::linux("SystemdUser", "Systemd user state", "Systemd user state and unit overview"),
-    // ZFS meters (Linux, FreeBSD, Solaris)
-    MeterInfo::zfs("ZFSARC", "ZFS ARC", "ZFS ARC"),
-    MeterInfo::zfs("ZFSCARC", "ZFS CARC", "ZFS CARC: Compressed ARC statistics"),
-    // CPU meters at the end (like C htop AvailableMetersPanel_addCPUMeters)
+];
+
+/// ZFS meters - available on Linux, macOS, FreeBSD
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "freebsd"))]
+const ZFS_METERS: &[MeterInfo] = &[
+    MeterInfo::new("ZFSARC", "ZFS ARC", "ZFS ARC"),
+    MeterInfo::new("ZFSCARC", "ZFS CARC", "ZFS CARC: Compressed ARC statistics"),
+];
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+const ZFS_METERS: &[MeterInfo] = &[];
+
+/// Linux-specific meters
+#[cfg(target_os = "linux")]
+const LINUX_METERS: &[MeterInfo] = &[
+    MeterInfo::new("HugePages", "HugePages", "HugePages"),
+    MeterInfo::new("PressureStallCPUSome", "PSI some CPU", "Pressure Stall Information, some cpu"),
+    MeterInfo::new("PressureStallIOSome", "PSI some IO", "Pressure Stall Information, some io"),
+    MeterInfo::new("PressureStallIOFull", "PSI full IO", "Pressure Stall Information, full io"),
+    MeterInfo::new("PressureStallIRQFull", "PSI full IRQ", "Pressure Stall Information, full irq"),
+    MeterInfo::new("PressureStallMemorySome", "PSI some memory", "Pressure Stall Information, some memory"),
+    MeterInfo::new("PressureStallMemoryFull", "PSI full memory", "Pressure Stall Information, full memory"),
+    MeterInfo::new("Zram", "Zram", "Zram"),
+    MeterInfo::new("SELinux", "SELinux", "SELinux state overview"),
+    MeterInfo::new("Systemd", "Systemd state", "Systemd system state and unit overview"),
+    MeterInfo::new("SystemdUser", "Systemd user state", "Systemd user state and unit overview"),
+];
+
+#[cfg(not(target_os = "linux"))]
+const LINUX_METERS: &[MeterInfo] = &[];
+
+/// CPU meter (with param support) - available on all platforms
+const CPU_METER: &[MeterInfo] = &[
     MeterInfo::with_param("CPU", "CPU", "CPU average"),
 ];
 
-/// Get available meters filtered by current platform
+/// Get available meters for the current platform
+/// This combines common meters with platform-specific ones at runtime,
+/// but the platform-specific arrays are determined at compile time.
 fn available_meters_for_platform() -> Vec<&'static MeterInfo> {
-    AVAILABLE_METERS
-        .iter()
-        .filter(|m| m.platform.is_available())
-        .collect()
+    let mut meters: Vec<&'static MeterInfo> = Vec::new();
+    
+    // Add common meters
+    for m in COMMON_METERS {
+        meters.push(m);
+    }
+    
+    // Add Linux-specific meters (empty on other platforms)
+    for m in LINUX_METERS {
+        meters.push(m);
+    }
+    
+    // Add ZFS meters (available on Linux, macOS, FreeBSD)
+    for m in ZFS_METERS {
+        meters.push(m);
+    }
+    
+    // Add CPU meter at the end (like C htop)
+    for m in CPU_METER {
+        meters.push(m);
+    }
+    
+    meters
 }
 
 /// Get the display name for a meter by its internal name
