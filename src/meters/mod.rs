@@ -236,6 +236,7 @@ impl MeterType {
             "Memory" => Some(Box::new(MemoryMeter::new())),
             "Swap" => Some(Box::new(SwapMeter::new())),
             "LoadAverage" => Some(Box::new(LoadAverageMeter::new())),
+            "Load" => Some(Box::new(LoadMeter::new())),
             "Tasks" => Some(Box::new(TasksMeter::new())),
             "Uptime" => Some(Box::new(UptimeMeter::new())),
             "Blank" => Some(Box::new(BlankMeter::new())),

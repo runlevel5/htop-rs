@@ -368,73 +368,63 @@ impl MeterInfo {
 
 /// List of all available meters (matching C htop Platform_meterTypes order)
 /// Note: C htop adds individual CPU meters at the end via AvailableMetersPanel_addCPUMeters
+/// The description field is what's shown in the Available Meters panel.
+/// C htop shows description if set, otherwise falls back to uiName.
 pub const AVAILABLE_METERS: &[MeterInfo] = &[
-    // Regular meters in C htop Platform_meterTypes order (skipping index 0 which is CPUMeter)
-    MeterInfo::new("Clock", "Clock", "Current time"),
-    MeterInfo::new("Date", "Date", "Current date"),
-    MeterInfo::new("DateTime", "Date and Time", "Current date and time"),
-    MeterInfo::new("LoadAverage", "Load average", "System load averages"),
-    MeterInfo::new("Memory", "Memory", "Memory usage"),
-    MeterInfo::new("Swap", "Swap", "Swap usage"),
-    MeterInfo::new("Tasks", "Task counter", "Running/total tasks"),
-    MeterInfo::new("Battery", "Battery", "Battery charge level"),
-    MeterInfo::new("Hostname", "Hostname", "System hostname"),
-    MeterInfo::new("Uptime", "Uptime", "System uptime"),
-    // AllCPUs variants
-    MeterInfo::new("AllCPUs", "CPUs (1/1)", "All CPUs in a single row"),
-    MeterInfo::new("AllCPUs2", "CPUs (1/2)", "All CPUs in 2 rows"),
-    MeterInfo::new("AllCPUs4", "CPUs (1/4)", "All CPUs in 4 rows"),
-    MeterInfo::new("AllCPUs8", "CPUs (1/8)", "All CPUs in 8 rows"),
+    // Regular meters - description matches C htop (uiName if no description set)
+    MeterInfo::new("Clock", "Clock", "Clock"),
+    MeterInfo::new("Date", "Date", "Date"),
+    MeterInfo::new("DateTime", "Date and Time", "Date and Time"),
+    MeterInfo::new("LoadAverage", "Load average", "Load averages: 1 minute, 5 minutes, 15 minutes"),
+    MeterInfo::new("Load", "Load", "Load: average of ready processes in the last minute"),
+    MeterInfo::new("Memory", "Memory", "Memory"),
+    MeterInfo::new("Swap", "Swap", "Swap"),
+    MeterInfo::new("Tasks", "Task counter", "Task counter"),
+    MeterInfo::new("Battery", "Battery", "Battery"),
+    MeterInfo::new("Hostname", "Hostname", "Hostname"),
+    MeterInfo::new("Uptime", "Uptime", "Uptime"),
+    // AllCPUs variants - C htop has descriptions for these
+    MeterInfo::new("AllCPUs", "CPUs (1/1)", "CPUs (1/1): all CPUs"),
+    MeterInfo::new("AllCPUs2", "CPUs (1&2/2)", "CPUs (1&2/2): all CPUs in 2 shorter columns"),
+    MeterInfo::new("AllCPUs4", "CPUs (1&2&3&4/4)", "CPUs (1&2&3&4/4): all CPUs in 4 shorter columns"),
+    MeterInfo::new("AllCPUs8", "CPUs (1-8/8)", "CPUs (1-8/8): all CPUs in 8 shorter columns"),
     // Left/Right CPUs variants
-    MeterInfo::new("LeftCPUs", "Left CPUs (1/1)", "Left half of CPUs (1 row)"),
-    MeterInfo::new(
-        "RightCPUs",
-        "Right CPUs (1/1)",
-        "Right half of CPUs (1 row)",
-    ),
-    MeterInfo::new("LeftCPUs2", "Left CPUs (1/2)", "Left half of CPUs (2 rows)"),
-    MeterInfo::new(
-        "RightCPUs2",
-        "Right CPUs (1/2)",
-        "Right half of CPUs (2 rows)",
-    ),
-    MeterInfo::new("LeftCPUs4", "Left CPUs (1/4)", "Left half of CPUs (4 rows)"),
-    MeterInfo::new(
-        "RightCPUs4",
-        "Right CPUs (1/4)",
-        "Right half of CPUs (4 rows)",
-    ),
-    MeterInfo::new("LeftCPUs8", "Left CPUs (1/8)", "Left half of CPUs (8 rows)"),
-    MeterInfo::new(
-        "RightCPUs8",
-        "Right CPUs (1/8)",
-        "Right half of CPUs (8 rows)",
-    ),
+    MeterInfo::new("LeftCPUs", "CPUs (1/2)", "CPUs (1/2): first half of list"),
+    MeterInfo::new("RightCPUs", "CPUs (2/2)", "CPUs (2/2): second half of list"),
+    MeterInfo::new("LeftCPUs2", "CPUs (1&2/4)", "CPUs (1&2/4): first half in 2 shorter columns"),
+    MeterInfo::new("RightCPUs2", "CPUs (3&4/4)", "CPUs (3&4/4): second half in 2 shorter columns"),
+    MeterInfo::new("LeftCPUs4", "CPUs (1-4/8)", "CPUs (1-4/8): first half in 4 shorter columns"),
+    MeterInfo::new("RightCPUs4", "CPUs (5-8/8)", "CPUs (5-8/8): second half in 4 shorter columns"),
+    MeterInfo::new("LeftCPUs8", "CPUs (1-8/16)", "CPUs (1-8/16): first half in 8 shorter columns"),
+    MeterInfo::new("RightCPUs8", "CPUs (9-16/16)", "CPUs (9-16/16): second half in 8 shorter columns"),
     // Blank meter
-    MeterInfo::new("Blank", "Blank", "Empty spacer"),
+    MeterInfo::new("Blank", "Blank", "Blank"),
     // CPU meters at the end (like C htop AvailableMetersPanel_addCPUMeters)
-    MeterInfo::with_param("CPU", "CPU average", "CPU usage average"),
+    MeterInfo::with_param("CPU", "CPU", "CPU average"),
 ];
 
 /// Get the display name for a meter by its internal name
+/// Get the display name for a meter by its internal name (used in meter columns)
+/// This matches C htop's uiName field
 fn meter_display_name(name: &str, mode: MeterMode) -> String {
     let base_name = match name {
         "CPU" => "CPU",
         "AllCPUs" => "CPUs (1/1)",
-        "AllCPUs2" => "CPUs (1/2)",
-        "AllCPUs4" => "CPUs (1/4)",
-        "AllCPUs8" => "CPUs (1/8)",
-        "LeftCPUs" => "Left CPUs (1/1)",
-        "LeftCPUs2" => "Left CPUs (1/2)",
-        "LeftCPUs4" => "Left CPUs (1/4)",
-        "LeftCPUs8" => "Left CPUs (1/8)",
-        "RightCPUs" => "Right CPUs (1/1)",
-        "RightCPUs2" => "Right CPUs (1/2)",
-        "RightCPUs4" => "Right CPUs (1/4)",
-        "RightCPUs8" => "Right CPUs (1/8)",
+        "AllCPUs2" => "CPUs (1&2/2)",
+        "AllCPUs4" => "CPUs (1&2&3&4/4)",
+        "AllCPUs8" => "CPUs (1-8/8)",
+        "LeftCPUs" => "CPUs (1/2)",
+        "LeftCPUs2" => "CPUs (1&2/4)",
+        "LeftCPUs4" => "CPUs (1-4/8)",
+        "LeftCPUs8" => "CPUs (1-8/16)",
+        "RightCPUs" => "CPUs (2/2)",
+        "RightCPUs2" => "CPUs (3&4/4)",
+        "RightCPUs4" => "CPUs (5-8/8)",
+        "RightCPUs8" => "CPUs (9-16/16)",
         "Memory" => "Memory",
         "Swap" => "Swap",
         "LoadAverage" => "Load average",
+        "Load" => "Load",
         "Tasks" => "Task counter",
         "Uptime" => "Uptime",
         "Battery" => "Battery",
@@ -1426,9 +1416,9 @@ impl SetupScreen {
                 let meter_info = &AVAILABLE_METERS[item_index];
                 let is_selected = has_focus && item_index == self.meters_available_selection;
 
-                // Show display name (description could be shown as tooltip)
+                // Show description in available meters panel (like C htop)
                 let display_text: String = meter_info
-                    .display_name
+                    .description
                     .chars()
                     .take((w - 1) as usize)
                     .collect();
