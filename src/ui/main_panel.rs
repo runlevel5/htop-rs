@@ -7,10 +7,10 @@ use super::function_bar::FunctionBar;
 use super::panel::HandlerResult;
 use super::rich_string::RichString;
 use super::row_print::{
-    print_kbytes, print_left_aligned, print_percentage, print_time,
+    print_count, print_kbytes, print_left_aligned, print_percentage, print_time,
 };
 #[cfg(target_os = "linux")]
-use super::row_print::{print_bytes, print_count, print_rate};
+use super::row_print::{print_bytes, print_rate};
 use super::Crt;
 use crate::core::{highlight_flags, FieldWidths, Machine, Process, ProcessField, ProcessState, Settings};
 #[cfg(target_os = "linux")]
@@ -984,12 +984,12 @@ impl MainPanel {
                 str.append(&format!("{:>width$} ", process.tpgid, width = width), base_color);
             }
             ProcessField::Minflt => {
-                // MINFLT: minor faults (11 chars)
-                str.append(&format!("{:>11} ", process.minflt), base_color);
+                // MINFLT: minor faults (12 chars) - uses Row_printCount coloring
+                print_count(str, process.minflt, coloring && !is_shadowed, crt);
             }
             ProcessField::Majflt => {
-                // MAJFLT: major faults (11 chars)
-                str.append(&format!("{:>11} ", process.majflt), base_color);
+                // MAJFLT: major faults (12 chars) - uses Row_printCount coloring
+                print_count(str, process.majflt, coloring && !is_shadowed, crt);
             }
             ProcessField::Starttime => {
                 // START: start time (6 chars total matching C htop title "START ")
@@ -1138,13 +1138,13 @@ impl MainPanel {
             // === Linux-specific fields ===
             #[cfg(target_os = "linux")]
             ProcessField::Cminflt => {
-                // CMINFLT: children's minor faults (11 chars)
-                str.append(&format!("{:>11} ", process.cminflt), base_color);
+                // CMINFLT: children's minor faults (12 chars) - uses Row_printCount coloring
+                print_count(str, process.cminflt, coloring && !is_shadowed, crt);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Cmajflt => {
-                // CMAJFLT: children's major faults (11 chars)
-                str.append(&format!("{:>11} ", process.cmajflt), base_color);
+                // CMAJFLT: children's major faults (12 chars) - uses Row_printCount coloring
+                print_count(str, process.cmajflt, coloring && !is_shadowed, crt);
             }
             #[cfg(target_os = "linux")]
             ProcessField::Utime => {
