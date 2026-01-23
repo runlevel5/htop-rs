@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::process::{CommandStrParams, Process, ProcessField, ProcessList};
+use super::field_widths::FieldWidths;
 
 /// Memory type alias (in bytes)
 pub type Memory = u64;
@@ -231,6 +232,9 @@ pub struct Machine {
     // Settings copied from Settings for platform access
     pub update_process_names: bool,
     pub show_cpu_frequency: bool,
+
+    // Dynamic field widths for columns
+    pub field_widths: FieldWidths,
 }
 
 impl Machine {
@@ -296,6 +300,7 @@ impl Machine {
             boot_time: 0,
             update_process_names: false,
             show_cpu_frequency: false,
+            field_widths: FieldWidths::new(),
         }
     }
 

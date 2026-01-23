@@ -333,6 +333,11 @@ pub fn scan_processes(machine: &mut Machine) {
     let total_mem_kb = machine.total_mem as f64;
     let boot_time = machine.boot_time;
 
+    // Track max values for dynamic column widths
+    let mut max_pid: i32 = 0;
+    let mut max_uid: u32 = 0;
+    let mut max_percent_cpu: f32 = 0.0;
+
     for proc_result in all_procs {
         let proc = match proc_result {
             Ok(p) => p,
@@ -529,9 +534,27 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
 
+        // Track max values for dynamic column widths
+        if pid > max_pid {
+            max_pid = pid;
+        }
+        if process.uid > max_uid {
+            max_uid = process.uid;
+        }
+        if process.percent_cpu > max_percent_cpu {
+            max_percent_cpu = process.percent_cpu;
+        }
+
         process.updated = true;
         machine.processes.add(process);
     }
+
+    // Update dynamic field widths based on scan results
+    machine.max_pid = max_pid;
+    machine.max_user_id = max_uid;
+    machine.field_widths.set_pid_width(max_pid);
+    machine.field_widths.set_uid_width(max_uid);
+    machine.field_widths.update_percent_cpu_width(max_percent_cpu);
 }
 
 /// Check if a process uses deleted libraries by scanning /proc/PID/maps

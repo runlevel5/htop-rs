@@ -413,18 +413,42 @@ impl ProcessField {
         }
     }
 
-    /// Get the title (column header) for a process field
-    pub fn title(self) -> &'static str {
+    /// Get the base title (without padding) for dynamic-width columns
+    /// This is used by FieldWidths to create properly padded titles
+    pub fn base_title(self) -> &'static str {
         match self {
-            // Common fields
+            // PID columns - base title without padding
             ProcessField::Pid => "PID",
-            ProcessField::Command => "Command ",
-            ProcessField::State => "S ",
             ProcessField::Ppid => "PPID",
             ProcessField::Pgrp => "PGRP",
             ProcessField::Session => "SID",
-            ProcessField::Tty => "TTY      ",
             ProcessField::Tpgid => "TPGID",
+            ProcessField::Tgid => "TGID",
+            // UID column
+            ProcessField::StUid => "UID",
+            // Auto-width columns
+            ProcessField::PercentCpu => "CPU%",
+            ProcessField::PercentNormCpu => "NCPU%",
+            // All other fields use their regular title
+            _ => self.title(),
+        }
+    }
+
+    /// Get the title (column header) for a process field
+    /// NOTE: For dynamic-width columns (PID, UID, PERCENT_CPU, etc.),
+    /// use FieldWidths::get_title() instead for proper padding.
+    pub fn title(self) -> &'static str {
+        match self {
+            // Common fields
+            // PID columns use 5 digits + 1 space = 6 chars (matching C htop's ROW_MIN_PID_DIGITS=5)
+            ProcessField::Pid => "  PID ",
+            ProcessField::Command => "Command ",
+            ProcessField::State => "S ",
+            ProcessField::Ppid => " PPID ",
+            ProcessField::Pgrp => " PGRP ",
+            ProcessField::Session => "  SID ",
+            ProcessField::Tty => "TTY      ",
+            ProcessField::Tpgid => "TPGID ",
             ProcessField::Minflt => "     MINFLT ",
             ProcessField::Majflt => "     MAJFLT ",
             ProcessField::Priority => "PRI ",
@@ -433,13 +457,13 @@ impl ProcessField {
             ProcessField::Processor => "CPU ",
             ProcessField::MSize => " VIRT ",
             ProcessField::MResident => "  RES ",
-            ProcessField::StUid => "UID",
+            ProcessField::StUid => "  UID ",
             ProcessField::PercentCpu => " CPU%",
             ProcessField::PercentMem => "MEM% ",
             ProcessField::User => "USER       ",
             ProcessField::Time => "  TIME+  ",
             ProcessField::Nlwp => "NLWP ",
-            ProcessField::Tgid => "TGID",
+            ProcessField::Tgid => " TGID ",
             ProcessField::PercentNormCpu => "NCPU%",
             ProcessField::Elapsed => "ELAPSED  ",
             ProcessField::SchedulerPolicy => "SCHED ",

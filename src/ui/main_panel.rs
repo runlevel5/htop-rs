@@ -12,7 +12,7 @@ use super::row_print::{
 #[cfg(target_os = "linux")]
 use super::row_print::print_rate;
 use super::Crt;
-use crate::core::{highlight_flags, Machine, Process, ProcessField, ProcessState, Settings};
+use crate::core::{highlight_flags, FieldWidths, Machine, Process, ProcessField, ProcessState, Settings};
 #[cfg(target_os = "linux")]
 use crate::platform::linux::{
     ioprio_class, ioprio_data, IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE, IOPRIO_CLASS_NONE,
@@ -342,6 +342,7 @@ impl MainPanel {
         sort_key: ProcessField,
         sort_descending: bool,
         filter_active: bool,
+        field_widths: &FieldWidths,
     ) {
         // Normal header color (green)
         let header_attr = crt.color(ColorElement::PanelHeaderFocus);
@@ -381,7 +382,16 @@ impl MainPanel {
             filter_active && self.fields.contains(&ProcessField::Command);
 
         for field in &self.fields {
-            let title = field.title();
+            // Get title - use dynamic title for PID/UID/PERCENT_CPU columns
+            let title = if FieldWidths::is_pid_column(*field) 
+                || *field == ProcessField::StUid 
+                || FieldWidths::is_auto_width(*field) 
+            {
+                field_widths.get_title(*field)
+            } else {
+                field.title().to_string()
+            };
+            
             let is_sort_column = *field == active_sort_key;
             // Command column turns yellow when filter is active
             let is_filter_column = filter_active && *field == ProcessField::Command;
@@ -507,6 +517,7 @@ impl MainPanel {
         current_uid: u32,
         realtime_ms: u64,
         active_cpus: u32,
+        field_widths: &FieldWidths,
     ) {
         let selection_attr = if selected {
             crt.color(self.selection_color)
@@ -539,6 +550,7 @@ impl MainPanel {
                 is_shadowed,
                 realtime_ms,
                 active_cpus,
+                field_widths,
             );
         }
 
@@ -579,6 +591,7 @@ impl MainPanel {
         is_shadowed: bool,
         realtime_ms: u64,
         active_cpus: u32,
+        field_widths: &FieldWidths,
     ) {
         let process_color = crt.color(ColorElement::Process);
         let shadow_color = crt.color(ColorElement::ProcessShadow);
@@ -598,10 +611,14 @@ impl MainPanel {
 
         match field {
             ProcessField::Pid => {
-                str.append(&format!("{:>5} ", process.pid), base_color);
+                // PID: dynamic width based on max PID
+                let width = field_widths.pid_digits;
+                str.append(&format!("{:>width$} ", process.pid, width = width), base_color);
             }
             ProcessField::Ppid => {
-                str.append(&format!("{:>5} ", process.ppid), base_color);
+                // PPID: dynamic width based on max PID
+                let width = field_widths.pid_digits;
+                str.append(&format!("{:>width$} ", process.ppid, width = width), base_color);
             }
             ProcessField::User => {
                 // USER: left-aligned, 10 chars, always use is_shadowed computation
@@ -672,19 +689,20 @@ impl MainPanel {
                 print_kbytes(str, process.m_share as u64, coloring && !is_shadowed, crt);
             }
             ProcessField::PercentCpu => {
-                // CPU%: percentage with coloring (width 5 to match C htop)
+                // CPU%: percentage with coloring (dynamic width)
                 // When shadowed, use shadow color
+                let width = field_widths.percent_cpu_width;
                 if is_shadowed {
-                    str.append(&format!("{:>4.1} ", process.percent_cpu), shadow_color);
+                    str.append(&format!("{:>width$.1} ", process.percent_cpu, width = width), shadow_color);
                 } else {
-                    print_percentage(str, process.percent_cpu, 5, crt);
+                    print_percentage(str, process.percent_cpu, width, crt);
                 }
             }
             ProcessField::PercentMem => {
                 // MEM%: percentage with coloring (width 4, no autoWidth)
                 // When shadowed, use shadow color
                 if is_shadowed {
-                    str.append(&format!("{:>3.1} ", process.percent_mem), shadow_color);
+                    str.append(&format!("{:>4.1} ", process.percent_mem), shadow_color);
                 } else {
                     print_percentage(str, process.percent_mem, 4, crt);
                 }
@@ -829,13 +847,20 @@ impl MainPanel {
                 str.append_char(' ', attr);
             }
             ProcessField::Tty => {
-                let tty = process.tty_name.as_deref().unwrap_or("?");
-                let attr = if is_shadowed || tty == "?" {
-                    shadow_color
+                // TTY: controlling terminal (8 chars + 1 space = 9 total)
+                // C htop shows "(no tty) " for processes without a terminal
+                if let Some(tty) = process.tty_name.as_deref() {
+                    // Strip /dev/ prefix if present (matching C htop)
+                    let name = tty.strip_prefix("/dev/").unwrap_or(tty);
+                    let attr = if is_shadowed {
+                        shadow_color
+                    } else {
+                        process_color
+                    };
+                    print_left_aligned(str, attr, name, 8);
                 } else {
-                    process_color
-                };
-                print_left_aligned(str, attr, tty, 8);
+                    str.append("(no tty) ", shadow_color);
+                }
             }
             #[cfg(target_os = "linux")]
             ProcessField::IOPriority => {
@@ -934,16 +959,19 @@ impl MainPanel {
             
             // === Stub implementations for unimplemented common fields ===
             ProcessField::Pgrp => {
-                // PGRP: process group ID (5 chars like PID)
-                str.append(&format!("{:>5} ", process.pgrp), base_color);
+                // PGRP: process group ID (dynamic width like PID)
+                let width = field_widths.pid_digits;
+                str.append(&format!("{:>width$} ", process.pgrp, width = width), base_color);
             }
             ProcessField::Session => {
-                // SID: session ID (5 chars)
-                str.append(&format!("{:>5} ", process.session), base_color);
+                // SID: session ID (dynamic width like PID)
+                let width = field_widths.pid_digits;
+                str.append(&format!("{:>width$} ", process.session, width = width), base_color);
             }
             ProcessField::Tpgid => {
-                // TPGID: terminal process group ID (5 chars)
-                str.append(&format!("{:>5} ", process.tpgid), base_color);
+                // TPGID: terminal process group ID (dynamic width like PID)
+                let width = field_widths.pid_digits;
+                str.append(&format!("{:>width$} ", process.tpgid, width = width), base_color);
             }
             ProcessField::Minflt => {
                 // MINFLT: minor faults (11 chars)
@@ -954,18 +982,18 @@ impl MainPanel {
                 str.append(&format!("{:>11} ", process.majflt), base_color);
             }
             ProcessField::Starttime => {
-                // START: start time (7 chars including trailing space)
+                // START: start time (6 chars total matching C htop title "START ")
                 // Format based on how long ago the process started:
-                // - < 24 hours: "HH:MM " (time today)
-                // - < 365 days: "MmmDD " (month + day, e.g., "Jan23 ")
-                // - >= 365 days: " YYYY " (year, e.g., " 2024 ")
+                // - < 24 hours: "HH:MM " (time today) - %R format
+                // - < 365 days: "MmmDD " (month + day, e.g., "Jan23 ") - %b%d format
+                // - >= 365 days: " YYYY " (year, e.g., " 2024 ") - %Y format with leading space
                 use chrono::{Local, TimeZone, Datelike, Timelike};
                 
                 let now = realtime_ms / 1000; // current time in seconds
                 let start = process.starttime_ctime;
                 
                 if start <= 0 {
-                    str.append("   ?   ", shadow_color);
+                    str.append("  N/A ", shadow_color);
                 } else {
                     let age_seconds = (now as i64).saturating_sub(start);
                     
@@ -988,16 +1016,17 @@ impl MainPanel {
                         };
                         str.append(&formatted, base_color);
                     } else {
-                        str.append("   ?   ", shadow_color);
+                        str.append("  N/A ", shadow_color);
                     }
                 }
             }
             ProcessField::StUid => {
-                // UID: user ID (5 chars)
-                str.append(&format!("{:>5} ", process.uid), base_color);
+                // UID: user ID (dynamic width)
+                let width = field_widths.uid_digits;
+                str.append(&format!("{:>width$} ", process.uid, width = width), base_color);
             }
             ProcessField::Tgid => {
-                // TGID: thread group ID (same as PID for main thread)
+                // TGID: thread group ID (dynamic width like PID)
                 // For userland threads, tgid == ppid (the main process)
                 // For main processes, tgid == pid
                 let tgid = if process.is_userland_thread {
@@ -1005,10 +1034,11 @@ impl MainPanel {
                 } else {
                     process.pid
                 };
-                str.append(&format!("{:>5} ", tgid), base_color);
+                let width = field_widths.pid_digits;
+                str.append(&format!("{:>width$} ", tgid, width = width), base_color);
             }
             ProcessField::PercentNormCpu => {
-                // NCPU%: normalized CPU percentage (6 chars)
+                // NCPU%: normalized CPU percentage (dynamic width)
                 // This is percent_cpu divided by the number of active CPUs
                 let norm_cpu = if active_cpus > 0 {
                     process.percent_cpu / active_cpus as f32
@@ -1016,10 +1046,11 @@ impl MainPanel {
                     process.percent_cpu
                 };
                 
+                let width = field_widths.percent_norm_cpu_width;
                 if is_shadowed {
-                    str.append(&format!("{:>5.1} ", norm_cpu), shadow_color);
+                    str.append(&format!("{:>width$.1} ", norm_cpu, width = width), shadow_color);
                 } else {
-                    print_percentage(str, norm_cpu, 5, crt);
+                    print_percentage(str, norm_cpu, width, crt);
                 }
             }
             ProcessField::Elapsed => {
@@ -1059,9 +1090,10 @@ impl MainPanel {
                 str.append(&format!("{:<5} ", policy_str), base_color);
             }
             ProcessField::ProcComm => {
-                // COMM: process name from /proc/[pid]/comm (16 chars)
+                // COMM: process name from /proc/[pid]/comm (15 chars + space = 16 total)
+                // Matches C htop's TASK_COMM_LEN - 1 = 15
                 let comm = process.comm.as_deref().unwrap_or("?");
-                print_left_aligned(str, base_color, comm, 16);
+                print_left_aligned(str, base_color, comm, 15);
             }
             ProcessField::ProcExe => {
                 // EXE: executable basename (15 chars + space)
@@ -1321,6 +1353,7 @@ impl MainPanel {
                 machine.sort_key,
                 machine.sort_descending,
                 self.filter.is_some() || search_active,
+                &machine.field_widths,
             );
             self.y + 1
         } else {
@@ -1365,7 +1398,7 @@ impl MainPanel {
                     let process_idx = self.cached_display_indices[display_idx];
                     if let Some(process) = machine.processes.processes.get(process_idx) {
                         let selected = display_idx as i32 == self.selected;
-                        self.draw_process(crt, y, process, selected, settings, current_uid, realtime_ms, active_cpus);
+                        self.draw_process(crt, y, process, selected, settings, current_uid, realtime_ms, active_cpus, &machine.field_widths);
                     }
                 } else {
                     // Empty line
@@ -1394,7 +1427,7 @@ impl MainPanel {
                 if old_row < self.cached_display_indices.len() {
                     let process_idx = self.cached_display_indices[old_row];
                     if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(crt, old_y, process, false, settings, current_uid, realtime_ms, active_cpus);
+                        self.draw_process(crt, old_y, process, false, settings, current_uid, realtime_ms, active_cpus, &machine.field_widths);
                     }
                 }
             }
@@ -1406,7 +1439,7 @@ impl MainPanel {
                 if new_row < self.cached_display_indices.len() {
                     let process_idx = self.cached_display_indices[new_row];
                     if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(crt, new_y, process, true, settings, current_uid, realtime_ms, active_cpus);
+                        self.draw_process(crt, new_y, process, true, settings, current_uid, realtime_ms, active_cpus, &machine.field_widths);
                     }
                 }
             }

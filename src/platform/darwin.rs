@@ -735,6 +735,11 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
     machine.userland_threads = 0;
     machine.kernel_threads = 0;
 
+    // Track max values for dynamic column widths
+    let mut max_pid: i32 = 0;
+    let mut max_uid: u32 = 0;
+    let mut max_percent_cpu: f32 = 0.0;
+
     // Process each PID
     for &pid in &pids {
         if pid <= 0 {
@@ -913,7 +918,25 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
         // Check if kernel thread (PID 0 or ppid 0 with specific patterns)
         process.is_kernel_thread = pid == 0 || process.ppid == 0;
 
+        // Track max values for dynamic column widths
+        if pid > max_pid {
+            max_pid = pid;
+        }
+        if process.uid > max_uid {
+            max_uid = process.uid;
+        }
+        if process.percent_cpu > max_percent_cpu {
+            max_percent_cpu = process.percent_cpu;
+        }
+
         process.updated = true;
         machine.processes.add(process);
     }
+
+    // Update dynamic field widths based on scan results
+    machine.max_pid = max_pid;
+    machine.max_user_id = max_uid;
+    machine.field_widths.set_pid_width(max_pid);
+    machine.field_widths.set_uid_width(max_uid);
+    machine.field_widths.update_percent_cpu_width(max_percent_cpu);
 }
