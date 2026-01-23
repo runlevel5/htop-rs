@@ -325,6 +325,41 @@ pub const COLOR_SCHEME_NAMES: &[&str] = &[
     "Nord",
 ];
 
+/// Platform requirement for a meter
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeterPlatform {
+    /// Available on all platforms
+    All,
+    /// Linux only
+    Linux,
+    /// Platforms with ZFS support (Linux, FreeBSD, Solaris)
+    Zfs,
+}
+
+impl MeterPlatform {
+    /// Check if this meter is available on the current platform
+    #[cfg(target_os = "linux")]
+    pub const fn is_available(&self) -> bool {
+        // Linux supports all meter types
+        true
+    }
+
+    #[cfg(target_os = "macos")]
+    pub const fn is_available(&self) -> bool {
+        matches!(self, MeterPlatform::All)
+    }
+
+    #[cfg(target_os = "freebsd")]
+    pub const fn is_available(&self) -> bool {
+        matches!(self, MeterPlatform::All | MeterPlatform::Zfs)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
+    pub const fn is_available(&self) -> bool {
+        matches!(self, MeterPlatform::All)
+    }
+}
+
 /// Available meter information
 #[derive(Debug, Clone)]
 pub struct MeterInfo {
@@ -336,6 +371,8 @@ pub struct MeterInfo {
     pub description: &'static str,
     /// Whether this meter type supports a parameter (e.g., CPU number)
     pub supports_param: bool,
+    /// Platform requirement
+    pub platform: MeterPlatform,
 }
 
 impl MeterInfo {
@@ -349,6 +386,7 @@ impl MeterInfo {
             display_name,
             description,
             supports_param: false,
+            platform: MeterPlatform::All,
         }
     }
 
@@ -362,6 +400,35 @@ impl MeterInfo {
             display_name,
             description,
             supports_param: true,
+            platform: MeterPlatform::All,
+        }
+    }
+
+    const fn linux(
+        name: &'static str,
+        display_name: &'static str,
+        description: &'static str,
+    ) -> Self {
+        MeterInfo {
+            name,
+            display_name,
+            description,
+            supports_param: false,
+            platform: MeterPlatform::Linux,
+        }
+    }
+
+    const fn zfs(
+        name: &'static str,
+        display_name: &'static str,
+        description: &'static str,
+    ) -> Self {
+        MeterInfo {
+            name,
+            display_name,
+            description,
+            supports_param: false,
+            platform: MeterPlatform::Zfs,
         }
     }
 }
@@ -407,23 +474,31 @@ pub const AVAILABLE_METERS: &[MeterInfo] = &[
     // Blank meter
     MeterInfo::new("Blank", "Blank", "Blank"),
     // Linux-specific meters
-    MeterInfo::new("HugePages", "HugePages", "HugePages"),
-    MeterInfo::new("PressureStallCPUSome", "PSI some CPU", "Pressure Stall Information, some cpu"),
-    MeterInfo::new("PressureStallIOSome", "PSI some IO", "Pressure Stall Information, some io"),
-    MeterInfo::new("PressureStallIOFull", "PSI full IO", "Pressure Stall Information, full io"),
-    MeterInfo::new("PressureStallIRQFull", "PSI full IRQ", "Pressure Stall Information, full irq"),
-    MeterInfo::new("PressureStallMemorySome", "PSI some memory", "Pressure Stall Information, some memory"),
-    MeterInfo::new("PressureStallMemoryFull", "PSI full memory", "Pressure Stall Information, full memory"),
-    MeterInfo::new("Zram", "Zram", "Zram"),
-    MeterInfo::new("SELinux", "SELinux", "SELinux state overview"),
-    MeterInfo::new("Systemd", "Systemd state", "Systemd system state and unit overview"),
-    MeterInfo::new("SystemdUser", "Systemd user state", "Systemd user state and unit overview"),
-    // ZFS meters
-    MeterInfo::new("ZFSARC", "ZFS ARC", "ZFS ARC"),
-    MeterInfo::new("ZFSCARC", "ZFS CARC", "ZFS CARC: Compressed ARC statistics"),
+    MeterInfo::linux("HugePages", "HugePages", "HugePages"),
+    MeterInfo::linux("PressureStallCPUSome", "PSI some CPU", "Pressure Stall Information, some cpu"),
+    MeterInfo::linux("PressureStallIOSome", "PSI some IO", "Pressure Stall Information, some io"),
+    MeterInfo::linux("PressureStallIOFull", "PSI full IO", "Pressure Stall Information, full io"),
+    MeterInfo::linux("PressureStallIRQFull", "PSI full IRQ", "Pressure Stall Information, full irq"),
+    MeterInfo::linux("PressureStallMemorySome", "PSI some memory", "Pressure Stall Information, some memory"),
+    MeterInfo::linux("PressureStallMemoryFull", "PSI full memory", "Pressure Stall Information, full memory"),
+    MeterInfo::linux("Zram", "Zram", "Zram"),
+    MeterInfo::linux("SELinux", "SELinux", "SELinux state overview"),
+    MeterInfo::linux("Systemd", "Systemd state", "Systemd system state and unit overview"),
+    MeterInfo::linux("SystemdUser", "Systemd user state", "Systemd user state and unit overview"),
+    // ZFS meters (Linux, FreeBSD, Solaris)
+    MeterInfo::zfs("ZFSARC", "ZFS ARC", "ZFS ARC"),
+    MeterInfo::zfs("ZFSCARC", "ZFS CARC", "ZFS CARC: Compressed ARC statistics"),
     // CPU meters at the end (like C htop AvailableMetersPanel_addCPUMeters)
     MeterInfo::with_param("CPU", "CPU", "CPU average"),
 ];
+
+/// Get available meters filtered by current platform
+fn available_meters_for_platform() -> Vec<&'static MeterInfo> {
+    AVAILABLE_METERS
+        .iter()
+        .filter(|m| m.platform.is_available())
+        .collect()
+}
 
 /// Get the display name for a meter by its internal name
 /// Get the display name for a meter by its internal name (used in meter columns)
@@ -1460,6 +1535,9 @@ impl SetupScreen {
         };
         let normal_attr = crt.color(ColorElement::Process);
 
+        // Get platform-filtered meters
+        let available_meters = available_meters_for_platform();
+
         // Draw available meters
         let display_height = (h - 1) as usize;
         for i in 0..display_height {
@@ -1467,8 +1545,8 @@ impl SetupScreen {
             let screen_y = y + 1 + i as i32;
             mv(screen_y, x);
 
-            if item_index < AVAILABLE_METERS.len() {
-                let meter_info = &AVAILABLE_METERS[item_index];
+            if item_index < available_meters.len() {
+                let meter_info = available_meters[item_index];
                 let is_selected = has_focus && item_index == self.meters_available_selection;
 
                 // Show description in available meters panel (like C htop)
@@ -2680,7 +2758,8 @@ impl SetupScreen {
 
         if self.meters_column_focus == num_columns {
             // Available meters panel
-            if self.meters_available_selection < AVAILABLE_METERS.len().saturating_sub(1) {
+            let available_meters = available_meters_for_platform();
+            if self.meters_available_selection < available_meters.len().saturating_sub(1) {
                 self.meters_available_selection += 1;
                 // Adjust scroll
                 let display_height = self.content_panel.h - 1;
@@ -2716,11 +2795,12 @@ impl SetupScreen {
         header: &mut Header,
         target_column: usize,
     ) {
-        if self.meters_available_selection >= AVAILABLE_METERS.len() {
+        let available_meters = available_meters_for_platform();
+        if self.meters_available_selection >= available_meters.len() {
             return;
         }
 
-        let meter_info = &AVAILABLE_METERS[self.meters_available_selection];
+        let meter_info = available_meters[self.meters_available_selection];
 
         // Create meter config
         let config = MeterConfig {
