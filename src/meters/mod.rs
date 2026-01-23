@@ -16,6 +16,7 @@ mod hostname_meter;
 mod load_meter;
 mod memory_meter;
 mod networkio_meter;
+mod stub_meters;
 mod swap_meter;
 mod tasks_meter;
 mod uptime_meter;
@@ -36,6 +37,7 @@ pub use hostname_meter::*;
 pub use load_meter::*;
 pub use memory_meter::*;
 pub use networkio_meter::*;
+pub use stub_meters::*;
 pub use swap_meter::*;
 pub use tasks_meter::*;
 pub use uptime_meter::*;
@@ -247,6 +249,25 @@ impl MeterType {
             "Battery" => Some(Box::new(BatteryMeter::new())),
             "DiskIO" => Some(Box::new(DiskIOMeter::new())),
             "NetworkIO" => Some(Box::new(NetworkIOMeter::new())),
+            // Stub meters (not yet implemented)
+            "MemorySwap" => Some(Box::new(MemorySwapMeter::new())),
+            "System" => Some(Box::new(SystemMeter::new())),
+            "DiskIORate" => Some(Box::new(DiskIORateMeter::new())),
+            "DiskIOTime" => Some(Box::new(DiskIOTimeMeter::new())),
+            "FileDescriptors" => Some(Box::new(FileDescriptorsMeter::new())),
+            "HugePages" => Some(Box::new(HugePagesMeter::new())),
+            "PressureStallCPUSome" => Some(Box::new(PressureStallCPUSomeMeter::new())),
+            "PressureStallIOSome" => Some(Box::new(PressureStallIOSomeMeter::new())),
+            "PressureStallIOFull" => Some(Box::new(PressureStallIOFullMeter::new())),
+            "PressureStallIRQFull" => Some(Box::new(PressureStallIRQFullMeter::new())),
+            "PressureStallMemorySome" => Some(Box::new(PressureStallMemorySomeMeter::new())),
+            "PressureStallMemoryFull" => Some(Box::new(PressureStallMemoryFullMeter::new())),
+            "Zram" => Some(Box::new(ZramMeter::new())),
+            "SELinux" => Some(Box::new(SELinuxMeter::new())),
+            "Systemd" => Some(Box::new(SystemdMeter::new())),
+            "SystemdUser" => Some(Box::new(SystemdUserMeter::new())),
+            "ZFSARC" => Some(Box::new(ZfsArcMeter::new())),
+            "ZFSCARC" => Some(Box::new(ZfsCompressedArcMeter::new())),
             _ => None,
         }
     }
