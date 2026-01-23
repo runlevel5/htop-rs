@@ -74,6 +74,9 @@ pub struct ScreenManager {
     /// In mode 1, the bar is hidden on ESC and shown again on any other key
     function_bar_hidden: bool,
 
+    /// Whether header meters need redrawing (optimization)
+    header_needs_redraw: bool,
+
     /// Sort timeout counter (like C htop)
     /// When user presses keys, reset to SORT_TIMEOUT_RESET
     /// Decrements on idle, sorting only happens when this reaches 0
@@ -95,6 +98,7 @@ impl ScreenManager {
             paused: false,
             last_update: Instant::now(),
             function_bar_hidden: false,
+            header_needs_redraw: true,
             sort_timeout: 0,
         }
     }
@@ -349,9 +353,10 @@ impl ScreenManager {
         // Note: We don't call crt.clear() here - ncurses handles differential updates.
         // Only call clear() when needed (e.g., after dialogs, resize, etc.)
 
-        // Draw header meters
-        if !self.hide_meters {
+        // Draw header meters only when data changed (optimization)
+        if !self.hide_meters && self.header_needs_redraw {
             self.header.draw(crt, machine, &self.settings);
+            self.header_needs_redraw = false;
         }
 
         // Draw screen tabs if enabled
@@ -392,6 +397,9 @@ impl ScreenManager {
         crt.update_size();
         crt.clear();
         self.layout(crt);
+        // Force full redraw after resize
+        self.header_needs_redraw = true;
+        self.main_panel.needs_redraw = true;
     }
 
     /// Run the main event loop
@@ -475,6 +483,10 @@ impl ScreenManager {
                 // Update header meters with new data
                 self.header.update(machine);
 
+                // Data changed, need full redraw of header and process list
+                self.header_needs_redraw = true;
+                self.main_panel.needs_redraw = true;
+
                 self.last_update = Instant::now();
 
                 // Decrement iteration count if set
@@ -514,6 +526,9 @@ impl ScreenManager {
                     HandlerResult::Resize => self.handle_resize(crt),
                     HandlerResult::Redraw => {
                         crt.clear();
+                        // Force full redraw of header and main panel after clear
+                        self.header_needs_redraw = true;
+                        self.main_panel.needs_redraw = true;
                         self.draw(crt, machine);
                     }
                     _ => {}

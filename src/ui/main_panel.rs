@@ -331,7 +331,9 @@ pub struct MainPanel {
 
     // Selection
     pub selected: i32,
+    old_selected: i32, // Track previous selection for partial redraw optimization
     pub scroll_v: i32,
+    old_scroll_v: i32, // Track previous scroll for partial redraw optimization
     pub scroll_h: i32,
 
     // Process display
@@ -370,7 +372,9 @@ impl MainPanel {
             w: 80,
             h: 24,
             selected: 0,
+            old_selected: 0,
             scroll_v: 0,
+            old_scroll_v: 0,
             scroll_h: 0,
             // Default fields matching C htop darwin/Platform.c
             // "PID USER PRIORITY NICE M_VIRT M_RESIDENT STATE PERCENT_CPU PERCENT_MEM TIME Command"
@@ -1405,32 +1409,64 @@ impl MainPanel {
         // Get current user ID for highlighting
         let current_uid = machine.htop_user_id;
 
-        // Draw processes
-        for i in 0..visible_height {
-            let process_idx = (self.scroll_v + i) as usize;
-            let y = start_y + i;
+        // Check if we can do partial redraw (like C htop Panel_draw optimization)
+        // Only redraw old and new selected rows if:
+        // - needs_redraw is false (no full redraw needed)
+        // - scroll position hasn't changed
+        // - both old and new selection are within visible range
+        let scroll_changed = self.scroll_v != self.old_scroll_v;
+        let old_in_range = self.old_selected >= self.scroll_v
+            && self.old_selected < self.scroll_v + visible_height;
+        let new_in_range =
+            self.selected >= self.scroll_v && self.selected < self.scroll_v + visible_height;
+        let can_partial_redraw =
+            !self.needs_redraw && !scroll_changed && old_in_range && new_in_range;
 
-            if process_idx < processes.len() {
-                let selected = process_idx as i32 == self.selected;
-                self.draw_process(
-                    crt,
-                    y,
-                    processes[process_idx],
-                    selected,
-                    settings,
-                    current_uid,
-                );
-            } else {
-                // Empty line
-                mv(y, self.x);
-                for _ in 0..self.w {
-                    addch(' ' as u32);
+        if can_partial_redraw && self.old_selected != self.selected {
+            // Partial redraw: only redraw the two rows that changed
+            // Redraw old selected row (remove highlight)
+            let old_row = (self.old_selected - self.scroll_v) as usize;
+            let old_y = start_y + old_row as i32;
+            if old_row < processes.len() {
+                self.draw_process(crt, old_y, processes[old_row], false, settings, current_uid);
+            }
+
+            // Redraw new selected row (add highlight)
+            let new_row = (self.selected - self.scroll_v) as usize;
+            let new_y = start_y + new_row as i32;
+            if new_row < processes.len() {
+                self.draw_process(crt, new_y, processes[new_row], true, settings, current_uid);
+            }
+        } else if self.needs_redraw || scroll_changed {
+            // Full redraw: draw all visible rows
+            for i in 0..visible_height {
+                let process_idx = (self.scroll_v + i) as usize;
+                let y = start_y + i;
+
+                if process_idx < processes.len() {
+                    let selected = process_idx as i32 == self.selected;
+                    self.draw_process(
+                        crt,
+                        y,
+                        processes[process_idx],
+                        selected,
+                        settings,
+                        current_uid,
+                    );
+                } else {
+                    // Empty line
+                    mv(y, self.x);
+                    for _ in 0..self.w {
+                        addch(' ' as u32);
+                    }
                 }
             }
         }
+        // else: nothing changed, no redraw needed
 
-        // Note: Search/filter bar is now drawn by ScreenManager at the bottom of the screen
-
+        // Update tracking state for next draw
+        self.old_selected = self.selected;
+        self.old_scroll_v = self.scroll_v;
         self.needs_redraw = false;
     }
 
