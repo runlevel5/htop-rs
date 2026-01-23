@@ -1191,13 +1191,17 @@ impl MainPanel {
                         Some(self.inc_search.text.clone())
                     };
                     self.invalidate_display_list();
-                    // In filter mode, use normal selection color (cyan) since the header
-                    // already indicates filtered state with yellow background
-                    self.following = false;
-                    self.selection_color = ColorElement::PanelSelectionFocus;
+                    // Keep yellow "following" selection when filter is active
+                    if self.filter.is_some() {
+                        self.following = true;
+                        self.selection_color = ColorElement::PanelSelectionFollow;
+                    } else {
+                        self.following = false;
+                        self.selection_color = ColorElement::PanelSelectionFocus;
+                    }
                 }
                 self.inc_search.stop();
-                // Keep following state if in search mode with active search, otherwise reset
+                // Reset if no filter/search active
                 if self.filter.is_none() && !is_search {
                     self.following = false;
                     self.selection_color = ColorElement::PanelSelectionFocus;
@@ -1282,15 +1286,9 @@ impl MainPanel {
                 self.selected = i as i32;
                 self.ensure_visible(processes.len() as i32);
                 self.inc_search.found = true;
-                // For filter mode, use cyan selection (header indicates filtered state)
-                // For search mode, use yellow "following" selection
-                if self.inc_search.is_filter() {
-                    self.following = false;
-                    self.selection_color = ColorElement::PanelSelectionFocus;
-                } else {
-                    self.following = true;
-                    self.selection_color = ColorElement::PanelSelectionFollow;
-                }
+                // Use yellow "following" selection for both search and filter modes
+                self.following = true;
+                self.selection_color = ColorElement::PanelSelectionFollow;
                 return;
             }
         }
