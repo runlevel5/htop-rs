@@ -349,109 +349,196 @@ impl CpuMeter {
         );
     }
 
-    /// Draw a single CPU in text mode (matches C htop CPUMeter_display)
-    fn draw_cpu_text(
+    /// Internal helper to draw CPU text with truncation support.
+    /// Takes individual CPU values and a pre-formatted caption.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_cpu_text_internal(
         crt: &Crt,
-        cpu: &crate::core::CpuData,
-        cpu_idx: usize,
+        caption: &str,
+        user: f64,
+        nice: f64,
+        system: f64,
+        irq: f64,
+        softirq: f64,
+        steal: f64,
+        guest: f64,
+        iowait: f64,
+        frequency: f64,
         x: i32,
         y: i32,
-        _width: i32,
-        count_from_one: bool,
+        width: i32,
         detailed_cpu_time: bool,
         show_cpu_frequency: bool,
     ) {
         use crate::ui::ColorElement;
         use ncurses::*;
 
-        // Apply count_cpus_from_one setting
-        let display_id = if count_from_one { cpu_idx + 1 } else { cpu_idx };
-        let caption = format!("{:>3}", display_id);
+        if width <= 0 {
+            return;
+        }
+
+        let max_x = x + width;
+        let mut cur_x = x;
+
+        // Helper to print a string with truncation
+        let mut print_str = |s: &str, attr: ncurses::attr_t| -> bool {
+            if cur_x >= max_x {
+                return false;
+            }
+            attrset(attr);
+            let available = (max_x - cur_x) as usize;
+            let to_print: String = s.chars().take(available).collect();
+            let printed_len = to_print.chars().count() as i32;
+            mv(y, cur_x);
+            let _ = addstr(&to_print);
+            cur_x += printed_len;
+            cur_x < max_x
+        };
+
+        let caption_attr = crt.color(ColorElement::MeterText);
+        let value_attr = crt.color(ColorElement::MeterValue);
 
         // Draw caption
-        let caption_attr = crt.color(ColorElement::MeterText);
-        mv(y, x);
-        attrset(caption_attr);
-        let _ = addstr(&caption);
-
-        // Draw values with colors (matching C htop CPUMeter_display)
-        let value_attr = crt.color(ColorElement::MeterValue);
+        if !print_str(caption, caption_attr) {
+            return;
+        }
 
         if detailed_cpu_time {
             // Detailed: show breakdown like C htop
             // Format: ":5.1% sy:5.1% ni:5.1% hi:5.1% si:5.1% st:5.1% gu:5.1% wa:5.1%"
-            attrset(caption_attr);
-            let _ = addstr(":");
-            attrset(crt.color(ColorElement::CpuNormal));
-            let _ = addstr(&format!("{:5.1}% ", cpu.user_percent));
-            attrset(caption_attr);
-            let _ = addstr("sy:");
-            attrset(crt.color(ColorElement::CpuSystem));
-            let _ = addstr(&format!("{:5.1}% ", cpu.system_percent));
-            attrset(caption_attr);
-            let _ = addstr("ni:");
-            attrset(crt.color(ColorElement::CpuNiceText));
-            let _ = addstr(&format!("{:5.1}% ", cpu.nice_percent));
-            attrset(caption_attr);
-            let _ = addstr("hi:");
-            attrset(crt.color(ColorElement::CpuIrq));
-            let _ = addstr(&format!("{:5.1}% ", cpu.irq_percent));
-            attrset(caption_attr);
-            let _ = addstr("si:");
-            attrset(crt.color(ColorElement::CpuSoftIrq));
-            let _ = addstr(&format!("{:5.1}% ", cpu.softirq_percent));
+            if !print_str(":", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", user), crt.color(ColorElement::CpuNormal)) {
+                return;
+            }
+            if !print_str("sy:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", system), crt.color(ColorElement::CpuSystem)) {
+                return;
+            }
+            if !print_str("ni:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", nice), crt.color(ColorElement::CpuNiceText)) {
+                return;
+            }
+            if !print_str("hi:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", irq), crt.color(ColorElement::CpuIrq)) {
+                return;
+            }
+            if !print_str("si:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", softirq), crt.color(ColorElement::CpuSoftIrq)) {
+                return;
+            }
             // st: only shown if steal is non-negative (i.e., supported)
-            if cpu.steal_percent >= 0.0 {
-                attrset(caption_attr);
-                let _ = addstr("st:");
-                attrset(crt.color(ColorElement::CpuSteal));
-                let _ = addstr(&format!("{:5.1}% ", cpu.steal_percent));
+            if steal >= 0.0 {
+                if !print_str("st:", caption_attr) {
+                    return;
+                }
+                if !print_str(&format!("{:5.1}% ", steal), crt.color(ColorElement::CpuSteal)) {
+                    return;
+                }
             }
             // gu: only shown if guest is non-negative (i.e., supported)
-            if cpu.guest_percent >= 0.0 {
-                attrset(caption_attr);
-                let _ = addstr("gu:");
-                attrset(crt.color(ColorElement::CpuGuest));
-                let _ = addstr(&format!("{:5.1}% ", cpu.guest_percent));
+            if guest >= 0.0 {
+                if !print_str("gu:", caption_attr) {
+                    return;
+                }
+                if !print_str(&format!("{:5.1}% ", guest), crt.color(ColorElement::CpuGuest)) {
+                    return;
+                }
             }
-            attrset(caption_attr);
-            let _ = addstr("wa:");
-            attrset(crt.color(ColorElement::CpuIOWait));
-            let _ = addstr(&format!("{:5.1}% ", cpu.iowait_percent));
+            if !print_str("wa:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", iowait), crt.color(ColorElement::CpuIOWait)) {
+                return;
+            }
         } else {
             // Non-detailed: simpler display
-            let kernel = cpu.system_percent + cpu.irq_percent + cpu.softirq_percent;
-            let virt = cpu.steal_percent + cpu.guest_percent;
+            let kernel = system + irq + softirq;
+            let virt = steal + guest;
 
-            attrset(caption_attr);
-            let _ = addstr(":");
-            attrset(crt.color(ColorElement::CpuNormal));
-            let _ = addstr(&format!("{:5.1}% ", cpu.user_percent));
-            attrset(caption_attr);
-            let _ = addstr("sys:");
-            attrset(crt.color(ColorElement::CpuSystem));
-            let _ = addstr(&format!("{:5.1}% ", kernel));
-            attrset(caption_attr);
-            let _ = addstr("low:");
-            attrset(crt.color(ColorElement::CpuNiceText));
-            let _ = addstr(&format!("{:5.1}% ", cpu.nice_percent));
+            if !print_str(":", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", user), crt.color(ColorElement::CpuNormal)) {
+                return;
+            }
+            if !print_str("sys:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", kernel), crt.color(ColorElement::CpuSystem)) {
+                return;
+            }
+            if !print_str("low:", caption_attr) {
+                return;
+            }
+            if !print_str(&format!("{:5.1}% ", nice), crt.color(ColorElement::CpuNiceText)) {
+                return;
+            }
             // vir: only shown if IRQ is non-negative (used as proxy for virtualization support)
-            if cpu.irq_percent >= 0.0 {
-                attrset(caption_attr);
-                let _ = addstr("vir:");
-                attrset(crt.color(ColorElement::CpuGuest));
-                let _ = addstr(&format!("{:5.1}% ", virt));
+            if irq >= 0.0 {
+                if !print_str("vir:", caption_attr) {
+                    return;
+                }
+                if !print_str(&format!("{:5.1}% ", virt), crt.color(ColorElement::CpuGuest)) {
+                    return;
+                }
             }
         }
 
         if show_cpu_frequency {
-            attrset(caption_attr);
-            let _ = addstr("freq: ");
-            attrset(value_attr);
-            let _ = addstr(&format!("{} ", Self::format_frequency(cpu.frequency)));
+            if !print_str("freq: ", caption_attr) {
+                return;
+            }
+            let _ = print_str(&format!("{} ", Self::format_frequency(frequency)), value_attr);
         }
 
         attrset(crt.color(ColorElement::ResetColor));
+    }
+
+    /// Draw a single CPU in text mode (matches C htop CPUMeter_display)
+    /// Respects width limit and truncates output accordingly
+    fn draw_cpu_text(
+        crt: &Crt,
+        cpu: &crate::core::CpuData,
+        cpu_idx: usize,
+        x: i32,
+        y: i32,
+        width: i32,
+        count_from_one: bool,
+        detailed_cpu_time: bool,
+        show_cpu_frequency: bool,
+    ) {
+        // Apply count_cpus_from_one setting
+        let display_id = if count_from_one { cpu_idx + 1 } else { cpu_idx };
+        let caption = format!("{:>3}", display_id);
+
+        Self::draw_cpu_text_internal(
+            crt,
+            &caption,
+            cpu.user_percent,
+            cpu.nice_percent,
+            cpu.system_percent,
+            cpu.irq_percent,
+            cpu.softirq_percent,
+            cpu.steal_percent,
+            cpu.guest_percent,
+            cpu.iowait_percent,
+            cpu.frequency,
+            x,
+            y,
+            width,
+            detailed_cpu_time,
+            show_cpu_frequency,
+        );
     }
 }
 
@@ -673,9 +760,6 @@ impl Meter for CpuMeter {
                     }
                     _ => {
                         // Single CPU or average - draw one text line with proper colors
-                        use crate::ui::ColorElement;
-                        use ncurses::*;
-
                         let caption = match self.selection {
                             CpuSelection::Average => "Avg".to_string(),
                             CpuSelection::Cpu(n) => {
@@ -689,87 +773,24 @@ impl Meter for CpuMeter {
                             _ => "CPU".to_string(),
                         };
 
-                        let caption_attr = crt.color(ColorElement::MeterText);
-                        let value_attr = crt.color(ColorElement::MeterValue);
-
-                        mv(y, x);
-                        attrset(caption_attr);
-                        let _ = addstr(&caption);
-
-                        if settings.detailed_cpu_time {
-                            // Detailed: show breakdown like C htop
-                            attrset(caption_attr);
-                            let _ = addstr(":");
-                            attrset(crt.color(ColorElement::CpuNormal));
-                            let _ = addstr(&format!("{:5.1}% ", self.user));
-                            attrset(caption_attr);
-                            let _ = addstr("sy:");
-                            attrset(crt.color(ColorElement::CpuSystem));
-                            let _ = addstr(&format!("{:5.1}% ", self.system));
-                            attrset(caption_attr);
-                            let _ = addstr("ni:");
-                            attrset(crt.color(ColorElement::CpuNiceText));
-                            let _ = addstr(&format!("{:5.1}% ", self.nice));
-                            attrset(caption_attr);
-                            let _ = addstr("hi:");
-                            attrset(crt.color(ColorElement::CpuIrq));
-                            let _ = addstr(&format!("{:5.1}% ", self.irq));
-                            attrset(caption_attr);
-                            let _ = addstr("si:");
-                            attrset(crt.color(ColorElement::CpuSoftIrq));
-                            let _ = addstr(&format!("{:5.1}% ", self.softirq));
-                            // st: only shown if steal is non-negative
-                            if self.steal >= 0.0 {
-                                attrset(caption_attr);
-                                let _ = addstr("st:");
-                                attrset(crt.color(ColorElement::CpuSteal));
-                                let _ = addstr(&format!("{:5.1}% ", self.steal));
-                            }
-                            // gu: only shown if guest is non-negative
-                            if self.guest >= 0.0 {
-                                attrset(caption_attr);
-                                let _ = addstr("gu:");
-                                attrset(crt.color(ColorElement::CpuGuest));
-                                let _ = addstr(&format!("{:5.1}% ", self.guest));
-                            }
-                            attrset(caption_attr);
-                            let _ = addstr("wa:");
-                            attrset(crt.color(ColorElement::CpuIOWait));
-                            let _ = addstr(&format!("{:5.1}% ", self.iowait));
-                        } else {
-                            // Non-detailed: simpler display
-                            let kernel = self.system + self.irq + self.softirq;
-                            let virt = self.steal + self.guest;
-
-                            attrset(caption_attr);
-                            let _ = addstr(":");
-                            attrset(crt.color(ColorElement::CpuNormal));
-                            let _ = addstr(&format!("{:5.1}% ", self.user));
-                            attrset(caption_attr);
-                            let _ = addstr("sys:");
-                            attrset(crt.color(ColorElement::CpuSystem));
-                            let _ = addstr(&format!("{:5.1}% ", kernel));
-                            attrset(caption_attr);
-                            let _ = addstr("low:");
-                            attrset(crt.color(ColorElement::CpuNiceText));
-                            let _ = addstr(&format!("{:5.1}% ", self.nice));
-                            // vir: only shown if IRQ is non-negative
-                            if self.irq >= 0.0 {
-                                attrset(caption_attr);
-                                let _ = addstr("vir:");
-                                attrset(crt.color(ColorElement::CpuGuest));
-                                let _ = addstr(&format!("{:5.1}% ", virt));
-                            }
-                        }
-
-                        if settings.show_cpu_frequency {
-                            attrset(caption_attr);
-                            let _ = addstr("freq: ");
-                            attrset(value_attr);
-                            let _ = addstr(&format!("{} ", Self::format_frequency(self.frequency)));
-                        }
-
-                        attrset(crt.color(ColorElement::ResetColor));
+                        Self::draw_cpu_text_internal(
+                            crt,
+                            &caption,
+                            self.user,
+                            self.nice,
+                            self.system,
+                            self.irq,
+                            self.softirq,
+                            self.steal,
+                            self.guest,
+                            self.iowait,
+                            self.frequency,
+                            x,
+                            y,
+                            width,
+                            settings.detailed_cpu_time,
+                            settings.show_cpu_frequency,
+                        );
                     }
                 }
             }
