@@ -587,11 +587,11 @@ impl Crt {
         self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_WHITE, COLOR_BLACK);
         self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
         self.colors[ColorElement::CpuNiceText as usize] =
-            color_pair(COLOR_CYAN, COLOR_BLACK) | A_BOLD;
+            color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::CpuNormal as usize] = color_pair(COLOR_GREEN, COLOR_BLACK);
         self.colors[ColorElement::CpuSystem as usize] = color_pair(COLOR_RED, COLOR_BLACK);
         self.colors[ColorElement::CpuIOWait as usize] = color_pair_gray_black() | A_BOLD;
-        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::CpuIrq as usize] = color_pair(COLOR_YELLOW, COLOR_BLACK);
         self.colors[ColorElement::CpuSoftIrq as usize] = color_pair(COLOR_MAGENTA, COLOR_BLACK);
         self.colors[ColorElement::CpuSteal as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
         self.colors[ColorElement::CpuGuest as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
