@@ -360,8 +360,10 @@ pub struct MainPanel {
     // PID search
     pub pid_search: Option<String>,
 
-    // Cached count of visible processes (updated in draw)
-    visible_count: i32,
+    // Cached display list - indices into process list (rebuilt on data change)
+    // This avoids filtering on every draw, matching C htop's Table_rebuildPanel
+    cached_display_indices: Vec<usize>,
+    display_list_valid: bool,
 }
 
 impl MainPanel {
@@ -402,7 +404,8 @@ impl MainPanel {
             needs_redraw: true,
             wrap_command: false,
             pid_search: None,
-            visible_count: 0,
+            cached_display_indices: Vec::new(),
+            display_list_valid: false,
         }
     }
 
@@ -413,6 +416,7 @@ impl MainPanel {
         } else {
             self.filter = Some(filter.to_string());
         }
+        self.invalidate_display_list();
     }
 
     /// Clear the filter
@@ -422,6 +426,7 @@ impl MainPanel {
         // Reset to normal selection color
         self.following = false;
         self.selection_color = ColorElement::PanelSelectionFocus;
+        self.invalidate_display_list();
     }
 
     /// Check if filtering is active (has filter text)
@@ -483,6 +488,44 @@ impl MainPanel {
         self.w = w;
         self.h = h;
         self.needs_redraw = true;
+    }
+
+    /// Invalidate the cached display list (call when filters change)
+    pub fn invalidate_display_list(&mut self) {
+        self.display_list_valid = false;
+    }
+
+    /// Rebuild the cached display list (like C htop's Table_rebuildPanel)
+    /// This filters processes once per update cycle instead of on every draw
+    pub fn rebuild_display_list(&mut self, machine: &Machine, settings: &Settings) {
+        self.cached_display_indices.clear();
+
+        if self.tree_view {
+            // In tree view, use tree display order
+            for process in machine.processes.iter_tree() {
+                if self.should_show_process(process, settings, machine) {
+                    // Find the actual index in the processes vec
+                    // iter_tree returns processes in tree order, we need their indices
+                    if let Some(idx) = machine
+                        .processes
+                        .processes
+                        .iter()
+                        .position(|p| p.pid == process.pid)
+                    {
+                        self.cached_display_indices.push(idx);
+                    }
+                }
+            }
+        } else {
+            // Normal view - iterate in sorted order
+            for (i, process) in machine.processes.iter().enumerate() {
+                if self.should_show_process(process, settings, machine) {
+                    self.cached_display_indices.push(i);
+                }
+            }
+        }
+
+        self.display_list_valid = true;
     }
 
     /// Ensure the selected process is visible
@@ -1386,24 +1429,12 @@ impl MainPanel {
             self.y
         };
 
-        // Filter and collect visible processes
-        let processes: Vec<&Process> = if self.tree_view {
-            // In tree view, use tree display order
-            machine
-                .processes
-                .iter_tree()
-                .filter(|p| self.should_show_process(p, settings, machine))
-                .collect()
-        } else {
-            machine
-                .processes
-                .iter()
-                .filter(|p| self.should_show_process(p, settings, machine))
-                .collect()
-        };
+        // Rebuild display list if invalid (data changed, filter changed, etc.)
+        if !self.display_list_valid {
+            self.rebuild_display_list(machine, settings);
+        }
 
-        let process_count = processes.len() as i32;
-        self.visible_count = process_count; // Cache for use in on_key
+        let process_count = self.cached_display_indices.len() as i32;
         self.ensure_visible(process_count);
 
         // Get current user ID for highlighting
@@ -1427,32 +1458,34 @@ impl MainPanel {
             // Redraw old selected row (remove highlight)
             let old_row = (self.old_selected - self.scroll_v) as usize;
             let old_y = start_y + old_row as i32;
-            if old_row < processes.len() {
-                self.draw_process(crt, old_y, processes[old_row], false, settings, current_uid);
+            if old_row < self.cached_display_indices.len() {
+                let process_idx = self.cached_display_indices[old_row];
+                if let Some(process) = machine.processes.processes.get(process_idx) {
+                    self.draw_process(crt, old_y, process, false, settings, current_uid);
+                }
             }
 
             // Redraw new selected row (add highlight)
             let new_row = (self.selected - self.scroll_v) as usize;
             let new_y = start_y + new_row as i32;
-            if new_row < processes.len() {
-                self.draw_process(crt, new_y, processes[new_row], true, settings, current_uid);
+            if new_row < self.cached_display_indices.len() {
+                let process_idx = self.cached_display_indices[new_row];
+                if let Some(process) = machine.processes.processes.get(process_idx) {
+                    self.draw_process(crt, new_y, process, true, settings, current_uid);
+                }
             }
         } else if self.needs_redraw || scroll_changed {
             // Full redraw: draw all visible rows
             for i in 0..visible_height {
-                let process_idx = (self.scroll_v + i) as usize;
+                let display_idx = (self.scroll_v + i) as usize;
                 let y = start_y + i;
 
-                if process_idx < processes.len() {
-                    let selected = process_idx as i32 == self.selected;
-                    self.draw_process(
-                        crt,
-                        y,
-                        processes[process_idx],
-                        selected,
-                        settings,
-                        current_uid,
-                    );
+                if display_idx < self.cached_display_indices.len() {
+                    let process_idx = self.cached_display_indices[display_idx];
+                    if let Some(process) = machine.processes.processes.get(process_idx) {
+                        let selected = display_idx as i32 == self.selected;
+                        self.draw_process(crt, y, process, selected, settings, current_uid);
+                    }
                 } else {
                     // Empty line
                     mv(y, self.x);
@@ -1594,6 +1627,7 @@ impl MainPanel {
                     // Esc in filter mode clears the filter (like C htop)
                     self.inc_search.clear();
                     self.filter = None;
+                    self.invalidate_display_list();
                 }
                 self.inc_search.stop();
                 // Reset to normal selection color when exiting search/filter without active filter
@@ -1608,6 +1642,7 @@ impl MainPanel {
                 self.inc_search.clear();
                 if is_filter {
                     self.filter = None;
+                    self.invalidate_display_list();
                 }
                 // Reset selection color since text is cleared
                 self.following = false;
@@ -1624,6 +1659,7 @@ impl MainPanel {
                     } else {
                         Some(self.inc_search.text.clone())
                     };
+                    self.invalidate_display_list();
                 }
                 self.do_incremental_search(machine);
                 HandlerResult::Handled
@@ -1633,6 +1669,7 @@ impl MainPanel {
                 if is_filter {
                     // Update filter in real-time
                     self.filter = Some(self.inc_search.text.clone());
+                    self.invalidate_display_list();
                 }
                 self.do_incremental_search(machine);
                 HandlerResult::Handled
@@ -1647,6 +1684,7 @@ impl MainPanel {
                     } else {
                         Some(self.inc_search.text.clone())
                     };
+                    self.invalidate_display_list();
                 }
                 self.inc_search.stop();
                 // Keep following state if filter is active, otherwise reset
@@ -1781,24 +1819,22 @@ impl MainPanel {
     }
 
     /// Get count of visible processes
-    /// Uses cached count from last draw() which includes all filtering
-    fn get_visible_count(&self, machine: &Machine) -> i32 {
-        // Use cached count if available (set in draw())
-        // This ensures we use the same filtering as draw()
-        if self.visible_count > 0 {
-            self.visible_count
-        } else {
-            // Fallback: count with text filter only (before first draw)
-            machine
-                .processes
-                .iter()
-                .filter(|p| self.matches_filter(p))
-                .count() as i32
-        }
+    /// Uses cached display list which includes all filtering
+    fn get_visible_count(&self, _machine: &Machine) -> i32 {
+        self.cached_display_indices.len() as i32
     }
 
     /// Get the currently selected process
     pub fn get_selected_process<'a>(&self, machine: &'a Machine) -> Option<&'a Process> {
+        // Use cached display indices if available
+        if self.display_list_valid && !self.cached_display_indices.is_empty() {
+            let display_idx = self.selected as usize;
+            if let Some(&process_idx) = self.cached_display_indices.get(display_idx) {
+                return machine.processes.processes.get(process_idx);
+            }
+        }
+        
+        // Fallback: use old method
         let processes: Vec<&Process> = machine
             .processes
             .iter()

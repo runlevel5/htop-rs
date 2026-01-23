@@ -484,8 +484,10 @@ impl ScreenManager {
                 self.header.update(machine);
 
                 // Data changed, need full redraw of header and process list
+                // Also invalidate the cached display list so it gets rebuilt
                 self.header_needs_redraw = true;
                 self.main_panel.needs_redraw = true;
+                self.main_panel.invalidate_display_list();
 
                 self.last_update = Instant::now();
 
@@ -789,6 +791,7 @@ impl ScreenManager {
                 // Reset selection when filter changes to ensure visibility
                 self.main_panel.selected = 0;
                 self.main_panel.scroll_v = 0;
+                self.main_panel.invalidate_display_list();
                 return HandlerResult::Handled;
             }
             0x49 => {
@@ -817,6 +820,7 @@ impl ScreenManager {
                 // Reset selection when filter changes to ensure visibility
                 self.main_panel.selected = 0;
                 self.main_panel.scroll_v = 0;
+                self.main_panel.invalidate_display_list();
                 return HandlerResult::Handled;
             }
             0x4D => {
@@ -1035,6 +1039,9 @@ impl ScreenManager {
             };
             machine.processes.build_tree(sort_key, ascending);
         }
+
+        // Invalidate display list since tree/list order is different
+        self.main_panel.invalidate_display_list();
 
         // Mark settings as changed for saving
         self.settings.changed = true;
@@ -3887,6 +3894,7 @@ impl ScreenManager {
         // This ensures the selected row is visible in the new filtered list
         self.main_panel.selected = 0;
         self.main_panel.scroll_v = 0;
+        self.main_panel.invalidate_display_list();
 
         // Re-enable delay for main loop (clear is handled by Redraw handler)
         crt.enable_delay();
