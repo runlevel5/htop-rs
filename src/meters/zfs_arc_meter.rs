@@ -121,3 +121,94 @@ impl Meter for ZfsCompressedArcMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ZfsArcMeter tests
+    #[test]
+    fn test_zfs_arc_meter_new() {
+        let meter = ZfsArcMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_zfs_arc_meter_default() {
+        let meter = ZfsArcMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_zfs_arc_meter_name() {
+        let meter = ZfsArcMeter::new();
+        assert_eq!(meter.name(), "ZFSARC");
+    }
+
+    #[test]
+    fn test_zfs_arc_meter_caption() {
+        let meter = ZfsArcMeter::new();
+        assert_eq!(meter.caption(), "ARC: ");
+    }
+
+    #[test]
+    fn test_zfs_arc_meter_mode() {
+        let mut meter = ZfsArcMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_zfs_arc_meter_update_does_nothing() {
+        let mut meter = ZfsArcMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+
+    // ZfsCompressedArcMeter tests
+    #[test]
+    fn test_zfs_compressed_arc_meter_new() {
+        let meter = ZfsCompressedArcMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_zfs_compressed_arc_meter_default() {
+        let meter = ZfsCompressedArcMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_zfs_compressed_arc_meter_name() {
+        let meter = ZfsCompressedArcMeter::new();
+        assert_eq!(meter.name(), "ZFSCARC");
+    }
+
+    #[test]
+    fn test_zfs_compressed_arc_meter_caption() {
+        let meter = ZfsCompressedArcMeter::new();
+        assert_eq!(meter.caption(), "ARC: ");
+    }
+
+    #[test]
+    fn test_zfs_compressed_arc_meter_mode() {
+        let mut meter = ZfsCompressedArcMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_zfs_compressed_arc_meter_update_does_nothing() {
+        let mut meter = ZfsCompressedArcMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

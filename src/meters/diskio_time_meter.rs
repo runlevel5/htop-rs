@@ -63,3 +63,50 @@ impl Meter for DiskIOTimeMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diskio_time_meter_new() {
+        let meter = DiskIOTimeMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_diskio_time_meter_default() {
+        let meter = DiskIOTimeMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_diskio_time_meter_name() {
+        let meter = DiskIOTimeMeter::new();
+        assert_eq!(meter.name(), "DiskIOTime");
+    }
+
+    #[test]
+    fn test_diskio_time_meter_caption() {
+        let meter = DiskIOTimeMeter::new();
+        assert_eq!(meter.caption(), "Dsk: ");
+    }
+
+    #[test]
+    fn test_diskio_time_meter_mode() {
+        let mut meter = DiskIOTimeMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_diskio_time_meter_update_does_nothing() {
+        let mut meter = DiskIOTimeMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

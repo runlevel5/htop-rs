@@ -63,3 +63,50 @@ impl Meter for MemorySwapMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_memoryswap_meter_new() {
+        let meter = MemorySwapMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_memoryswap_meter_default() {
+        let meter = MemorySwapMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_memoryswap_meter_name() {
+        let meter = MemorySwapMeter::new();
+        assert_eq!(meter.name(), "MemorySwap");
+    }
+
+    #[test]
+    fn test_memoryswap_meter_caption() {
+        let meter = MemorySwapMeter::new();
+        assert_eq!(meter.caption(), "M&S: ");
+    }
+
+    #[test]
+    fn test_memoryswap_meter_mode() {
+        let mut meter = MemorySwapMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_memoryswap_meter_update_does_nothing() {
+        let mut meter = MemorySwapMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

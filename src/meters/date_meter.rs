@@ -87,3 +87,95 @@ impl Meter for DateMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_date_meter_new() {
+        let meter = DateMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert!(meter.date_str.is_empty());
+    }
+
+    #[test]
+    fn test_date_meter_default() {
+        let meter = DateMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_date_meter_name() {
+        let meter = DateMeter::new();
+        assert_eq!(meter.name(), "Date");
+    }
+
+    #[test]
+    fn test_date_meter_caption() {
+        let meter = DateMeter::new();
+        assert_eq!(meter.caption(), "Date: ");
+    }
+
+    #[test]
+    fn test_date_meter_default_mode() {
+        let meter = DateMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_date_meter_supported_modes() {
+        let meter = DateMeter::new();
+        let modes = meter.supported_modes();
+        // Should support Text and Led modes
+        assert!(modes & (1 << MeterMode::Text as u32) != 0);
+        assert!(modes & (1 << MeterMode::Led as u32) != 0);
+        // Should not support Bar or Graph modes
+        assert!(modes & (1 << MeterMode::Bar as u32) == 0);
+        assert!(modes & (1 << MeterMode::Graph as u32) == 0);
+    }
+
+    #[test]
+    fn test_date_meter_mode() {
+        let mut meter = DateMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_date_meter_update() {
+        let mut meter = DateMeter::new();
+        let machine = Machine::default();
+
+        assert!(meter.date_str.is_empty());
+        meter.update(&machine);
+
+        // After update, date_str should be in YYYY-MM-DD format
+        assert!(!meter.date_str.is_empty());
+        assert_eq!(meter.date_str.len(), 10); // "YYYY-MM-DD" = 10 chars
+        assert!(meter.date_str.chars().nth(4) == Some('-'));
+        assert!(meter.date_str.chars().nth(7) == Some('-'));
+    }
+
+    #[test]
+    fn test_date_meter_date_format() {
+        let mut meter = DateMeter::new();
+        let machine = Machine::default();
+        meter.update(&machine);
+
+        // Parse the date to validate format
+        let parts: Vec<&str> = meter.date_str.split('-').collect();
+        assert_eq!(parts.len(), 3);
+
+        let year: u32 = parts[0].parse().expect("Invalid year");
+        let month: u32 = parts[1].parse().expect("Invalid month");
+        let day: u32 = parts[2].parse().expect("Invalid day");
+
+        assert!(year >= 2020 && year <= 2100, "Year should be reasonable");
+        assert!(month >= 1 && month <= 12, "Month should be 1-12");
+        assert!(day >= 1 && day <= 31, "Day should be 1-31");
+    }
+}

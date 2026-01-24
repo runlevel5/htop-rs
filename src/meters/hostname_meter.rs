@@ -77,3 +77,104 @@ impl Meter for HostnameMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hostname_meter_new() {
+        let meter = HostnameMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert!(meter.hostname.is_empty());
+    }
+
+    #[test]
+    fn test_hostname_meter_default() {
+        let meter = HostnameMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_hostname_meter_name() {
+        let meter = HostnameMeter::new();
+        assert_eq!(meter.name(), "Hostname");
+    }
+
+    #[test]
+    fn test_hostname_meter_caption() {
+        let meter = HostnameMeter::new();
+        assert_eq!(meter.caption(), "Hostname: ");
+    }
+
+    #[test]
+    fn test_hostname_meter_default_mode() {
+        let meter = HostnameMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_hostname_meter_supported_modes() {
+        let meter = HostnameMeter::new();
+        let modes = meter.supported_modes();
+        // Should support only Text mode
+        assert!(modes & (1 << MeterMode::Text as u32) != 0);
+        // Should not support Led, Bar or Graph modes
+        assert!(modes & (1 << MeterMode::Led as u32) == 0);
+        assert!(modes & (1 << MeterMode::Bar as u32) == 0);
+        assert!(modes & (1 << MeterMode::Graph as u32) == 0);
+    }
+
+    #[test]
+    fn test_hostname_meter_mode_always_text() {
+        let meter = HostnameMeter::new();
+        // mode() always returns Text for HostnameMeter
+        assert_eq!(meter.mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_hostname_meter_set_mode() {
+        let mut meter = HostnameMeter::new();
+        // Even if we set a different mode, the internal mode field is changed
+        // but mode() always returns Text
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_hostname_meter_update() {
+        let mut meter = HostnameMeter::new();
+        let mut machine = Machine::default();
+        machine.hostname = "test-host.local".to_string();
+
+        assert!(meter.hostname.is_empty());
+        meter.update(&machine);
+
+        assert_eq!(meter.hostname, "test-host.local");
+    }
+
+    #[test]
+    fn test_hostname_meter_update_empty_hostname() {
+        let mut meter = HostnameMeter::new();
+        let machine = Machine::default();
+
+        meter.update(&machine);
+        // Default Machine should have empty hostname
+        assert!(meter.hostname.is_empty());
+    }
+
+    #[test]
+    fn test_hostname_meter_update_replaces_hostname() {
+        let mut meter = HostnameMeter::new();
+        let mut machine = Machine::default();
+
+        machine.hostname = "first-host".to_string();
+        meter.update(&machine);
+        assert_eq!(meter.hostname, "first-host");
+
+        machine.hostname = "second-host".to_string();
+        meter.update(&machine);
+        assert_eq!(meter.hostname, "second-host");
+    }
+}

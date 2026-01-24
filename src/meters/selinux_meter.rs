@@ -71,3 +71,68 @@ impl Meter for SELinuxMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_selinux_meter_new() {
+        let meter = SELinuxMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_selinux_meter_default() {
+        let meter = SELinuxMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_selinux_meter_name() {
+        let meter = SELinuxMeter::new();
+        assert_eq!(meter.name(), "SELinux");
+    }
+
+    #[test]
+    fn test_selinux_meter_caption() {
+        let meter = SELinuxMeter::new();
+        assert_eq!(meter.caption(), "SELinux: ");
+    }
+
+    #[test]
+    fn test_selinux_meter_default_mode() {
+        let meter = SELinuxMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_selinux_meter_supported_modes() {
+        let meter = SELinuxMeter::new();
+        let modes = meter.supported_modes();
+        // Should support only Text mode
+        assert!(modes & (1 << MeterMode::Text as u32) != 0);
+        // Should not support Led, Bar or Graph modes
+        assert!(modes & (1 << MeterMode::Led as u32) == 0);
+        assert!(modes & (1 << MeterMode::Bar as u32) == 0);
+        assert!(modes & (1 << MeterMode::Graph as u32) == 0);
+    }
+
+    #[test]
+    fn test_selinux_meter_mode() {
+        let mut meter = SELinuxMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_selinux_meter_update_does_nothing() {
+        let mut meter = SELinuxMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

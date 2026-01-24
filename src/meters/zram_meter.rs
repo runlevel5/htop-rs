@@ -63,3 +63,50 @@ impl Meter for ZramMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zram_meter_new() {
+        let meter = ZramMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_zram_meter_default() {
+        let meter = ZramMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_zram_meter_name() {
+        let meter = ZramMeter::new();
+        assert_eq!(meter.name(), "Zram");
+    }
+
+    #[test]
+    fn test_zram_meter_caption() {
+        let meter = ZramMeter::new();
+        assert_eq!(meter.caption(), "zrm: ");
+    }
+
+    #[test]
+    fn test_zram_meter_mode() {
+        let mut meter = ZramMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_zram_meter_update_does_nothing() {
+        let mut meter = ZramMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

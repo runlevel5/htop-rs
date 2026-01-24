@@ -63,3 +63,50 @@ impl Meter for DiskIORateMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diskio_rate_meter_new() {
+        let meter = DiskIORateMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_diskio_rate_meter_default() {
+        let meter = DiskIORateMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_diskio_rate_meter_name() {
+        let meter = DiskIORateMeter::new();
+        assert_eq!(meter.name(), "DiskIORate");
+    }
+
+    #[test]
+    fn test_diskio_rate_meter_caption() {
+        let meter = DiskIORateMeter::new();
+        assert_eq!(meter.caption(), "Dsk: ");
+    }
+
+    #[test]
+    fn test_diskio_rate_meter_mode() {
+        let mut meter = DiskIORateMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_diskio_rate_meter_update_does_nothing() {
+        let mut meter = DiskIORateMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

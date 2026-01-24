@@ -137,3 +137,130 @@ impl Meter for SystemdUserMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // SystemdMeter tests
+    #[test]
+    fn test_systemd_meter_new() {
+        let meter = SystemdMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_systemd_meter_default() {
+        let meter = SystemdMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_systemd_meter_name() {
+        let meter = SystemdMeter::new();
+        assert_eq!(meter.name(), "Systemd");
+    }
+
+    #[test]
+    fn test_systemd_meter_caption() {
+        let meter = SystemdMeter::new();
+        assert_eq!(meter.caption(), "Systemd: ");
+    }
+
+    #[test]
+    fn test_systemd_meter_default_mode() {
+        let meter = SystemdMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_systemd_meter_supported_modes() {
+        let meter = SystemdMeter::new();
+        let modes = meter.supported_modes();
+        // Should support only Text mode
+        assert!(modes & (1 << MeterMode::Text as u32) != 0);
+        // Should not support Led, Bar or Graph modes
+        assert!(modes & (1 << MeterMode::Led as u32) == 0);
+        assert!(modes & (1 << MeterMode::Bar as u32) == 0);
+        assert!(modes & (1 << MeterMode::Graph as u32) == 0);
+    }
+
+    #[test]
+    fn test_systemd_meter_mode() {
+        let mut meter = SystemdMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_systemd_meter_update_does_nothing() {
+        let mut meter = SystemdMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+
+    // SystemdUserMeter tests
+    #[test]
+    fn test_systemd_user_meter_new() {
+        let meter = SystemdUserMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_systemd_user_meter_default() {
+        let meter = SystemdUserMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_systemd_user_meter_name() {
+        let meter = SystemdUserMeter::new();
+        assert_eq!(meter.name(), "SystemdUser");
+    }
+
+    #[test]
+    fn test_systemd_user_meter_caption() {
+        let meter = SystemdUserMeter::new();
+        assert_eq!(meter.caption(), "Systemd User: ");
+    }
+
+    #[test]
+    fn test_systemd_user_meter_default_mode() {
+        let meter = SystemdUserMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Text);
+    }
+
+    #[test]
+    fn test_systemd_user_meter_supported_modes() {
+        let meter = SystemdUserMeter::new();
+        let modes = meter.supported_modes();
+        // Should support only Text mode
+        assert!(modes & (1 << MeterMode::Text as u32) != 0);
+        // Should not support Led, Bar or Graph modes
+        assert!(modes & (1 << MeterMode::Led as u32) == 0);
+        assert!(modes & (1 << MeterMode::Bar as u32) == 0);
+        assert!(modes & (1 << MeterMode::Graph as u32) == 0);
+    }
+
+    #[test]
+    fn test_systemd_user_meter_mode() {
+        let mut meter = SystemdUserMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_systemd_user_meter_update_does_nothing() {
+        let mut meter = SystemdUserMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

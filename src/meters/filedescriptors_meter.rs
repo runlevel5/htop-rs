@@ -63,3 +63,50 @@ impl Meter for FileDescriptorsMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filedescriptors_meter_new() {
+        let meter = FileDescriptorsMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_filedescriptors_meter_default() {
+        let meter = FileDescriptorsMeter::default();
+        // MeterMode::default() is Bar
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_filedescriptors_meter_name() {
+        let meter = FileDescriptorsMeter::new();
+        assert_eq!(meter.name(), "FileDescriptors");
+    }
+
+    #[test]
+    fn test_filedescriptors_meter_caption() {
+        let meter = FileDescriptorsMeter::new();
+        assert_eq!(meter.caption(), "FDs: ");
+    }
+
+    #[test]
+    fn test_filedescriptors_meter_mode() {
+        let mut meter = FileDescriptorsMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_filedescriptors_meter_update_does_nothing() {
+        let mut meter = FileDescriptorsMeter::new();
+        let machine = Machine::default();
+        // Update is not yet implemented but should not panic
+        meter.update(&machine);
+    }
+}

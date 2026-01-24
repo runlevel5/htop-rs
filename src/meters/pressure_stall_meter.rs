@@ -296,3 +296,225 @@ impl Meter for PressureStallMemoryFullMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // PressureStallCPUSomeMeter tests
+    #[test]
+    fn test_psi_cpu_some_meter_new() {
+        let meter = PressureStallCPUSomeMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_psi_cpu_some_meter_default() {
+        let meter = PressureStallCPUSomeMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_psi_cpu_some_meter_name() {
+        let meter = PressureStallCPUSomeMeter::new();
+        assert_eq!(meter.name(), "PressureStallCPUSome");
+    }
+
+    #[test]
+    fn test_psi_cpu_some_meter_caption() {
+        let meter = PressureStallCPUSomeMeter::new();
+        assert_eq!(meter.caption(), "PSI some CPU:    ");
+    }
+
+    #[test]
+    fn test_psi_cpu_some_meter_mode() {
+        let mut meter = PressureStallCPUSomeMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    // PressureStallIOSomeMeter tests
+    #[test]
+    fn test_psi_io_some_meter_new() {
+        let meter = PressureStallIOSomeMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_psi_io_some_meter_default() {
+        let meter = PressureStallIOSomeMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_psi_io_some_meter_name() {
+        let meter = PressureStallIOSomeMeter::new();
+        assert_eq!(meter.name(), "PressureStallIOSome");
+    }
+
+    #[test]
+    fn test_psi_io_some_meter_caption() {
+        let meter = PressureStallIOSomeMeter::new();
+        assert_eq!(meter.caption(), "PSI some IO:     ");
+    }
+
+    #[test]
+    fn test_psi_io_some_meter_mode() {
+        let mut meter = PressureStallIOSomeMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    // PressureStallIOFullMeter tests
+    #[test]
+    fn test_psi_io_full_meter_new() {
+        let meter = PressureStallIOFullMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_psi_io_full_meter_default() {
+        let meter = PressureStallIOFullMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_psi_io_full_meter_name() {
+        let meter = PressureStallIOFullMeter::new();
+        assert_eq!(meter.name(), "PressureStallIOFull");
+    }
+
+    #[test]
+    fn test_psi_io_full_meter_caption() {
+        let meter = PressureStallIOFullMeter::new();
+        assert_eq!(meter.caption(), "PSI full IO:     ");
+    }
+
+    #[test]
+    fn test_psi_io_full_meter_mode() {
+        let mut meter = PressureStallIOFullMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    // PressureStallIRQFullMeter tests
+    #[test]
+    fn test_psi_irq_full_meter_new() {
+        let meter = PressureStallIRQFullMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_psi_irq_full_meter_default() {
+        let meter = PressureStallIRQFullMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_psi_irq_full_meter_name() {
+        let meter = PressureStallIRQFullMeter::new();
+        assert_eq!(meter.name(), "PressureStallIRQFull");
+    }
+
+    #[test]
+    fn test_psi_irq_full_meter_caption() {
+        let meter = PressureStallIRQFullMeter::new();
+        assert_eq!(meter.caption(), "PSI full IRQ:    ");
+    }
+
+    #[test]
+    fn test_psi_irq_full_meter_mode() {
+        let mut meter = PressureStallIRQFullMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    // PressureStallMemorySomeMeter tests
+    #[test]
+    fn test_psi_memory_some_meter_new() {
+        let meter = PressureStallMemorySomeMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_psi_memory_some_meter_default() {
+        let meter = PressureStallMemorySomeMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_psi_memory_some_meter_name() {
+        let meter = PressureStallMemorySomeMeter::new();
+        assert_eq!(meter.name(), "PressureStallMemorySome");
+    }
+
+    #[test]
+    fn test_psi_memory_some_meter_caption() {
+        let meter = PressureStallMemorySomeMeter::new();
+        assert_eq!(meter.caption(), "PSI some memory: ");
+    }
+
+    #[test]
+    fn test_psi_memory_some_meter_mode() {
+        let mut meter = PressureStallMemorySomeMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    // PressureStallMemoryFullMeter tests
+    #[test]
+    fn test_psi_memory_full_meter_new() {
+        let meter = PressureStallMemoryFullMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+    }
+
+    #[test]
+    fn test_psi_memory_full_meter_default() {
+        let meter = PressureStallMemoryFullMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_psi_memory_full_meter_name() {
+        let meter = PressureStallMemoryFullMeter::new();
+        assert_eq!(meter.name(), "PressureStallMemoryFull");
+    }
+
+    #[test]
+    fn test_psi_memory_full_meter_caption() {
+        let meter = PressureStallMemoryFullMeter::new();
+        assert_eq!(meter.caption(), "PSI full memory: ");
+    }
+
+    #[test]
+    fn test_psi_memory_full_meter_mode() {
+        let mut meter = PressureStallMemoryFullMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    // Test update functions don't panic
+    #[test]
+    fn test_psi_meters_update_does_nothing() {
+        let machine = Machine::default();
+        let mut cpu = PressureStallCPUSomeMeter::new();
+        let mut io_some = PressureStallIOSomeMeter::new();
+        let mut io_full = PressureStallIOFullMeter::new();
+        let mut irq = PressureStallIRQFullMeter::new();
+        let mut mem_some = PressureStallMemorySomeMeter::new();
+        let mut mem_full = PressureStallMemoryFullMeter::new();
+
+        cpu.update(&machine);
+        io_some.update(&machine);
+        io_full.update(&machine);
+        irq.update(&machine);
+        mem_some.update(&machine);
+        mem_full.update(&machine);
+    }
+}
