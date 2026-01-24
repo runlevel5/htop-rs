@@ -550,7 +550,9 @@ impl ScreenManager {
         // On macOS, only root can decrease nice.
         // On Linux, RLIMIT_NICE may allow non-root users to decrease nice.
         // F7 is at index 6 (0-based: F1=0, F2=1, ..., F7=6)
-        self.main_panel.function_bar.set_enabled(6, can_decrease_nice());
+        self.main_panel
+            .function_bar
+            .set_enabled(6, can_decrease_nice());
 
         // Build tree if starting in tree view mode
         if self.settings.tree_view {
@@ -566,6 +568,10 @@ impl ScreenManager {
             machine.processes.build_tree(sort_key, ascending);
         }
 
+        // Redraw flag - matches C htop behavior
+        // Only redraw when data changed or user pressed a key
+        let mut redraw = true;
+
         loop {
             // Check if we should exit
             if !running.load(Ordering::SeqCst) {
@@ -577,7 +583,7 @@ impl ScreenManager {
                 break;
             }
 
-            // Determine if we should update
+            // Determine if we should update (time-based, like C htop checkRecalculation)
             let should_update = !self.paused
                 && self.last_update.elapsed()
                     >= Duration::from_millis(self.settings.delay as u64 * 100);
@@ -631,12 +637,18 @@ impl ScreenManager {
                 if machine.iterations_remaining > 0 {
                     machine.iterations_remaining -= 1;
                 }
+
+                // Data updated - need to redraw
+                redraw = true;
             }
 
-            // Draw the screen with real machine data
-            self.draw(crt, machine);
+            // Only draw when needed (matches C htop behavior)
+            // This avoids unnecessary redraws during halfdelay timeout
+            if redraw {
+                self.draw(crt, machine);
+            }
 
-            // Wait for input
+            // Wait for input (halfdelay mode - returns after timeout or key press)
             let mut key = crt.read_key();
 
             // Handle mouse events
@@ -667,15 +679,20 @@ impl ScreenManager {
                         // Force full redraw of header and main panel after clear
                         self.header_needs_redraw = true;
                         self.main_panel.needs_redraw = true;
-                        self.draw(crt, machine);
                     }
                     _ => {}
                 }
+
+                // Key was pressed - redraw on next iteration
+                redraw = true;
             } else {
-                // No key pressed (idle) - decrement sort timeout
+                // No key pressed (halfdelay timeout) - decrement sort timeout
                 if self.sort_timeout > 0 {
                     self.sort_timeout -= 1;
                 }
+                // No input and no data change - skip redraw on next iteration
+                // This matches C htop: "redraw = false; continue;"
+                redraw = false;
             }
         }
 
@@ -924,11 +941,11 @@ impl ScreenManager {
                 // 'H' - hide/show user process threads
                 // Remember currently selected PID before changing filter
                 let selected_pid = self.main_panel.get_selected_pid(machine);
-                
+
                 self.settings.hide_userland_threads = !self.settings.hide_userland_threads;
                 self.settings.changed = true;
                 self.main_panel.invalidate_display_list();
-                
+
                 // Try to keep the same process selected, fall back to first row if not visible
                 if let Some(pid) = selected_pid {
                     if !self.main_panel.try_select_pid(pid, machine, &self.settings) {
@@ -936,7 +953,7 @@ impl ScreenManager {
                         self.main_panel.scroll_v = 0;
                     }
                 }
-                
+
                 // Force full redraw since visible process list changed
                 self.main_panel.needs_redraw = true;
                 // Redraw header so Tasks meter updates immediately (shows thr shadowed/unshadowed)
@@ -971,11 +988,11 @@ impl ScreenManager {
                 // 'K' - hide/show kernel threads
                 // Remember currently selected PID before changing filter
                 let selected_pid = self.main_panel.get_selected_pid(machine);
-                
+
                 self.settings.hide_kernel_threads = !self.settings.hide_kernel_threads;
                 self.settings.changed = true;
                 self.main_panel.invalidate_display_list();
-                
+
                 // Try to keep the same process selected, fall back to first row if not visible
                 if let Some(pid) = selected_pid {
                     if !self.main_panel.try_select_pid(pid, machine, &self.settings) {
@@ -983,7 +1000,7 @@ impl ScreenManager {
                         self.main_panel.scroll_v = 0;
                     }
                 }
-                
+
                 // Force full redraw since visible process list changed
                 self.main_panel.needs_redraw = true;
                 // Redraw header so Tasks meter updates immediately (shows kthr shadowed/unshadowed)
@@ -2016,7 +2033,7 @@ impl ScreenManager {
     fn show_setup(&mut self, crt: &mut Crt, machine: &mut Machine) {
         let mut setup_screen = super::setup_screen::SetupScreen::new();
         setup_screen.run(&mut self.settings, crt, &mut self.header, machine);
-        
+
         // Sync main panel fields with current screen's fields (in case columns were changed)
         let screen = &self.settings.screens[self.settings.active_screen];
         self.main_panel.fields = screen.fields.clone();

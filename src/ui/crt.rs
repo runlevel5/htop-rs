@@ -1444,7 +1444,11 @@ impl Crt {
     }
 
     /// Read a key from input
+    /// Matches C htop Panel_getCh behavior with set_escdelay(25) for faster ESC handling
     pub fn read_key(&self) -> Option<i32> {
+        // Set escape delay to 25ms for faster ESC key response (matches C htop)
+        // This reduces the delay when pressing ESC (which is also prefix for arrow keys)
+        ncurses::set_escdelay(25);
         let ch = getch();
         if ch == ERR {
             None
