@@ -2681,6 +2681,419 @@ impl ProcessList {
 mod tests {
     use super::*;
 
+    // ==================== ProcessField Tests ====================
+
+    #[test]
+    fn test_process_field_all_returns_common_fields() {
+        let fields = ProcessField::all();
+
+        // Common fields that should exist on all platforms
+        let common_fields = [
+            ProcessField::Pid,
+            ProcessField::Command,
+            ProcessField::State,
+            ProcessField::Ppid,
+            ProcessField::Pgrp,
+            ProcessField::Session,
+            ProcessField::Tty,
+            ProcessField::Tpgid,
+            ProcessField::Minflt,
+            ProcessField::Majflt,
+            ProcessField::Priority,
+            ProcessField::Nice,
+            ProcessField::Starttime,
+            ProcessField::Processor,
+            ProcessField::MSize,
+            ProcessField::MResident,
+            ProcessField::StUid,
+            ProcessField::PercentCpu,
+            ProcessField::PercentMem,
+            ProcessField::User,
+            ProcessField::Time,
+            ProcessField::Nlwp,
+            ProcessField::Tgid,
+            ProcessField::PercentNormCpu,
+            ProcessField::Elapsed,
+            ProcessField::SchedulerPolicy,
+            ProcessField::ProcComm,
+            ProcessField::ProcExe,
+            ProcessField::Cwd,
+        ];
+
+        for field in common_fields {
+            assert!(
+                fields.contains(&field),
+                "ProcessField::all() should contain {:?}",
+                field
+            );
+        }
+    }
+
+    #[test]
+    fn test_process_field_all_no_duplicates() {
+        let fields = ProcessField::all();
+        let mut seen = std::collections::HashSet::new();
+
+        for field in &fields {
+            assert!(
+                seen.insert(field),
+                "ProcessField::all() contains duplicate: {:?}",
+                field
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_process_field_all_contains_linux_fields() {
+        let fields = ProcessField::all();
+
+        let linux_fields = [
+            ProcessField::Cminflt,
+            ProcessField::Cmajflt,
+            ProcessField::MShare,
+            ProcessField::IORate,
+            ProcessField::CGroup,
+            ProcessField::Oom,
+            ProcessField::IOPriority,
+        ];
+
+        for field in linux_fields {
+            assert!(
+                fields.contains(&field),
+                "ProcessField::all() should contain Linux field {:?}",
+                field
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_process_field_all_contains_macos_fields() {
+        let fields = ProcessField::all();
+        assert!(
+            fields.contains(&ProcessField::Translated),
+            "ProcessField::all() should contain macOS Translated field"
+        );
+    }
+
+    #[test]
+    fn test_process_field_name_common_fields() {
+        assert_eq!(ProcessField::Pid.name(), "PID");
+        assert_eq!(ProcessField::Command.name(), "Command");
+        assert_eq!(ProcessField::State.name(), "STATE");
+        assert_eq!(ProcessField::Ppid.name(), "PPID");
+        assert_eq!(ProcessField::Nice.name(), "NICE");
+        assert_eq!(ProcessField::PercentCpu.name(), "PERCENT_CPU");
+        assert_eq!(ProcessField::PercentMem.name(), "PERCENT_MEM");
+        assert_eq!(ProcessField::User.name(), "USER");
+        assert_eq!(ProcessField::Time.name(), "TIME");
+        assert_eq!(ProcessField::MSize.name(), "M_VIRT");
+        assert_eq!(ProcessField::MResident.name(), "M_RESIDENT");
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_process_field_name_linux_fields() {
+        assert_eq!(ProcessField::MShare.name(), "M_SHARE");
+        assert_eq!(ProcessField::IORate.name(), "IO_RATE");
+        assert_eq!(ProcessField::CGroup.name(), "CGROUP");
+        assert_eq!(ProcessField::Oom.name(), "OOM");
+        assert_eq!(ProcessField::IOPriority.name(), "IO_PRIORITY");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_process_field_name_macos_fields() {
+        assert_eq!(ProcessField::Translated.name(), "TRANSLATED");
+    }
+
+    #[test]
+    fn test_process_field_title_common_fields() {
+        // Title includes padding for column alignment
+        assert_eq!(ProcessField::Pid.title(), "  PID ");
+        assert_eq!(ProcessField::Command.title(), "Command ");
+        assert_eq!(ProcessField::State.title(), "S ");
+        assert_eq!(ProcessField::Nice.title(), " NI ");
+        assert_eq!(ProcessField::PercentCpu.title(), " CPU%");
+        assert_eq!(ProcessField::PercentMem.title(), "MEM% ");
+        assert_eq!(ProcessField::User.title(), "USER       ");
+        assert_eq!(ProcessField::Time.title(), "  TIME+  ");
+    }
+
+    #[test]
+    fn test_process_field_base_title_pid_columns() {
+        // PID columns have special base titles (without padding)
+        assert_eq!(ProcessField::Pid.base_title(), "PID");
+        assert_eq!(ProcessField::Ppid.base_title(), "PPID");
+        assert_eq!(ProcessField::Pgrp.base_title(), "PGRP");
+        assert_eq!(ProcessField::Session.base_title(), "SID");
+        assert_eq!(ProcessField::Tpgid.base_title(), "TPGID");
+        assert_eq!(ProcessField::Tgid.base_title(), "TGID");
+    }
+
+    #[test]
+    fn test_process_field_base_title_special_columns() {
+        assert_eq!(ProcessField::StUid.base_title(), "UID");
+        assert_eq!(ProcessField::PercentCpu.base_title(), "CPU%");
+        assert_eq!(ProcessField::PercentNormCpu.base_title(), "NCPU%");
+    }
+
+    #[test]
+    fn test_process_field_base_title_falls_back_to_title() {
+        // Non-special fields should return their title
+        assert_eq!(ProcessField::Command.base_title(), ProcessField::Command.title());
+        assert_eq!(ProcessField::State.base_title(), ProcessField::State.title());
+        assert_eq!(ProcessField::Nice.base_title(), ProcessField::Nice.title());
+    }
+
+    #[test]
+    fn test_process_field_description_not_empty() {
+        // All fields should have non-empty descriptions
+        for field in ProcessField::all() {
+            let desc = field.description();
+            assert!(
+                !desc.is_empty(),
+                "ProcessField::{:?} should have a non-empty description",
+                field
+            );
+        }
+    }
+
+    #[test]
+    fn test_process_field_description_common_fields() {
+        assert!(ProcessField::Pid.description().contains("Process"));
+        assert!(ProcessField::Command.description().contains("Command"));
+        assert!(ProcessField::Nice.description().contains("Nice"));
+        assert!(ProcessField::PercentCpu.description().contains("CPU"));
+        assert!(ProcessField::PercentMem.description().contains("memory"));
+    }
+
+    #[test]
+    fn test_process_field_from_name_common_fields() {
+        // Primary names
+        assert_eq!(ProcessField::from_name("PID"), Some(ProcessField::Pid));
+        assert_eq!(ProcessField::from_name("COMMAND"), Some(ProcessField::Command));
+        assert_eq!(ProcessField::from_name("STATE"), Some(ProcessField::State));
+        assert_eq!(ProcessField::from_name("NICE"), Some(ProcessField::Nice));
+        assert_eq!(ProcessField::from_name("USER"), Some(ProcessField::User));
+        assert_eq!(ProcessField::from_name("TIME"), Some(ProcessField::Time));
+    }
+
+    #[test]
+    fn test_process_field_from_name_aliases() {
+        // Alias names should also work
+        assert_eq!(ProcessField::from_name("S"), Some(ProcessField::State));
+        assert_eq!(ProcessField::from_name("NI"), Some(ProcessField::Nice));
+        assert_eq!(ProcessField::from_name("PRI"), Some(ProcessField::Priority));
+        assert_eq!(ProcessField::from_name("VIRT"), Some(ProcessField::MSize));
+        assert_eq!(ProcessField::from_name("RES"), Some(ProcessField::MResident));
+        assert_eq!(ProcessField::from_name("CPU%"), Some(ProcessField::PercentCpu));
+        assert_eq!(ProcessField::from_name("MEM%"), Some(ProcessField::PercentMem));
+        assert_eq!(ProcessField::from_name("TIME+"), Some(ProcessField::Time));
+        assert_eq!(ProcessField::from_name("UID"), Some(ProcessField::StUid));
+        assert_eq!(ProcessField::from_name("SID"), Some(ProcessField::Session));
+        assert_eq!(ProcessField::from_name("START"), Some(ProcessField::Starttime));
+        assert_eq!(ProcessField::from_name("CPU"), Some(ProcessField::Processor));
+        assert_eq!(ProcessField::from_name("SCHED"), Some(ProcessField::SchedulerPolicy));
+    }
+
+    #[test]
+    fn test_process_field_from_name_case_insensitive() {
+        assert_eq!(ProcessField::from_name("pid"), Some(ProcessField::Pid));
+        assert_eq!(ProcessField::from_name("Pid"), Some(ProcessField::Pid));
+        assert_eq!(ProcessField::from_name("command"), Some(ProcessField::Command));
+        assert_eq!(ProcessField::from_name("COMMAND"), Some(ProcessField::Command));
+        assert_eq!(ProcessField::from_name("Command"), Some(ProcessField::Command));
+    }
+
+    #[test]
+    fn test_process_field_from_name_invalid() {
+        assert_eq!(ProcessField::from_name("INVALID"), None);
+        assert_eq!(ProcessField::from_name(""), None);
+        assert_eq!(ProcessField::from_name("NONEXISTENT"), None);
+        assert_eq!(ProcessField::from_name("123"), None);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_process_field_from_name_linux_fields() {
+        assert_eq!(ProcessField::from_name("M_SHARE"), Some(ProcessField::MShare));
+        assert_eq!(ProcessField::from_name("SHR"), Some(ProcessField::MShare));
+        assert_eq!(ProcessField::from_name("CGROUP"), Some(ProcessField::CGroup));
+        assert_eq!(ProcessField::from_name("OOM"), Some(ProcessField::Oom));
+        assert_eq!(ProcessField::from_name("IO_PRIORITY"), Some(ProcessField::IOPriority));
+        assert_eq!(ProcessField::from_name("IO"), Some(ProcessField::IOPriority));
+        assert_eq!(ProcessField::from_name("IO_RATE"), Some(ProcessField::IORate));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_process_field_from_name_macos_fields() {
+        assert_eq!(ProcessField::from_name("TRANSLATED"), Some(ProcessField::Translated));
+        assert_eq!(ProcessField::from_name("T"), Some(ProcessField::Translated));
+    }
+
+    #[test]
+    fn test_process_field_from_id_common_fields() {
+        // Note: PID is ID 0 but from_id doesn't return it (0 is terminator in C htop)
+        assert_eq!(ProcessField::from_id(1), Some(ProcessField::Command));
+        assert_eq!(ProcessField::from_id(2), Some(ProcessField::State));
+        assert_eq!(ProcessField::from_id(3), Some(ProcessField::Ppid));
+        assert_eq!(ProcessField::from_id(18), Some(ProcessField::Priority));
+        assert_eq!(ProcessField::from_id(19), Some(ProcessField::Nice));
+        assert_eq!(ProcessField::from_id(47), Some(ProcessField::PercentCpu));
+        assert_eq!(ProcessField::from_id(48), Some(ProcessField::PercentMem));
+        assert_eq!(ProcessField::from_id(49), Some(ProcessField::User));
+        assert_eq!(ProcessField::from_id(50), Some(ProcessField::Time));
+    }
+
+    #[test]
+    fn test_process_field_from_id_invalid() {
+        assert_eq!(ProcessField::from_id(0), None); // 0 is PID terminator
+        assert_eq!(ProcessField::from_id(999), None);
+        assert_eq!(ProcessField::from_id(u32::MAX), None);
+    }
+
+    #[test]
+    fn test_process_field_to_id_common_fields() {
+        assert_eq!(ProcessField::Pid.to_id(), 0); // Special: terminator
+        assert_eq!(ProcessField::Command.to_id(), 1);
+        assert_eq!(ProcessField::State.to_id(), 2);
+        assert_eq!(ProcessField::Ppid.to_id(), 3);
+        assert_eq!(ProcessField::Priority.to_id(), 18);
+        assert_eq!(ProcessField::Nice.to_id(), 19);
+        assert_eq!(ProcessField::PercentCpu.to_id(), 47);
+        assert_eq!(ProcessField::PercentMem.to_id(), 48);
+        assert_eq!(ProcessField::User.to_id(), 49);
+        assert_eq!(ProcessField::Time.to_id(), 50);
+    }
+
+    #[test]
+    fn test_process_field_id_roundtrip() {
+        // Test that from_id(to_id(field)) == field for all fields except PID
+        for field in ProcessField::all() {
+            if field == ProcessField::Pid {
+                // PID is special (id=0, which is terminator)
+                continue;
+            }
+            let id = field.to_id();
+            let recovered = ProcessField::from_id(id);
+            assert_eq!(
+                recovered,
+                Some(field),
+                "ID roundtrip failed for {:?} (id={})",
+                field,
+                id
+            );
+        }
+    }
+
+    #[test]
+    fn test_process_field_default_sort_desc_cpu_mem_fields() {
+        // CPU and memory fields should sort descending (highest first)
+        assert!(ProcessField::PercentCpu.default_sort_desc());
+        assert!(ProcessField::PercentMem.default_sort_desc());
+        assert!(ProcessField::PercentNormCpu.default_sort_desc());
+        assert!(ProcessField::MSize.default_sort_desc());
+        assert!(ProcessField::MResident.default_sort_desc());
+        assert!(ProcessField::Time.default_sort_desc());
+        assert!(ProcessField::Minflt.default_sort_desc());
+        assert!(ProcessField::Majflt.default_sort_desc());
+        assert!(ProcessField::Nlwp.default_sort_desc());
+    }
+
+    #[test]
+    fn test_process_field_default_sort_desc_ascending_fields() {
+        // PID-like fields should sort ascending
+        assert!(!ProcessField::Pid.default_sort_desc());
+        assert!(!ProcessField::Ppid.default_sort_desc());
+        assert!(!ProcessField::Pgrp.default_sort_desc());
+        assert!(!ProcessField::Session.default_sort_desc());
+        assert!(!ProcessField::Tpgid.default_sort_desc());
+        assert!(!ProcessField::Tgid.default_sort_desc());
+
+        // Name/text fields should sort ascending
+        assert!(!ProcessField::Command.default_sort_desc());
+        assert!(!ProcessField::User.default_sort_desc());
+        assert!(!ProcessField::State.default_sort_desc());
+        assert!(!ProcessField::Nice.default_sort_desc());
+        assert!(!ProcessField::Priority.default_sort_desc());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_process_field_default_sort_desc_linux_fields() {
+        // I/O and memory fields should sort descending
+        assert!(ProcessField::IORate.default_sort_desc());
+        assert!(ProcessField::IOReadRate.default_sort_desc());
+        assert!(ProcessField::IOWriteRate.default_sort_desc());
+        assert!(ProcessField::MShare.default_sort_desc());
+        assert!(ProcessField::Oom.default_sort_desc());
+        assert!(ProcessField::Ctxt.default_sort_desc());
+    }
+
+    #[test]
+    fn test_process_field_is_pid_column() {
+        // These are PID columns
+        assert!(ProcessField::Pid.is_pid_column());
+        assert!(ProcessField::Ppid.is_pid_column());
+        assert!(ProcessField::Pgrp.is_pid_column());
+        assert!(ProcessField::Session.is_pid_column());
+        assert!(ProcessField::Tpgid.is_pid_column());
+        assert!(ProcessField::Tgid.is_pid_column());
+
+        // These are NOT PID columns
+        assert!(!ProcessField::Command.is_pid_column());
+        assert!(!ProcessField::User.is_pid_column());
+        assert!(!ProcessField::PercentCpu.is_pid_column());
+        assert!(!ProcessField::PercentMem.is_pid_column());
+        assert!(!ProcessField::Nice.is_pid_column());
+        assert!(!ProcessField::Time.is_pid_column());
+        assert!(!ProcessField::StUid.is_pid_column());
+    }
+
+    #[test]
+    fn test_process_field_default() {
+        // Default should be PercentCpu
+        let default: ProcessField = Default::default();
+        assert_eq!(default, ProcessField::PercentCpu);
+    }
+
+    #[test]
+    fn test_process_field_clone_copy() {
+        let field = ProcessField::Pid;
+        let cloned = field.clone();
+        let copied = field;
+        assert_eq!(field, cloned);
+        assert_eq!(field, copied);
+    }
+
+    #[test]
+    fn test_process_field_debug() {
+        let debug_str = format!("{:?}", ProcessField::Pid);
+        assert_eq!(debug_str, "Pid");
+
+        let debug_str = format!("{:?}", ProcessField::PercentCpu);
+        assert_eq!(debug_str, "PercentCpu");
+    }
+
+    #[test]
+    fn test_process_field_hash() {
+        use std::collections::HashSet;
+
+        let mut set = HashSet::new();
+        set.insert(ProcessField::Pid);
+        set.insert(ProcessField::Command);
+        set.insert(ProcessField::Pid); // Duplicate
+
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&ProcessField::Pid));
+        assert!(set.contains(&ProcessField::Command));
+    }
+
+    // ==================== Tree Building Tests ====================
+
     #[test]
     fn test_tree_building() {
         let mut pl = ProcessList::new();
