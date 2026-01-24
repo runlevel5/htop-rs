@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-use ncurses::*;
+use crate::ncurses_compat::*;
 
 /// A character with its display attributes
 #[derive(Debug, Clone, Copy)]

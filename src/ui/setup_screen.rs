@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)] // UI drawing functions naturally have many parameters
 
-use ncurses::*;
+use crate::ncurses_compat::*;
 
 use super::crt::{ColorElement, KEY_DEL_MAC, KEY_F10, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9};
 use super::function_bar::FunctionBar;

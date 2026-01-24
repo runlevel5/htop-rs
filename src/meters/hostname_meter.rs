@@ -54,7 +54,7 @@ impl Meter for HostnameMeter {
         y: i32,
         _width: i32,
     ) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         let caption_attr = crt.color(ColorElement::MeterText);
         let value_attr = crt.color(ColorElement::Hostname);

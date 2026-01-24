@@ -84,7 +84,7 @@ impl Meter for LoadAverageMeter {
         y: i32,
         width: i32,
     ) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         match self.mode {
             MeterMode::Text => {
@@ -298,7 +298,7 @@ impl Meter for LoadMeter {
         y: i32,
         width: i32,
     ) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         match self.mode {
             MeterMode::Text => {

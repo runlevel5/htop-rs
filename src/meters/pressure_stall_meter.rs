@@ -8,7 +8,7 @@ use crate::ui::{ColorElement, Crt};
 
 /// Helper function to draw "Not implemented" text
 fn draw_not_implemented(crt: &Crt, x: i32, y: i32, caption: &str) {
-    use ncurses::*;
+    use crate::ncurses_compat::*;
 
     let caption_attr = crt.color(ColorElement::MeterText);
     let text_attr = crt.color(ColorElement::MeterValueError);

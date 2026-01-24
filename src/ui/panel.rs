@@ -9,7 +9,7 @@ use super::crt::{ColorElement, KEY_WHEELDOWN, KEY_WHEELUP};
 use super::function_bar::FunctionBar;
 use super::rich_string::RichString;
 use super::Crt;
-use ncurses::*;
+use crate::ncurses_compat::*;
 
 /// Handler result from event processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

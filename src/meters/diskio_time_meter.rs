@@ -42,7 +42,7 @@ impl Meter for DiskIOTimeMeter {
         y: i32,
         _width: i32,
     ) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         let caption_attr = crt.color(ColorElement::MeterText);
         let text_attr = crt.color(ColorElement::MeterValueError);

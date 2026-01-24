@@ -19,7 +19,7 @@ use crate::platform::linux::{
     ioprio_class, ioprio_data, IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE, IOPRIO_CLASS_NONE,
     IOPRIO_CLASS_RT,
 };
-use ncurses::*;
+use crate::ncurses_compat::*;
 
 /// Incremental mode type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

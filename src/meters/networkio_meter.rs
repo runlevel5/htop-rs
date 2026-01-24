@@ -113,7 +113,7 @@ impl Meter for NetworkIOMeter {
     }
 
     fn draw(&self, crt: &Crt, _machine: &Machine, settings: &Settings, x: i32, y: i32, width: i32) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         match self.mode {
             MeterMode::Bar => {

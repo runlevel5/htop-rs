@@ -105,7 +105,7 @@ impl Meter for UptimeMeter {
         y: i32,
         width: i32,
     ) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         match self.mode {
             MeterMode::Led => {

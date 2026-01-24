@@ -5,6 +5,7 @@
 
 mod core;
 mod meters;
+mod ncurses_compat;
 mod platform;
 mod ui;
 

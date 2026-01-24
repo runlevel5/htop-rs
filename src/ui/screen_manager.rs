@@ -5,8 +5,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use ncurses::CURSOR_VISIBILITY;
-use ncurses::*;
+use crate::ncurses_compat::CURSOR_VISIBILITY;
+use crate::ncurses_compat::*;
 
 use super::crt::{
     ColorElement, KEY_F1, KEY_F10, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9,
@@ -501,9 +501,9 @@ impl ScreenManager {
             // If paused, append "PAUSED" indicator (like C htop MainPanel_drawFunctionBar)
             if self.paused {
                 let paused_color = crt.color(ColorElement::Paused);
-                ncurses::attrset(paused_color);
-                let _ = ncurses::mvaddstr(y, end_x + 1, "PAUSED");
-                ncurses::attrset(ncurses::A_NORMAL);
+                attrset(paused_color);
+                let _ = mvaddstr(y, end_x + 1, "PAUSED");
+                attrset(A_NORMAL);
             }
         }
 

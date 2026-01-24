@@ -186,7 +186,7 @@ impl CpuMeter {
         show_cpu_frequency: bool,
         frequency: f64,
     ) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         // Draw caption (exactly 3 chars)
         let caption_attr = crt.color(ColorElement::MeterText);
@@ -373,8 +373,8 @@ impl CpuMeter {
         detailed_cpu_time: bool,
         show_cpu_frequency: bool,
     ) {
+        use crate::ncurses_compat::*;
         use crate::ui::ColorElement;
-        use ncurses::*;
 
         if width <= 0 {
             return;
@@ -384,7 +384,7 @@ impl CpuMeter {
         let mut cur_x = x;
 
         // Helper to print a string with truncation
-        let mut print_str = |s: &str, attr: ncurses::attr_t| -> bool {
+        let mut print_str = |s: &str, attr: attr_t| -> bool {
             if cur_x >= max_x {
                 return false;
             }
@@ -412,19 +412,28 @@ impl CpuMeter {
             if !print_str(":", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", user), crt.color(ColorElement::CpuNormal)) {
+            if !print_str(
+                &format!("{:5.1}% ", user),
+                crt.color(ColorElement::CpuNormal),
+            ) {
                 return;
             }
             if !print_str("sy:", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", system), crt.color(ColorElement::CpuSystem)) {
+            if !print_str(
+                &format!("{:5.1}% ", system),
+                crt.color(ColorElement::CpuSystem),
+            ) {
                 return;
             }
             if !print_str("ni:", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", nice), crt.color(ColorElement::CpuNiceText)) {
+            if !print_str(
+                &format!("{:5.1}% ", nice),
+                crt.color(ColorElement::CpuNiceText),
+            ) {
                 return;
             }
             if !print_str("hi:", caption_attr) {
@@ -436,7 +445,10 @@ impl CpuMeter {
             if !print_str("si:", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", softirq), crt.color(ColorElement::CpuSoftIrq)) {
+            if !print_str(
+                &format!("{:5.1}% ", softirq),
+                crt.color(ColorElement::CpuSoftIrq),
+            ) {
                 return;
             }
             // st: only shown if steal is non-negative (i.e., supported)
@@ -444,7 +456,10 @@ impl CpuMeter {
                 if !print_str("st:", caption_attr) {
                     return;
                 }
-                if !print_str(&format!("{:5.1}% ", steal), crt.color(ColorElement::CpuSteal)) {
+                if !print_str(
+                    &format!("{:5.1}% ", steal),
+                    crt.color(ColorElement::CpuSteal),
+                ) {
                     return;
                 }
             }
@@ -453,14 +468,20 @@ impl CpuMeter {
                 if !print_str("gu:", caption_attr) {
                     return;
                 }
-                if !print_str(&format!("{:5.1}% ", guest), crt.color(ColorElement::CpuGuest)) {
+                if !print_str(
+                    &format!("{:5.1}% ", guest),
+                    crt.color(ColorElement::CpuGuest),
+                ) {
                     return;
                 }
             }
             if !print_str("wa:", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", iowait), crt.color(ColorElement::CpuIOWait)) {
+            if !print_str(
+                &format!("{:5.1}% ", iowait),
+                crt.color(ColorElement::CpuIOWait),
+            ) {
                 return;
             }
         } else {
@@ -471,19 +492,28 @@ impl CpuMeter {
             if !print_str(":", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", user), crt.color(ColorElement::CpuNormal)) {
+            if !print_str(
+                &format!("{:5.1}% ", user),
+                crt.color(ColorElement::CpuNormal),
+            ) {
                 return;
             }
             if !print_str("sys:", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", kernel), crt.color(ColorElement::CpuSystem)) {
+            if !print_str(
+                &format!("{:5.1}% ", kernel),
+                crt.color(ColorElement::CpuSystem),
+            ) {
                 return;
             }
             if !print_str("low:", caption_attr) {
                 return;
             }
-            if !print_str(&format!("{:5.1}% ", nice), crt.color(ColorElement::CpuNiceText)) {
+            if !print_str(
+                &format!("{:5.1}% ", nice),
+                crt.color(ColorElement::CpuNiceText),
+            ) {
                 return;
             }
             // vir: only shown if IRQ is non-negative (used as proxy for virtualization support)
@@ -491,7 +521,10 @@ impl CpuMeter {
                 if !print_str("vir:", caption_attr) {
                     return;
                 }
-                if !print_str(&format!("{:5.1}% ", virt), crt.color(ColorElement::CpuGuest)) {
+                if !print_str(
+                    &format!("{:5.1}% ", virt),
+                    crt.color(ColorElement::CpuGuest),
+                ) {
                     return;
                 }
             }
@@ -501,7 +534,10 @@ impl CpuMeter {
             if !print_str("freq: ", caption_attr) {
                 return;
             }
-            let _ = print_str(&format!("{} ", Self::format_frequency(frequency)), value_attr);
+            let _ = print_str(
+                &format!("{} ", Self::format_frequency(frequency)),
+                value_attr,
+            );
         }
 
         attrset(crt.color(ColorElement::ResetColor));
@@ -1158,17 +1194,17 @@ mod tests {
     #[test]
     fn test_format_cpu_display_text_detailed() {
         let text = CpuMeter::format_cpu_display_text(
-            50.0, // user
-            10.0, // system
-            5.0,  // nice
-            1.0,  // irq
-            0.5,  // softirq
-            0.2,  // steal
-            0.1,  // guest
-            3.0,  // iowait
+            50.0,   // user
+            10.0,   // system
+            5.0,    // nice
+            1.0,    // irq
+            0.5,    // softirq
+            0.2,    // steal
+            0.1,    // guest
+            3.0,    // iowait
             2400.0, // frequency
-            true, // detailed_cpu_time
-            false, // show_cpu_frequency
+            true,   // detailed_cpu_time
+            false,  // show_cpu_frequency
         );
 
         assert!(text.contains(": 50.0%"));
@@ -1185,10 +1221,8 @@ mod tests {
     #[test]
     fn test_format_cpu_display_text_detailed_with_frequency() {
         let text = CpuMeter::format_cpu_display_text(
-            50.0, 10.0, 5.0, 1.0, 0.5, 0.2, 0.1, 3.0,
-            2400.0,
-            true,  // detailed_cpu_time
-            true,  // show_cpu_frequency
+            50.0, 10.0, 5.0, 1.0, 0.5, 0.2, 0.1, 3.0, 2400.0, true, // detailed_cpu_time
+            true, // show_cpu_frequency
         );
 
         assert!(text.contains("freq: 2400MHz"));
@@ -1205,17 +1239,16 @@ mod tests {
             0.2,  // steal
             0.1,  // guest
             3.0,  // iowait
-            2400.0,
-            false, // detailed_cpu_time
+            2400.0, false, // detailed_cpu_time
             false, // show_cpu_frequency
         );
 
         // Non-detailed should combine values
         assert!(text.contains(": 50.0%")); // user
-        // sys = system + irq + softirq = 10 + 1 + 0.5 = 11.5
+                                           // sys = system + irq + softirq = 10 + 1 + 0.5 = 11.5
         assert!(text.contains("sys: 11.5%"));
         assert!(text.contains("low:  5.0%")); // nice
-        // vir = steal + guest = 0.2 + 0.1 = 0.3
+                                              // vir = steal + guest = 0.2 + 0.1 = 0.3
         assert!(text.contains("vir:  0.3%"));
     }
 
@@ -1223,11 +1256,9 @@ mod tests {
     fn test_format_cpu_display_text_negative_steal_guest_hidden() {
         // When steal/guest are negative (unsupported), they should be hidden in detailed mode
         let text = CpuMeter::format_cpu_display_text(
-            50.0, 10.0, 5.0, 1.0, 0.5,
-            -1.0, // steal (negative = unsupported)
+            50.0, 10.0, 5.0, 1.0, 0.5, -1.0, // steal (negative = unsupported)
             -1.0, // guest (negative = unsupported)
-            3.0, 0.0,
-            true, // detailed_cpu_time
+            3.0, 0.0, true, // detailed_cpu_time
             false,
         );
 
@@ -1285,7 +1316,7 @@ mod tests {
     #[test]
     fn test_cpu_meter_update_cpu_count() {
         let mut meter = CpuMeter::all(1);
-        
+
         // First update with 4 CPUs
         let machine4 = create_test_machine_with_cpus(4);
         meter.update(&machine4);
@@ -1536,9 +1567,7 @@ mod tests {
 
     #[test]
     fn test_bar_values_non_detailed_mode_segment_count() {
-        let cpu = create_test_cpu_data(
-            20.0, 5.0, 10.0, 2.0, 1.0, 0.5, 0.3, 3.0, 2400.0,
-        );
+        let cpu = create_test_cpu_data(20.0, 5.0, 10.0, 2.0, 1.0, 0.5, 0.3, 3.0, 2400.0);
 
         // Non-detailed mode should have 4 segments
         let values = build_bar_values(&cpu, false);
@@ -1564,14 +1593,14 @@ mod tests {
         let values = build_bar_values(&cpu, true);
 
         // Verify each segment has correct value and color
-        assert_eq!(values[0], (20.0, ColorElement::CpuNormal));  // user
-        assert_eq!(values[1], (5.0, ColorElement::CpuNice));     // nice
-        assert_eq!(values[2], (10.0, ColorElement::CpuSystem));  // system
-        assert_eq!(values[3], (2.0, ColorElement::CpuIrq));      // irq
-        assert_eq!(values[4], (1.0, ColorElement::CpuSoftIrq));  // softirq
-        assert_eq!(values[5], (0.5, ColorElement::CpuSteal));    // steal
-        assert_eq!(values[6], (0.3, ColorElement::CpuGuest));    // guest
-        assert_eq!(values[7], (3.0, ColorElement::CpuIOWait));   // iowait
+        assert_eq!(values[0], (20.0, ColorElement::CpuNormal)); // user
+        assert_eq!(values[1], (5.0, ColorElement::CpuNice)); // nice
+        assert_eq!(values[2], (10.0, ColorElement::CpuSystem)); // system
+        assert_eq!(values[3], (2.0, ColorElement::CpuIrq)); // irq
+        assert_eq!(values[4], (1.0, ColorElement::CpuSoftIrq)); // softirq
+        assert_eq!(values[5], (0.5, ColorElement::CpuSteal)); // steal
+        assert_eq!(values[6], (0.3, ColorElement::CpuGuest)); // guest
+        assert_eq!(values[7], (3.0, ColorElement::CpuIOWait)); // iowait
     }
 
     #[test]
@@ -1659,7 +1688,7 @@ mod tests {
         // With detailed=false, guest is always included regardless of account_guest
         let total_with = calculate_total(&cpu, true, false);
         let total_without = calculate_total(&cpu, false, false);
-        
+
         // Both should be the same: 20 + 5 + 10 + 2 + 1 + 0.5 + 0.3 + 3 = 41.8
         assert!((total_with - 41.8).abs() < 0.001);
         assert!((total_without - 41.8).abs() < 0.001);

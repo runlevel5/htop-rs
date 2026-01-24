@@ -11,7 +11,7 @@
 use super::crt::ColorElement;
 use super::Crt;
 use crate::core::Settings;
-use ncurses::*;
+use crate::ncurses_compat::*;
 
 /// Default function key labels (6-char fixed width with trailing spaces, like C htop)
 pub const DEFAULT_FUNCTIONS: [(&str, &str); 10] = [

@@ -10,7 +10,7 @@
 use super::crt::ColorElement;
 use super::rich_string::RichString;
 use super::Crt;
-use ncurses::attr_t;
+use crate::ncurses_compat::attr_t;
 
 /// Unit prefixes for memory formatting (K, M, G, T, P, E)
 const UNIT_PREFIXES: [char; 6] = ['K', 'M', 'G', 'T', 'P', 'E'];
@@ -400,25 +400,81 @@ pub fn print_count(str: &mut RichString, number: u64, coloring: bool, crt: &Crt)
         // Very large: all LARGE_NUMBER
         let scaled = number / ONE_DECIMAL_G;
         let formatted = format!("{:>11} ", scaled);
-        str.append(&formatted, if coloring { large_number_color } else { process_color });
+        str.append(
+            &formatted,
+            if coloring {
+                large_number_color
+            } else {
+                process_color
+            },
+        );
     } else if number >= 100 * ONE_DECIMAL_T {
         // Large: first 8 chars LARGE_NUMBER, last 4 MEGABYTES
         let scaled = number / ONE_DECIMAL_M;
         let formatted = format!("{:>11} ", scaled);
-        str.append(&formatted[..8], if coloring { large_number_color } else { process_color });
-        str.append(&formatted[8..], if coloring { megabytes_color } else { process_color });
+        str.append(
+            &formatted[..8],
+            if coloring {
+                large_number_color
+            } else {
+                process_color
+            },
+        );
+        str.append(
+            &formatted[8..],
+            if coloring {
+                megabytes_color
+            } else {
+                process_color
+            },
+        );
     } else if number >= 10 * ONE_DECIMAL_G {
         // Medium-large: 5 chars LARGE_NUMBER, 3 MEGABYTES, 4 PROCESS
         let scaled = number / ONE_DECIMAL_K;
         let formatted = format!("{:>11} ", scaled);
-        str.append(&formatted[..5], if coloring { large_number_color } else { process_color });
-        str.append(&formatted[5..8], if coloring { megabytes_color } else { process_color });
+        str.append(
+            &formatted[..5],
+            if coloring {
+                large_number_color
+            } else {
+                process_color
+            },
+        );
+        str.append(
+            &formatted[5..8],
+            if coloring {
+                megabytes_color
+            } else {
+                process_color
+            },
+        );
         str.append(&formatted[8..], process_color);
     } else {
         // Small: 2 LARGE_NUMBER, 3 MEGABYTES, 3 PROCESS, 4 SHADOW
-        str.append(&buffer[..2], if coloring { large_number_color } else { process_color });
-        str.append(&buffer[2..5], if coloring { megabytes_color } else { process_color });
+        str.append(
+            &buffer[..2],
+            if coloring {
+                large_number_color
+            } else {
+                process_color
+            },
+        );
+        str.append(
+            &buffer[2..5],
+            if coloring {
+                megabytes_color
+            } else {
+                process_color
+            },
+        );
         str.append(&buffer[5..8], process_color);
-        str.append(&buffer[8..], if coloring { shadow_color } else { process_color });
+        str.append(
+            &buffer[8..],
+            if coloring {
+                shadow_color
+            } else {
+                process_color
+            },
+        );
     }
 }

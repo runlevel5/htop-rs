@@ -138,7 +138,7 @@ impl Header {
 
     /// Draw the header (matches C htop Header_draw)
     pub fn draw(&self, crt: &Crt, machine: &Machine, settings: &Settings) {
-        use ncurses::*;
+        use crate::ncurses_compat::*;
 
         let screen_width = crt.width();
         let height = self.height;

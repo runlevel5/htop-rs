@@ -12,9 +12,8 @@ categories = ["command-line-utilities", "os"]
 default-run = "htop-rs"
 
 [dependencies]
-# ncurses bindings with wide character support
-# Using our fork which fixes build failures with ncurses 6.5+ (Fedora 43+)
-ncurses = { git = "https://github.com/runlevel5/ncurses-rs.git", features = ["wide"] }
+# Pure Rust ncurses implementation - no C dependencies
+ncurses-rs = { git = "https://github.com/runlevel5/ncurses-pure-rust.git", features = ["wide", "mouse"] }
 
 # Command line argument parsing
 clap = { version = "4.4", features = ["derive"] }

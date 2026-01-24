@@ -4,8 +4,8 @@
 
 #![allow(dead_code)]
 
-use ncurses::CURSOR_VISIBILITY::{CURSOR_INVISIBLE, CURSOR_VISIBLE};
-use ncurses::*;
+use crate::ncurses_compat::*;
+use crate::ncurses_compat::CURSOR_VISIBILITY::{CURSOR_INVISIBLE, CURSOR_VISIBLE};
 
 use crate::core::{ColorScheme, Settings};
 
@@ -347,8 +347,8 @@ impl Crt {
             let mask = BUTTON1_RELEASED
                 | BUTTON3_RELEASED
                 | BUTTON4_PRESSED
-                | BUTTON5_PRESSED_COMPAT as i32;
-            mousemask(mask as mmask_t, None);
+                | BUTTON5_PRESSED;
+            mousemask(mask, None);
             mouseinterval(0);
         }
 
@@ -1425,14 +1425,14 @@ impl Crt {
         // Use halfdelay like C htop - delay is in tenths of seconds (1-255)
         // halfdelay makes getch() wait up to delay tenths of a second
         let delay_tenths = (delay as i32).clamp(1, 255);
-        ncurses::halfdelay(delay_tenths);
+        halfdelay(delay_tenths);
     }
 
     /// Disable input delay (for instant response)
     /// Matches C htop CRT_disableDelay
     pub fn disable_delay(&self) {
-        ncurses::nocbreak();
-        ncurses::cbreak();
+        nocbreak();
+        cbreak();
         nodelay(stdscr(), true);
     }
 
@@ -1440,7 +1440,7 @@ impl Crt {
     /// Matches C htop CRT_enableDelay
     pub fn enable_delay(&self) {
         let delay_tenths = (self.delay as i32).clamp(1, 255);
-        ncurses::halfdelay(delay_tenths);
+        halfdelay(delay_tenths);
     }
 
     /// Read a key from input
@@ -1448,7 +1448,7 @@ impl Crt {
     pub fn read_key(&self) -> Option<i32> {
         // Set escape delay to 25ms for faster ESC key response (matches C htop)
         // This reduces the delay when pressing ESC (which is also prefix for arrow keys)
-        ncurses::set_escdelay(25);
+        set_escdelay(25);
         let ch = getch();
         if ch == ERR {
             None
@@ -1627,8 +1627,8 @@ impl Crt {
             let mask = BUTTON1_RELEASED
                 | BUTTON3_RELEASED
                 | BUTTON4_PRESSED
-                | BUTTON5_PRESSED_COMPAT as i32;
-            mousemask(mask as mmask_t, None);
+                | BUTTON5_PRESSED;
+            mousemask(mask, None);
         } else {
             mousemask(0, None);
         }

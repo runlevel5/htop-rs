@@ -299,7 +299,7 @@ impl MeterType {
 /// Draw a bar meter
 pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], total: f64) {
     use crate::ui::{bar_meter_char, ColorElement};
-    use ncurses::*;
+    use crate::ncurses_compat::*;
 
     let bar_width = (width - 2) as usize; // Account for [ and ]
 
@@ -345,7 +345,7 @@ pub fn draw_bar(crt: &Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], to
 /// Draw a text meter
 pub fn draw_text(crt: &Crt, x: i32, y: i32, caption: &str, text: &str) {
     use crate::ui::ColorElement;
-    use ncurses::*;
+    use crate::ncurses_compat::*;
 
     let caption_attr = crt.color(ColorElement::MeterText);
     let value_attr = crt.color(ColorElement::MeterValue);
@@ -382,7 +382,7 @@ pub fn draw_graph(
     caption: &str,
 ) {
     use crate::ui::ColorElement;
-    use ncurses::*;
+    use crate::ncurses_compat::*;
 
     // Draw the caption (3 chars like bar mode)
     let caption_len = 3;
@@ -453,7 +453,7 @@ const LED_DIGITS_UTF8: [&str; 30] = [
 
 /// Draw a single LED digit at position (x, y)
 fn draw_led_digit(crt: &Crt, x: i32, y: i32, digit: u8) {
-    use ncurses::*;
+    use crate::ncurses_compat::*;
 
     let digits = if crt.utf8 {
         &LED_DIGITS_UTF8
@@ -485,7 +485,7 @@ fn draw_led_digit(crt: &Crt, x: i32, y: i32, digit: u8) {
 /// * `text` - Text to display as LED digits (digits are rendered as LED, other chars as-is)
 pub fn draw_led(crt: &Crt, x: i32, y: i32, width: i32, caption: &str, text: &str) {
     use crate::ui::ColorElement;
-    use ncurses::*;
+    use crate::ncurses_compat::*;
 
     // Y position for non-digit text (caption and symbols like %, /, .)
     // UTF-8: middle row (y + 1), ASCII: bottom row (y + 2)
