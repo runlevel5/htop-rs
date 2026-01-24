@@ -1380,3 +1380,269 @@ fn find_config_path() -> Option<ConfigSearchResult> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== MeterMode Tests ====================
+
+    #[test]
+    fn test_meter_mode_default() {
+        let mode: MeterMode = Default::default();
+        assert_eq!(mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_meter_mode_from_i32_valid() {
+        assert_eq!(MeterMode::from_i32(1), MeterMode::Bar);
+        assert_eq!(MeterMode::from_i32(2), MeterMode::Text);
+        assert_eq!(MeterMode::from_i32(3), MeterMode::Graph);
+        assert_eq!(MeterMode::from_i32(4), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_meter_mode_from_i32_invalid() {
+        // Invalid values should default to Bar
+        assert_eq!(MeterMode::from_i32(0), MeterMode::Bar);
+        assert_eq!(MeterMode::from_i32(5), MeterMode::Bar);
+        assert_eq!(MeterMode::from_i32(-1), MeterMode::Bar);
+        assert_eq!(MeterMode::from_i32(100), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_meter_mode_to_i32() {
+        assert_eq!(MeterMode::Bar.to_i32(), 1);
+        assert_eq!(MeterMode::Text.to_i32(), 2);
+        assert_eq!(MeterMode::Graph.to_i32(), 3);
+        assert_eq!(MeterMode::Led.to_i32(), 4);
+    }
+
+    #[test]
+    fn test_meter_mode_roundtrip() {
+        // Test that from_i32(to_i32(mode)) == mode
+        for mode in [MeterMode::Bar, MeterMode::Text, MeterMode::Graph, MeterMode::Led] {
+            let i = mode.to_i32();
+            let recovered = MeterMode::from_i32(i);
+            assert_eq!(recovered, mode, "Roundtrip failed for {:?}", mode);
+        }
+    }
+
+    #[test]
+    fn test_meter_mode_clone_copy() {
+        let mode = MeterMode::Graph;
+        let cloned = mode.clone();
+        let copied = mode;
+        assert_eq!(mode, cloned);
+        assert_eq!(mode, copied);
+    }
+
+    #[test]
+    fn test_meter_mode_debug() {
+        assert_eq!(format!("{:?}", MeterMode::Bar), "Bar");
+        assert_eq!(format!("{:?}", MeterMode::Text), "Text");
+        assert_eq!(format!("{:?}", MeterMode::Graph), "Graph");
+        assert_eq!(format!("{:?}", MeterMode::Led), "Led");
+    }
+
+    // ==================== MeterConfig Tests ====================
+
+    #[test]
+    fn test_meter_config_creation() {
+        let config = MeterConfig {
+            name: "CPU".to_string(),
+            param: 0,
+            mode: MeterMode::Bar,
+        };
+        assert_eq!(config.name, "CPU");
+        assert_eq!(config.param, 0);
+        assert_eq!(config.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_meter_config_with_param() {
+        let config = MeterConfig {
+            name: "CPU".to_string(),
+            param: 2,
+            mode: MeterMode::Graph,
+        };
+        assert_eq!(config.name, "CPU");
+        assert_eq!(config.param, 2);
+        assert_eq!(config.mode, MeterMode::Graph);
+    }
+
+    #[test]
+    fn test_meter_config_clone() {
+        let config = MeterConfig {
+            name: "Memory".to_string(),
+            param: 0,
+            mode: MeterMode::Text,
+        };
+        let cloned = config.clone();
+        assert_eq!(cloned.name, config.name);
+        assert_eq!(cloned.param, config.param);
+        assert_eq!(cloned.mode, config.mode);
+    }
+
+    // ==================== parse_meter_name Tests ====================
+
+    #[test]
+    fn test_parse_meter_name_simple() {
+        let (name, param) = parse_meter_name("CPU");
+        assert_eq!(name, "CPU");
+        assert_eq!(param, 0);
+    }
+
+    #[test]
+    fn test_parse_meter_name_with_param() {
+        let (name, param) = parse_meter_name("CPU(1)");
+        assert_eq!(name, "CPU");
+        assert_eq!(param, 1);
+    }
+
+    #[test]
+    fn test_parse_meter_name_with_larger_param() {
+        let (name, param) = parse_meter_name("CPU(42)");
+        assert_eq!(name, "CPU");
+        assert_eq!(param, 42);
+    }
+
+    #[test]
+    fn test_parse_meter_name_with_zero_param() {
+        let (name, param) = parse_meter_name("Memory(0)");
+        assert_eq!(name, "Memory");
+        assert_eq!(param, 0);
+    }
+
+    #[test]
+    fn test_parse_meter_name_invalid_param() {
+        // Non-numeric param should default to 0
+        let (name, param) = parse_meter_name("CPU(abc)");
+        assert_eq!(name, "CPU");
+        assert_eq!(param, 0);
+    }
+
+    #[test]
+    fn test_parse_meter_name_empty_param() {
+        // Empty param should default to 0
+        let (name, param) = parse_meter_name("CPU()");
+        assert_eq!(name, "CPU");
+        assert_eq!(param, 0);
+    }
+
+    #[test]
+    fn test_parse_meter_name_unclosed_paren() {
+        // Unclosed paren should be treated as plain name
+        let (name, param) = parse_meter_name("CPU(1");
+        assert_eq!(name, "CPU(1");
+        assert_eq!(param, 0);
+    }
+
+    #[test]
+    fn test_parse_meter_name_various_meters() {
+        assert_eq!(parse_meter_name("Memory"), ("Memory".to_string(), 0));
+        assert_eq!(parse_meter_name("Swap"), ("Swap".to_string(), 0));
+        assert_eq!(parse_meter_name("LoadAverage"), ("LoadAverage".to_string(), 0));
+        assert_eq!(parse_meter_name("AllCPUs"), ("AllCPUs".to_string(), 0));
+        assert_eq!(parse_meter_name("AllCPUs2"), ("AllCPUs2".to_string(), 0));
+    }
+
+    // ==================== format_meter_name Tests ====================
+
+    #[test]
+    fn test_format_meter_name_no_param() {
+        assert_eq!(format_meter_name("CPU", 0), "CPU");
+        assert_eq!(format_meter_name("Memory", 0), "Memory");
+        assert_eq!(format_meter_name("Swap", 0), "Swap");
+    }
+
+    #[test]
+    fn test_format_meter_name_with_param() {
+        assert_eq!(format_meter_name("CPU", 1), "CPU(1)");
+        assert_eq!(format_meter_name("CPU", 2), "CPU(2)");
+        assert_eq!(format_meter_name("CPU", 42), "CPU(42)");
+    }
+
+    #[test]
+    fn test_format_meter_name_roundtrip() {
+        // Test that parse_meter_name(format_meter_name(name, param)) == (name, param)
+        let test_cases = [
+            ("CPU", 0),
+            ("CPU", 1),
+            ("CPU", 10),
+            ("Memory", 0),
+            ("LoadAverage", 0),
+        ];
+
+        for (name, param) in test_cases {
+            let formatted = format_meter_name(name, param);
+            let (parsed_name, parsed_param) = parse_meter_name(&formatted);
+            assert_eq!(parsed_name, name, "Name roundtrip failed for ({}, {})", name, param);
+            assert_eq!(parsed_param, param, "Param roundtrip failed for ({}, {})", name, param);
+        }
+    }
+
+    // ==================== ScreenSettings Tests ====================
+
+    #[test]
+    fn test_screen_settings_main_screen() {
+        let screen = ScreenSettings::main_screen();
+        assert_eq!(screen.heading, "Main");
+        assert!(!screen.fields.is_empty());
+        assert!(screen.fields.contains(&ProcessField::Pid));
+        assert!(screen.fields.contains(&ProcessField::Command));
+        assert!(screen.fields.contains(&ProcessField::PercentCpu));
+        assert_eq!(screen.sort_key, ProcessField::PercentCpu);
+        assert_eq!(screen.tree_sort_key, ProcessField::Pid);
+        assert_eq!(screen.direction, -1); // Descending
+        assert_eq!(screen.tree_direction, 1); // Ascending
+        assert!(!screen.tree_view);
+        assert!(!screen.tree_view_always_by_pid); // Default is false
+        assert!(!screen.all_branches_collapsed);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_screen_settings_io_screen() {
+        let screen = ScreenSettings::io_screen();
+        assert_eq!(screen.heading, "I/O");
+        assert!(!screen.fields.is_empty());
+        assert!(screen.fields.contains(&ProcessField::Pid));
+        assert!(screen.fields.contains(&ProcessField::IORate));
+        assert_eq!(screen.sort_key, ProcessField::IORate);
+    }
+
+    #[test]
+    fn test_screen_settings_main_screen_has_required_fields() {
+        let screen = ScreenSettings::main_screen();
+        
+        // Required fields for basic operation
+        let required_fields = [
+            ProcessField::Pid,
+            ProcessField::User,
+            ProcessField::PercentCpu,
+            ProcessField::PercentMem,
+            ProcessField::Time,
+            ProcessField::Command,
+        ];
+
+        for field in required_fields {
+            assert!(
+                screen.fields.contains(&field),
+                "Main screen should contain {:?}",
+                field
+            );
+        }
+    }
+
+    #[test]
+    fn test_screen_settings_clone() {
+        let screen = ScreenSettings::main_screen();
+        let cloned = screen.clone();
+        
+        assert_eq!(cloned.heading, screen.heading);
+        assert_eq!(cloned.fields, screen.fields);
+        assert_eq!(cloned.sort_key, screen.sort_key);
+        assert_eq!(cloned.tree_view, screen.tree_view);
+    }
+}
