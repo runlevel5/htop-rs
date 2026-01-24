@@ -100,7 +100,8 @@ impl CpuMeter {
     }
 
     /// Get the range of CPUs this meter displays
-    fn cpu_range(&self, total_cpus: usize) -> (usize, usize) {
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn cpu_range(&self, total_cpus: usize) -> (usize, usize) {
         match self.selection {
             CpuSelection::All => (0, total_cpus),
             CpuSelection::Left => (0, total_cpus.div_ceil(2)),
@@ -112,7 +113,7 @@ impl CpuMeter {
 
     /// Format CPU frequency for display
     /// Returns frequency string in MHz format, or "N/A" if not available
-    fn format_frequency(frequency: f64) -> String {
+    pub(crate) fn format_frequency(frequency: f64) -> String {
         if frequency > 0.0 && frequency.is_finite() {
             format!("{:4}MHz", frequency as u32)
         } else {
@@ -122,7 +123,7 @@ impl CpuMeter {
 
     /// Format CPU display text for Text/LED modes (matches C htop CPUMeter_display)
     #[allow(clippy::too_many_arguments)]
-    fn format_cpu_display_text(
+    pub(crate) fn format_cpu_display_text(
         user: f64,
         system: f64,
         nice: f64,
@@ -929,5 +930,537 @@ impl Meter for CpuMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{CpuData, Machine};
+
+    // =========================================================================
+    // Helper functions for creating test data
+    // =========================================================================
+
+    fn create_test_cpu_data(
+        user: f64,
+        nice: f64,
+        system: f64,
+        irq: f64,
+        softirq: f64,
+        steal: f64,
+        guest: f64,
+        iowait: f64,
+        frequency: f64,
+    ) -> CpuData {
+        let mut cpu = CpuData::new();
+        cpu.user_percent = user;
+        cpu.nice_percent = nice;
+        cpu.system_percent = system;
+        cpu.irq_percent = irq;
+        cpu.softirq_percent = softirq;
+        cpu.steal_percent = steal;
+        cpu.guest_percent = guest;
+        cpu.iowait_percent = iowait;
+        cpu.frequency = frequency;
+        cpu
+    }
+
+    fn create_test_machine_with_cpus(num_cpus: usize) -> Machine {
+        let mut machine = Machine::default();
+        for i in 0..num_cpus {
+            let cpu = create_test_cpu_data(
+                10.0 + i as f64, // user
+                1.0,             // nice
+                5.0,             // system
+                0.5,             // irq
+                0.3,             // softirq
+                0.0,             // steal
+                0.0,             // guest
+                2.0,             // iowait
+                2400.0,          // frequency
+            );
+            machine.cpus.push(cpu);
+        }
+        // Set avg_cpu
+        machine.avg_cpu = create_test_cpu_data(
+            15.0,   // user
+            1.0,    // nice
+            5.0,    // system
+            0.5,    // irq
+            0.3,    // softirq
+            0.1,    // steal
+            0.1,    // guest
+            2.0,    // iowait
+            2400.0, // frequency
+        );
+        machine
+    }
+
+    // =========================================================================
+    // Constructor tests
+    // =========================================================================
+
+    #[test]
+    fn test_cpu_meter_new_with_cpu_index() {
+        let meter = CpuMeter::new(Some(3));
+        assert!(matches!(meter.selection, CpuSelection::Cpu(3)));
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert_eq!(meter.columns, 1);
+    }
+
+    #[test]
+    fn test_cpu_meter_new_without_cpu_index() {
+        let meter = CpuMeter::new(None);
+        assert!(matches!(meter.selection, CpuSelection::Average));
+    }
+
+    #[test]
+    fn test_cpu_meter_average() {
+        let meter = CpuMeter::average();
+        assert!(matches!(meter.selection, CpuSelection::Average));
+        assert_eq!(meter.mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_cpu_meter_all() {
+        let meter = CpuMeter::all(4);
+        assert!(matches!(meter.selection, CpuSelection::All));
+        assert_eq!(meter.columns, 4);
+    }
+
+    #[test]
+    fn test_cpu_meter_all_minimum_columns() {
+        // Columns should be at least 1
+        let meter = CpuMeter::all(0);
+        assert_eq!(meter.columns, 1);
+    }
+
+    #[test]
+    fn test_cpu_meter_left() {
+        let meter = CpuMeter::left(2);
+        assert!(matches!(meter.selection, CpuSelection::Left));
+        assert_eq!(meter.columns, 2);
+    }
+
+    #[test]
+    fn test_cpu_meter_right() {
+        let meter = CpuMeter::right(8);
+        assert!(matches!(meter.selection, CpuSelection::Right));
+        assert_eq!(meter.columns, 8);
+    }
+
+    // =========================================================================
+    // cpu_range tests
+    // =========================================================================
+
+    #[test]
+    fn test_cpu_range_all() {
+        let meter = CpuMeter::all(1);
+        assert_eq!(meter.cpu_range(8), (0, 8));
+        assert_eq!(meter.cpu_range(1), (0, 1));
+        assert_eq!(meter.cpu_range(16), (0, 16));
+    }
+
+    #[test]
+    fn test_cpu_range_left_even() {
+        let meter = CpuMeter::left(1);
+        // 8 CPUs: left half is 0-4
+        assert_eq!(meter.cpu_range(8), (0, 4));
+        // 4 CPUs: left half is 0-2
+        assert_eq!(meter.cpu_range(4), (0, 2));
+    }
+
+    #[test]
+    fn test_cpu_range_left_odd() {
+        let meter = CpuMeter::left(1);
+        // 7 CPUs: left half is 0-4 (div_ceil(7,2) = 4)
+        assert_eq!(meter.cpu_range(7), (0, 4));
+        // 5 CPUs: left half is 0-3
+        assert_eq!(meter.cpu_range(5), (0, 3));
+    }
+
+    #[test]
+    fn test_cpu_range_right_even() {
+        let meter = CpuMeter::right(1);
+        // 8 CPUs: right half is 4-8
+        assert_eq!(meter.cpu_range(8), (4, 8));
+        // 4 CPUs: right half is 2-4
+        assert_eq!(meter.cpu_range(4), (2, 4));
+    }
+
+    #[test]
+    fn test_cpu_range_right_odd() {
+        let meter = CpuMeter::right(1);
+        // 7 CPUs: right half is 4-7 (div_ceil(7,2) = 4)
+        assert_eq!(meter.cpu_range(7), (4, 7));
+        // 5 CPUs: right half is 3-5
+        assert_eq!(meter.cpu_range(5), (3, 5));
+    }
+
+    #[test]
+    fn test_cpu_range_specific_cpu() {
+        let meter = CpuMeter::new(Some(5));
+        assert_eq!(meter.cpu_range(8), (5, 6));
+        assert_eq!(meter.cpu_range(16), (5, 6));
+    }
+
+    #[test]
+    fn test_cpu_range_average() {
+        let meter = CpuMeter::average();
+        // Average mode returns (0, 0) - no specific CPUs
+        assert_eq!(meter.cpu_range(8), (0, 0));
+    }
+
+    // =========================================================================
+    // format_frequency tests
+    // =========================================================================
+
+    #[test]
+    fn test_format_frequency_normal() {
+        assert_eq!(CpuMeter::format_frequency(2400.0), "2400MHz");
+        assert_eq!(CpuMeter::format_frequency(3600.0), "3600MHz");
+        assert_eq!(CpuMeter::format_frequency(800.0), " 800MHz");
+    }
+
+    #[test]
+    fn test_format_frequency_zero() {
+        assert_eq!(CpuMeter::format_frequency(0.0), "N/A");
+    }
+
+    #[test]
+    fn test_format_frequency_negative() {
+        assert_eq!(CpuMeter::format_frequency(-100.0), "N/A");
+    }
+
+    #[test]
+    fn test_format_frequency_infinity() {
+        assert_eq!(CpuMeter::format_frequency(f64::INFINITY), "N/A");
+        assert_eq!(CpuMeter::format_frequency(f64::NEG_INFINITY), "N/A");
+    }
+
+    #[test]
+    fn test_format_frequency_nan() {
+        assert_eq!(CpuMeter::format_frequency(f64::NAN), "N/A");
+    }
+
+    #[test]
+    fn test_format_frequency_fractional() {
+        // Frequency is truncated to integer
+        assert_eq!(CpuMeter::format_frequency(2400.75), "2400MHz");
+        assert_eq!(CpuMeter::format_frequency(2400.25), "2400MHz");
+    }
+
+    // =========================================================================
+    // format_cpu_display_text tests
+    // =========================================================================
+
+    #[test]
+    fn test_format_cpu_display_text_detailed() {
+        let text = CpuMeter::format_cpu_display_text(
+            50.0, // user
+            10.0, // system
+            5.0,  // nice
+            1.0,  // irq
+            0.5,  // softirq
+            0.2,  // steal
+            0.1,  // guest
+            3.0,  // iowait
+            2400.0, // frequency
+            true, // detailed_cpu_time
+            false, // show_cpu_frequency
+        );
+
+        assert!(text.contains(": 50.0%"));
+        assert!(text.contains("sy: 10.0%"));
+        assert!(text.contains("ni:  5.0%"));
+        assert!(text.contains("hi:  1.0%"));
+        assert!(text.contains("si:  0.5%"));
+        assert!(text.contains("st:  0.2%"));
+        assert!(text.contains("gu:  0.1%"));
+        assert!(text.contains("wa:  3.0%"));
+        assert!(!text.contains("freq:"));
+    }
+
+    #[test]
+    fn test_format_cpu_display_text_detailed_with_frequency() {
+        let text = CpuMeter::format_cpu_display_text(
+            50.0, 10.0, 5.0, 1.0, 0.5, 0.2, 0.1, 3.0,
+            2400.0,
+            true,  // detailed_cpu_time
+            true,  // show_cpu_frequency
+        );
+
+        assert!(text.contains("freq: 2400MHz"));
+    }
+
+    #[test]
+    fn test_format_cpu_display_text_non_detailed() {
+        let text = CpuMeter::format_cpu_display_text(
+            50.0, // user
+            10.0, // system
+            5.0,  // nice
+            1.0,  // irq
+            0.5,  // softirq
+            0.2,  // steal
+            0.1,  // guest
+            3.0,  // iowait
+            2400.0,
+            false, // detailed_cpu_time
+            false, // show_cpu_frequency
+        );
+
+        // Non-detailed should combine values
+        assert!(text.contains(": 50.0%")); // user
+        // sys = system + irq + softirq = 10 + 1 + 0.5 = 11.5
+        assert!(text.contains("sys: 11.5%"));
+        assert!(text.contains("low:  5.0%")); // nice
+        // vir = steal + guest = 0.2 + 0.1 = 0.3
+        assert!(text.contains("vir:  0.3%"));
+    }
+
+    #[test]
+    fn test_format_cpu_display_text_negative_steal_guest_hidden() {
+        // When steal/guest are negative (unsupported), they should be hidden in detailed mode
+        let text = CpuMeter::format_cpu_display_text(
+            50.0, 10.0, 5.0, 1.0, 0.5,
+            -1.0, // steal (negative = unsupported)
+            -1.0, // guest (negative = unsupported)
+            3.0, 0.0,
+            true, // detailed_cpu_time
+            false,
+        );
+
+        assert!(!text.contains("st:"));
+        assert!(!text.contains("gu:"));
+    }
+
+    // =========================================================================
+    // update tests
+    // =========================================================================
+
+    #[test]
+    fn test_cpu_meter_update_average() {
+        let mut meter = CpuMeter::average();
+        let machine = create_test_machine_with_cpus(4);
+
+        meter.update(&machine);
+
+        assert_eq!(meter.user, 15.0);
+        assert_eq!(meter.nice, 1.0);
+        assert_eq!(meter.system, 5.0);
+        assert_eq!(meter.irq, 0.5);
+        assert_eq!(meter.softirq, 0.3);
+        assert_eq!(meter.steal, 0.1);
+        assert_eq!(meter.guest, 0.1);
+        assert_eq!(meter.iowait, 2.0);
+        assert_eq!(meter.frequency, 2400.0);
+        assert_eq!(meter.cpu_count, 4);
+    }
+
+    #[test]
+    fn test_cpu_meter_update_specific_cpu() {
+        let mut meter = CpuMeter::new(Some(2));
+        let machine = create_test_machine_with_cpus(4);
+
+        meter.update(&machine);
+
+        // CPU 2 has user = 10.0 + 2 = 12.0
+        assert_eq!(meter.user, 12.0);
+        assert_eq!(meter.cpu_count, 4);
+    }
+
+    #[test]
+    fn test_cpu_meter_update_all_cpus() {
+        let mut meter = CpuMeter::all(2);
+        let machine = create_test_machine_with_cpus(8);
+
+        meter.update(&machine);
+
+        // All/Left/Right modes use avg_cpu for cached values
+        assert_eq!(meter.user, 15.0);
+        assert_eq!(meter.cpu_count, 8);
+    }
+
+    #[test]
+    fn test_cpu_meter_update_cpu_count() {
+        let mut meter = CpuMeter::all(1);
+        
+        // First update with 4 CPUs
+        let machine4 = create_test_machine_with_cpus(4);
+        meter.update(&machine4);
+        assert_eq!(meter.cpu_count, 4);
+
+        // Update with 8 CPUs
+        let machine8 = create_test_machine_with_cpus(8);
+        meter.update(&machine8);
+        assert_eq!(meter.cpu_count, 8);
+    }
+
+    // =========================================================================
+    // height tests
+    // =========================================================================
+
+    #[test]
+    fn test_cpu_meter_height_bar_mode_single() {
+        let meter = CpuMeter::average();
+        assert_eq!(meter.height(), 1);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_text_mode_single() {
+        let mut meter = CpuMeter::average();
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.height(), 1);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_graph_mode() {
+        let mut meter = CpuMeter::average();
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), DEFAULT_GRAPH_HEIGHT);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_led_mode_single() {
+        let mut meter = CpuMeter::average();
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.height(), 3);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_all_cpus_bar_mode() {
+        let mut meter = CpuMeter::all(1);
+        meter.cpu_count = 8;
+        // 8 CPUs in 1 column = 8 rows
+        assert_eq!(meter.height(), 8);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_all_cpus_multiple_columns() {
+        let mut meter = CpuMeter::all(2);
+        meter.cpu_count = 8;
+        // 8 CPUs in 2 columns = 4 rows
+        assert_eq!(meter.height(), 4);
+
+        let mut meter4 = CpuMeter::all(4);
+        meter4.cpu_count = 8;
+        // 8 CPUs in 4 columns = 2 rows
+        assert_eq!(meter4.height(), 2);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_all_cpus_led_mode() {
+        let mut meter = CpuMeter::all(2);
+        meter.cpu_count = 8;
+        meter.set_mode(MeterMode::Led);
+        // 8 CPUs in 2 columns = 4 rows, LED is 3 rows per row = 12
+        assert_eq!(meter.height(), 12);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_left_cpus() {
+        let mut meter = CpuMeter::left(1);
+        meter.cpu_count = 8;
+        // Left half of 8 CPUs = 4 CPUs, 1 column = 4 rows
+        assert_eq!(meter.height(), 4);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_right_cpus_odd() {
+        let mut meter = CpuMeter::right(1);
+        meter.cpu_count = 7;
+        // Right half of 7 CPUs: height uses div_ceil(7,2) = 4
+        // Note: This is different from cpu_range which returns (4, 7) = 3 CPUs
+        // The height calculation uses the same formula for both Left and Right
+        // to maintain symmetry in the UI layout
+        assert_eq!(meter.height(), 4);
+    }
+
+    #[test]
+    fn test_cpu_meter_height_graph_mode_ignores_cpu_count() {
+        let mut meter = CpuMeter::all(1);
+        meter.cpu_count = 16;
+        meter.set_mode(MeterMode::Graph);
+        // Graph mode always returns DEFAULT_GRAPH_HEIGHT regardless of CPU count
+        assert_eq!(meter.height(), DEFAULT_GRAPH_HEIGHT);
+    }
+
+    // =========================================================================
+    // Meter trait tests
+    // =========================================================================
+
+    #[test]
+    fn test_cpu_meter_name() {
+        let meter = CpuMeter::average();
+        assert_eq!(meter.name(), "CPU");
+    }
+
+    #[test]
+    fn test_cpu_meter_caption() {
+        let meter_avg = CpuMeter::average();
+        assert_eq!(meter_avg.caption(), "Avg");
+
+        let meter_all = CpuMeter::all(1);
+        assert_eq!(meter_all.caption(), "CPU");
+
+        let meter_cpu = CpuMeter::new(Some(0));
+        assert_eq!(meter_cpu.caption(), "CPUn");
+    }
+
+    #[test]
+    fn test_cpu_meter_mode_get_set() {
+        let mut meter = CpuMeter::average();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    // =========================================================================
+    // Edge case tests
+    // =========================================================================
+
+    #[test]
+    fn test_cpu_meter_update_empty_machine() {
+        let mut meter = CpuMeter::new(Some(0));
+        let machine = Machine::default();
+
+        meter.update(&machine);
+
+        // cpu_count should be at least 1
+        assert_eq!(meter.cpu_count, 1);
+        // Values from avg_cpu (defaults to 0)
+        assert_eq!(meter.user, 0.0);
+    }
+
+    #[test]
+    fn test_cpu_meter_update_out_of_bounds_cpu() {
+        let mut meter = CpuMeter::new(Some(100)); // CPU index 100 doesn't exist
+        let machine = create_test_machine_with_cpus(4);
+
+        meter.update(&machine);
+
+        // Should not crash, values remain at defaults
+        assert_eq!(meter.user, 0.0);
+        assert_eq!(meter.cpu_count, 4);
+    }
+
+    #[test]
+    fn test_cpu_range_single_cpu_system() {
+        let meter_all = CpuMeter::all(1);
+        assert_eq!(meter_all.cpu_range(1), (0, 1));
+
+        let meter_left = CpuMeter::left(1);
+        assert_eq!(meter_left.cpu_range(1), (0, 1)); // div_ceil(1,2) = 1
+
+        let meter_right = CpuMeter::right(1);
+        assert_eq!(meter_right.cpu_range(1), (1, 1)); // Empty range for right half of 1 CPU
     }
 }

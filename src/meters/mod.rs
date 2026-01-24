@@ -532,3 +532,352 @@ pub fn draw_led(crt: &Crt, x: i32, y: i32, width: i32, caption: &str, text: &str
 
     attrset(crt.color(ColorElement::ResetColor));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    // =========================================================================
+    // MeterMode tests
+    // =========================================================================
+
+    #[test]
+    fn test_meter_mode_default() {
+        let mode: MeterMode = Default::default();
+        assert_eq!(mode, MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_meter_mode_default_height_bar() {
+        assert_eq!(MeterMode::Bar.default_height(), 1);
+    }
+
+    #[test]
+    fn test_meter_mode_default_height_text() {
+        assert_eq!(MeterMode::Text.default_height(), 1);
+    }
+
+    #[test]
+    fn test_meter_mode_default_height_graph() {
+        assert_eq!(MeterMode::Graph.default_height(), DEFAULT_GRAPH_HEIGHT);
+        assert_eq!(MeterMode::Graph.default_height(), 4);
+    }
+
+    #[test]
+    fn test_meter_mode_default_height_led() {
+        assert_eq!(MeterMode::Led.default_height(), 3);
+    }
+
+    #[test]
+    fn test_meter_mode_from_core() {
+        use crate::core::MeterMode as CoreMeterMode;
+
+        assert_eq!(MeterMode::from(CoreMeterMode::Bar), MeterMode::Bar);
+        assert_eq!(MeterMode::from(CoreMeterMode::Text), MeterMode::Text);
+        assert_eq!(MeterMode::from(CoreMeterMode::Graph), MeterMode::Graph);
+        assert_eq!(MeterMode::from(CoreMeterMode::Led), MeterMode::Led);
+    }
+
+    // =========================================================================
+    // GraphData tests
+    // =========================================================================
+
+    #[test]
+    fn test_graph_data_new() {
+        let data = GraphData::new();
+        assert!(data.last_update.is_none());
+        assert!(data.values.is_empty());
+    }
+
+    #[test]
+    fn test_graph_data_default() {
+        let data = GraphData::default();
+        assert!(data.last_update.is_none());
+        assert!(data.values.is_empty());
+    }
+
+    #[test]
+    fn test_graph_data_record_first_value() {
+        let mut data = GraphData::new();
+        let recorded = data.record(0.5, 100);
+        
+        assert!(recorded);
+        assert!(data.last_update.is_some());
+        assert_eq!(data.values.len(), 1);
+        assert_eq!(data.values[0], 0.5);
+    }
+
+    #[test]
+    fn test_graph_data_record_clamps_values() {
+        let mut data = GraphData::new();
+        
+        // Values should be clamped to 0.0-1.0
+        data.record(1.5, 0); // Above 1.0
+        assert_eq!(data.values[0], 1.0);
+
+        data.record(-0.5, 0); // Below 0.0
+        assert_eq!(data.values[1], 0.0);
+
+        data.record(0.75, 0); // Normal value
+        assert_eq!(data.values[2], 0.75);
+    }
+
+    #[test]
+    fn test_graph_data_record_respects_delay() {
+        let mut data = GraphData::new();
+        
+        // First record should succeed
+        assert!(data.record(0.5, 1000)); // 1000ms delay
+        
+        // Immediate second record should fail (within delay)
+        assert!(!data.record(0.6, 1000));
+        
+        // Values should still have only one entry
+        assert_eq!(data.values.len(), 1);
+        assert_eq!(data.values[0], 0.5);
+    }
+
+    #[test]
+    fn test_graph_data_record_after_delay() {
+        let mut data = GraphData::new();
+        
+        // First record
+        assert!(data.record(0.5, 10)); // 10ms delay
+        
+        // Wait for delay
+        thread::sleep(Duration::from_millis(15));
+        
+        // Second record should succeed
+        assert!(data.record(0.6, 10));
+        assert_eq!(data.values.len(), 2);
+        assert_eq!(data.values[1], 0.6);
+    }
+
+    #[test]
+    fn test_graph_data_record_zero_delay() {
+        let mut data = GraphData::new();
+        
+        // With zero delay, all records should succeed
+        assert!(data.record(0.1, 0));
+        assert!(data.record(0.2, 0));
+        assert!(data.record(0.3, 0));
+        
+        assert_eq!(data.values.len(), 3);
+    }
+
+    #[test]
+    fn test_graph_data_record_max_values() {
+        let mut data = GraphData::new();
+        
+        // Fill to max capacity
+        for i in 0..MAX_GRAPH_DATA_VALUES {
+            data.record(i as f64 / MAX_GRAPH_DATA_VALUES as f64, 0);
+        }
+        assert_eq!(data.values.len(), MAX_GRAPH_DATA_VALUES);
+        
+        // Add one more - should shift and maintain max size
+        data.record(1.0, 0);
+        assert_eq!(data.values.len(), MAX_GRAPH_DATA_VALUES);
+        
+        // Last value should be the new one
+        assert_eq!(*data.values.last().unwrap(), 1.0);
+        
+        // First value should have shifted (no longer 0.0)
+        assert!(data.values[0] > 0.0);
+    }
+
+    #[test]
+    fn test_graph_data_ensure_capacity_empty() {
+        let mut data = GraphData::new();
+        
+        data.ensure_capacity(10);
+        
+        // Should have 10 * 2 = 20 values (2 per column)
+        assert_eq!(data.values.len(), 20);
+        // All should be zeros
+        assert!(data.values.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn test_graph_data_ensure_capacity_partial() {
+        let mut data = GraphData::new();
+        data.record(0.5, 0);
+        data.record(0.6, 0);
+        data.record(0.7, 0);
+        
+        data.ensure_capacity(5); // Need 10 values
+        
+        assert_eq!(data.values.len(), 10);
+        // First 7 should be zeros, last 3 should be our values
+        assert_eq!(data.values[7], 0.5);
+        assert_eq!(data.values[8], 0.6);
+        assert_eq!(data.values[9], 0.7);
+    }
+
+    #[test]
+    fn test_graph_data_ensure_capacity_already_sufficient() {
+        let mut data = GraphData::new();
+        for _ in 0..30 {
+            data.record(0.5, 0);
+        }
+        
+        data.ensure_capacity(10); // Need 20, have 30
+        
+        // Should not change
+        assert_eq!(data.values.len(), 30);
+    }
+
+    #[test]
+    fn test_graph_data_clone() {
+        let mut data = GraphData::new();
+        data.record(0.5, 0);
+        data.record(0.6, 0);
+        
+        let cloned = data.clone();
+        
+        assert_eq!(cloned.values.len(), 2);
+        assert_eq!(cloned.values[0], 0.5);
+        assert_eq!(cloned.values[1], 0.6);
+    }
+
+    // =========================================================================
+    // MeterType::create_from_name tests
+    // =========================================================================
+
+    #[test]
+    fn test_meter_type_create_cpu() {
+        let meter = MeterType::create_from_name("CPU", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "CPU");
+    }
+
+    #[test]
+    fn test_meter_type_create_all_cpus() {
+        let meter = MeterType::create_from_name("AllCPUs", 0);
+        assert!(meter.is_some());
+        
+        let meter2 = MeterType::create_from_name("AllCPUs2", 0);
+        assert!(meter2.is_some());
+        
+        let meter4 = MeterType::create_from_name("AllCPUs4", 0);
+        assert!(meter4.is_some());
+        
+        let meter8 = MeterType::create_from_name("AllCPUs8", 0);
+        assert!(meter8.is_some());
+    }
+
+    #[test]
+    fn test_meter_type_create_left_right_cpus() {
+        let left = MeterType::create_from_name("LeftCPUs", 0);
+        assert!(left.is_some());
+        
+        let right = MeterType::create_from_name("RightCPUs", 0);
+        assert!(right.is_some());
+        
+        let left2 = MeterType::create_from_name("LeftCPUs2", 0);
+        assert!(left2.is_some());
+        
+        let right4 = MeterType::create_from_name("RightCPUs4", 0);
+        assert!(right4.is_some());
+    }
+
+    #[test]
+    fn test_meter_type_create_memory() {
+        let meter = MeterType::create_from_name("Memory", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Memory");
+    }
+
+    #[test]
+    fn test_meter_type_create_swap() {
+        let meter = MeterType::create_from_name("Swap", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Swap");
+    }
+
+    #[test]
+    fn test_meter_type_create_load() {
+        let load_avg = MeterType::create_from_name("LoadAverage", 0);
+        assert!(load_avg.is_some());
+        
+        let load = MeterType::create_from_name("Load", 0);
+        assert!(load.is_some());
+    }
+
+    #[test]
+    fn test_meter_type_create_tasks() {
+        let meter = MeterType::create_from_name("Tasks", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Tasks");
+    }
+
+    #[test]
+    fn test_meter_type_create_uptime() {
+        let meter = MeterType::create_from_name("Uptime", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Uptime");
+    }
+
+    #[test]
+    fn test_meter_type_create_clock_date() {
+        let clock = MeterType::create_from_name("Clock", 0);
+        assert!(clock.is_some());
+        
+        let date = MeterType::create_from_name("Date", 0);
+        assert!(date.is_some());
+        
+        let datetime = MeterType::create_from_name("DateTime", 0);
+        assert!(datetime.is_some());
+    }
+
+    #[test]
+    fn test_meter_type_create_hostname() {
+        let meter = MeterType::create_from_name("Hostname", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Hostname");
+    }
+
+    #[test]
+    fn test_meter_type_create_blank() {
+        let meter = MeterType::create_from_name("Blank", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Blank");
+    }
+
+    #[test]
+    fn test_meter_type_create_io() {
+        let disk = MeterType::create_from_name("DiskIO", 0);
+        assert!(disk.is_some());
+        
+        let network = MeterType::create_from_name("NetworkIO", 0);
+        assert!(network.is_some());
+    }
+
+    #[test]
+    fn test_meter_type_create_battery() {
+        let meter = MeterType::create_from_name("Battery", 0);
+        assert!(meter.is_some());
+        assert_eq!(meter.unwrap().name(), "Battery");
+    }
+
+    #[test]
+    fn test_meter_type_create_unknown() {
+        let meter = MeterType::create_from_name("UnknownMeter", 0);
+        assert!(meter.is_none());
+        
+        let meter2 = MeterType::create_from_name("", 0);
+        assert!(meter2.is_none());
+    }
+
+    #[test]
+    fn test_meter_type_create_case_sensitive() {
+        // Names should be case-sensitive
+        let cpu = MeterType::create_from_name("cpu", 0);
+        assert!(cpu.is_none());
+        
+        let memory = MeterType::create_from_name("memory", 0);
+        assert!(memory.is_none());
+    }
+}
