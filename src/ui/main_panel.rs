@@ -819,28 +819,35 @@ impl MainPanel {
                         }
                     }
                 } else {
-                    // Fallback: no pre-computed string, use simple cmdline display
-                    // This handles cases where make_command_str wasn't called
-                    let cmdline = process.cmdline.as_deref().unwrap_or("<unknown>");
+                    // Fallback: no pre-computed string, use get_command() which handles
+                    // the proper fallback chain (cmdline → comm → <unknown>).
+                    // This is important for kernel threads which have no cmdline but have comm.
                     let cmd = if show_program_path {
-                        cmdline
+                        process.get_command()
                     } else {
-                        &cmdline[process.cmdline_basename_start.min(cmdline.len())..]
+                        process.get_command_from_basename()
                     };
                     str.append(cmd, attr);
 
                     // Apply basename highlighting if enabled
+                    // For processes with cmdline, use the computed basename range
+                    // For kernel threads (no cmdline, using comm), highlight the whole command
                     if highlight_base_name {
-                        let basename_len = process.cmdline_basename_end.saturating_sub(process.cmdline_basename_start);
-                        if basename_len > 0 {
-                            let hl_offset = if show_program_path {
-                                process.cmdline_basename_start
-                            } else {
-                                0
-                            };
-                            let hl_start = str_start + hl_offset;
-                            let hl_end = hl_start + basename_len;
-                            str.set_attr(hl_start, hl_end, base_attr);
+                        if process.cmdline.is_some() {
+                            let basename_len = process.cmdline_basename_end.saturating_sub(process.cmdline_basename_start);
+                            if basename_len > 0 {
+                                let hl_offset = if show_program_path {
+                                    process.cmdline_basename_start
+                                } else {
+                                    0
+                                };
+                                let hl_start = str_start + hl_offset;
+                                let hl_end = hl_start + basename_len;
+                                str.set_attr(hl_start, hl_end, base_attr);
+                            }
+                        } else {
+                            // No cmdline (kernel thread or similar) - highlight entire command
+                            str.set_attr(str_start, str_start + cmd.len(), base_attr);
                         }
                     }
                 }
