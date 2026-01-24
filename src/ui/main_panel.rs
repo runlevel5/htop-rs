@@ -555,9 +555,8 @@ impl MainPanel {
             );
         }
 
-        // Apply selection highlighting if selected
+        // Apply row-level highlighting (matches C htop Row_display priority order)
         // Priority order (lowest to highest): normal -> shadow -> tagged -> selected
-        // This matches C htop Row_display behavior
         if selected {
             // For selected rows, use the override attribute method
             // This matches C htop's behavior where RichString_setAttr overrides all per-char colors
@@ -566,6 +565,12 @@ impl MainPanel {
             // For tagged rows, apply PROCESS_TAG color to entire row
             let tag_attr = crt.color(ColorElement::ProcessTag);
             str.write_at_width_with_attr(y, self.x, self.w as usize, tag_attr);
+        } else if is_shadowed {
+            // For shadowed rows (other users' processes), apply PROCESS_SHADOW to entire row
+            // This matches C htop's RichString_setAttr(out, CRT_colors[PROCESS_SHADOW])
+            let shadow_attr = crt.color(ColorElement::ProcessShadow);
+            str.set_all_attr(shadow_attr);
+            str.write_at_width(y, self.x, self.w as usize);
         } else {
             // For non-selected rows, use the RichString with per-field colors
             str.write_at_width(y, self.x, self.w as usize);
