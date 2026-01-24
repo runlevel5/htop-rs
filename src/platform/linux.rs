@@ -527,20 +527,21 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
 
-        // Smaps data (PSS, Swap, SwapPss) - expensive, only read for non-kernel processes
-        // TODO: Could be optimized to only read when these columns are displayed
-        if !process.is_kernel_thread {
-            read_smaps_file(&mut process, pid);
-        }
+        // Smaps data (PSS, Swap, SwapPss) - DISABLED: too expensive, causes 100% CPU
+        // TODO: Only read when PSS/MSwap/MPsswp columns are displayed
+        // if !process.is_kernel_thread {
+        //     read_smaps_file(&mut process, pid);
+        // }
 
-        // Autogroup data
-        read_autogroup(&mut process, pid);
+        // Autogroup data - DISABLED: causes CPU spike
+        // TODO: Only read when autogroup columns are displayed
+        // read_autogroup(&mut process, pid);
 
-        // Library size from maps (expensive)
-        // TODO: Could be optimized to only read when M_LIB column is displayed
-        if !process.is_kernel_thread && !process.is_userland_thread {
-            read_maps_for_lib_size(&mut process, pid, page_size);
-        }
+        // Library size from maps - DISABLED: too expensive, causes 100% CPU
+        // TODO: Only read when M_LIB column is displayed
+        // if !process.is_kernel_thread && !process.is_userland_thread {
+        //     read_maps_for_lib_size(&mut process, pid, page_size);
+        // }
 
         // Track max values for dynamic column widths
         if pid > max_pid {
