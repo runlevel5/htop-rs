@@ -9,6 +9,7 @@ license = "GPL-2.0-or-later"
 repository = "https://github.com/runlevel5/htop-rs"
 keywords = ["htop", "process", "monitor", "terminal", "ncurses"]
 categories = ["command-line-utilities", "os"]
+default-run = "htop-rs"
 
 [dependencies]
 # ncurses bindings with wide character support
@@ -47,6 +48,18 @@ libc = "0.2"
 [features]
 default = []
 hwloc = []  # Optional hardware locality support
+
+[[bin]]
+name = "htop-rs"
+path = "src/main.rs"
+
+[[bin]]
+name = "list_kernel_threads"
+path = "tools/list_kernel_threads.rs"
+
+[[bin]]
+name = "debug_kernel_threads"
+path = "tools/debug_kernel_threads.rs"
 
 [profile.release]
 lto = true
