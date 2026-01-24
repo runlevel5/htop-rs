@@ -232,6 +232,10 @@ pub struct Machine {
     // Settings copied from Settings for platform access
     pub update_process_names: bool,
     pub show_cpu_frequency: bool,
+    pub hide_userland_threads: bool,
+    
+    // Track if we've done at least one thread scan (for initial discovery)
+    pub threads_discovered: bool,
 
     // Dynamic field widths for columns
     pub field_widths: FieldWidths,
@@ -300,6 +304,8 @@ impl Machine {
             boot_time: 0,
             update_process_names: false,
             show_cpu_frequency: false,
+            hide_userland_threads: false,
+            threads_discovered: false,
             field_widths: FieldWidths::new(),
         }
     }

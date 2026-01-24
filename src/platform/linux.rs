@@ -617,8 +617,17 @@ pub fn scan_processes(machine: &mut Machine) {
         machine.processes.add(process);
         
         // Scan threads (tasks) for this process
-        // Skip if this is already a thread or kernel thread
-        if !is_kernel_thread_pid(pid) {
+        // Skip if:
+        // - This is a kernel thread (kernel threads don't have userland tasks)
+        // - hide_userland_threads is enabled AND we've already discovered threads once
+        //   (optimization: skip expensive task directory scan for hidden threads)
+        //
+        // We always scan threads at least once (threads_discovered=false) to populate
+        // the list, even if hide_userland_threads is true. This ensures threads exist
+        // in the list when the user toggles to show them.
+        let should_scan_threads = (!machine.hide_userland_threads || !machine.threads_discovered) 
+            && !is_kernel_thread_pid(pid);
+        if should_scan_threads {
             if let Ok(tasks) = proc.tasks() {
                 for task_result in tasks {
                     let task = match task_result {
@@ -732,6 +741,21 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
     }
+    
+    // When hide_userland_threads is enabled, we skip scanning threads but they still
+    // exist in the process list from previous scans. We need to mark them as updated
+    // so they don't get pruned by cleanup(). This matches C htop's behavior where
+    // pre-existing hidden threads are marked as updated but expensive reads are skipped.
+    if machine.hide_userland_threads {
+        for process in &mut machine.processes.processes {
+            if process.is_userland_thread {
+                process.updated = true;
+            }
+        }
+    }
+    
+    // Mark that we've done at least one thread scan
+    machine.threads_discovered = true;
 
     // Update dynamic field widths based on scan results
     machine.max_pid = max_pid;

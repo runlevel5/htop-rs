@@ -530,6 +530,7 @@ impl ScreenManager {
         // Copy settings to machine for platform access
         machine.update_process_names = self.settings.update_process_names;
         machine.show_cpu_frequency = self.settings.show_cpu_frequency;
+        machine.hide_userland_threads = self.settings.hide_userland_threads;
 
         // Initial scan BEFORE layout so we know actual CPU count for meter heights
         platform::scan(machine);
@@ -585,6 +586,7 @@ impl ScreenManager {
                 // Update settings in machine before scan
                 machine.update_process_names = self.settings.update_process_names;
                 machine.show_cpu_frequency = self.settings.show_cpu_frequency;
+                machine.hide_userland_threads = self.settings.hide_userland_threads;
 
                 // Only allow sorting when sort_timeout has elapsed (like C htop)
                 // This defers sorting during rapid user interaction
