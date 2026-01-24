@@ -1141,6 +1141,7 @@ pub struct Process {
     // Basic identification
     pub pid: i32,
     pub ppid: i32,
+    pub tgid: i32, // Thread group ID (equals PID for main process, main thread's PID for threads)
     pub pgrp: i32,
     pub session: i32,
     pub tpgid: i32,
@@ -1285,6 +1286,7 @@ impl Process {
         Process {
             pid,
             ppid: 0,
+            tgid: pid, // Default to pid (main process); will be updated for threads
             pgrp: 0,
             session: 0,
             tpgid: 0,
@@ -1375,6 +1377,19 @@ impl Process {
     /// Check if this is any kind of thread
     pub fn is_thread(&self) -> bool {
         self.is_kernel_thread || self.is_userland_thread
+    }
+
+    /// Get the group or parent ID for sorting purposes
+    /// This matches C htop's Row_getGroupOrParent():
+    /// - For threads (tgid != pid): returns tgid (thread group leader's PID)
+    /// - For main processes (tgid == pid): returns ppid (parent process)
+    /// This causes threads to be grouped with their main process during sorting
+    pub fn get_group_or_parent(&self) -> i32 {
+        if self.tgid != self.pid {
+            self.tgid
+        } else {
+            self.ppid
+        }
     }
 
     /// Get the display command string

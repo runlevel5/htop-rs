@@ -320,6 +320,28 @@ pub fn scan_memory(machine: &mut Machine) {
     machine.cached_swap = meminfo.swap_cached / 1024;
 }
 
+/// Check if a PID is a kernel thread (PID 2 is kthreadd, kernel threads have ppid=2)
+fn is_kernel_thread_pid(pid: i32) -> bool {
+    if pid == 2 {
+        return true;
+    }
+    // Check ppid - kernel threads have kthreadd (PID 2) as parent
+    if let Ok(content) = std::fs::read_to_string(format!("/proc/{}/stat", pid)) {
+        // Parse ppid from stat (4th field after comm which is in parentheses)
+        if let Some(end_paren) = content.rfind(')') {
+            let after_comm = &content[end_paren + 1..];
+            let fields: Vec<&str> = after_comm.split_whitespace().collect();
+            // fields[1] is ppid (index 0 is state)
+            if fields.len() > 1 {
+                if let Ok(ppid) = fields[1].parse::<i32>() {
+                    return ppid == 2;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
     // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
@@ -336,6 +358,7 @@ pub fn scan_processes(machine: &mut Machine) {
     let time_delta = machine.time_delta_ms() as f64 / 1000.0;
     let total_mem_kb = machine.total_mem as f64;
     let boot_time = machine.boot_time;
+    let page_size = (procfs::page_size() / 1024) as i64;
 
     // Track max values for dynamic column widths
     let mut max_pid: i32 = 0;
@@ -418,7 +441,6 @@ pub fn scan_processes(machine: &mut Machine) {
         process.starttime_ctime = boot_time + (stat.starttime as i64 / ticks_per_second as i64);
 
         // Memory from stat (pages to KB)
-        let page_size = (procfs::page_size() / 1024) as i64;
         process.m_virt = (stat.vsize / 1024) as i64;
         process.m_resident = (stat.rss as i64) * page_size;
 
@@ -488,7 +510,9 @@ pub fn scan_processes(machine: &mut Machine) {
         process.is_kernel_thread = process.ppid == 2 || pid == 2;
 
         // Check for userland thread (has TGID different from PID)
+        // Also store the TGID for thread grouping
         if let Ok(status) = proc.status() {
+            process.tgid = status.tgid;
             if status.tgid != pid {
                 process.is_userland_thread = true;
             }
@@ -572,7 +596,141 @@ pub fn scan_processes(machine: &mut Machine) {
         }
 
         process.updated = true;
+        
+        // Store main process info for thread inheritance
+        let main_uid = process.uid;
+        let main_user = process.user.clone();
+        let main_comm = process.comm.clone();
+        let main_cmdline = process.cmdline.clone();
+        let main_cmdline_basename_start = process.cmdline_basename_start;
+        let main_cmdline_basename_end = process.cmdline_basename_end;
+        let main_exe = process.exe.clone();
+        let main_exe_basename_offset = process.exe_basename_offset;
+        let main_exe_deleted = process.exe_deleted;
+        let main_cwd = process.cwd.clone();
+        let main_tty_nr = process.tty_nr;
+        let main_tty_name = process.tty_name.clone();
+        let main_cgroup = process.cgroup.clone();
+        let main_cgroup_short = process.cgroup_short.clone();
+        let main_container_short = process.container_short.clone();
+        
         machine.processes.add(process);
+        
+        // Scan threads (tasks) for this process
+        // Skip if this is already a thread or kernel thread
+        if !is_kernel_thread_pid(pid) {
+            if let Ok(tasks) = proc.tasks() {
+                for task_result in tasks {
+                    let task = match task_result {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    
+                    // Skip the main thread (tid == pid)
+                    let tid = task.tid;
+                    if tid == pid {
+                        continue;
+                    }
+                    
+                    // Get task stat
+                    let task_stat = match task.stat() {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    
+                    // Check if thread already exists
+                    let thread_is_new = machine.processes.get(tid).is_none();
+                    let thread_prev_time = if !thread_is_new {
+                        machine.processes.get(tid).map(|p| p.time).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    
+                    let mut thread = if thread_is_new {
+                        Process::new(tid)
+                    } else {
+                        machine.processes.get(tid).cloned().unwrap_or_else(|| Process::new(tid))
+                    };
+                    
+                    // Basic info from task stat
+                    thread.pid = tid;
+                    thread.ppid = pid;  // Thread's parent is the main process
+                    thread.tgid = pid;  // Thread group ID is the main process PID
+                    thread.pgrp = task_stat.pgrp;
+                    thread.session = task_stat.session;
+                    thread.tty_nr = main_tty_nr;
+                    thread.tty_name = main_tty_name.clone();
+                    thread.tpgid = task_stat.tpgid;
+                    thread.priority = task_stat.priority;
+                    thread.nice = task_stat.nice;
+                    thread.nlwp = 1;  // Threads show as 1
+                    thread.processor = task_stat.processor.unwrap_or(-1);
+                    thread.minflt = task_stat.minflt;
+                    thread.majflt = task_stat.majflt;
+                    
+                    // Process state
+                    thread.state = convert_process_state(task_stat.state);
+                    
+                    // CPU time
+                    let thread_utime = task_stat.utime;
+                    let thread_stime = task_stat.stime;
+                    let thread_total_ticks = thread_utime + thread_stime;
+                    thread.time = ((thread_total_ticks as f64 / ticks_per_second) * 100.0) as u64;
+                    thread.utime = ((thread_utime as f64 / ticks_per_second) * 100.0) as u64;
+                    thread.stime = ((thread_stime as f64 / ticks_per_second) * 100.0) as u64;
+                    
+                    // Calculate CPU percentage
+                    if !thread_is_new && time_delta > 0.0 && thread.time > thread_prev_time {
+                        let time_diff = (thread.time - thread_prev_time) as f64;
+                        thread.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
+                        thread.percent_cpu = thread.percent_cpu.min(100.0 * machine.active_cpus as f32);
+                    }
+                    
+                    // Start time
+                    thread.starttime_ctime = boot_time + (task_stat.starttime as i64 / ticks_per_second as i64);
+                    
+                    // Memory (shared with main process, but we read from task stat for consistency)
+                    thread.m_virt = (task_stat.vsize / 1024) as i64;
+                    thread.m_resident = (task_stat.rss as i64) * page_size;
+                    if total_mem_kb > 0.0 {
+                        thread.percent_mem = ((thread.m_resident as f64 / total_mem_kb) * 100.0) as f32;
+                    }
+                    
+                    // Inherit shared data from main process
+                    thread.uid = main_uid;
+                    thread.user = main_user.clone();
+                    thread.comm = Some(task_stat.comm.clone());  // Thread has its own comm
+                    thread.cmdline = main_cmdline.clone();
+                    thread.cmdline_basename_start = main_cmdline_basename_start;
+                    thread.cmdline_basename_end = main_cmdline_basename_end;
+                    thread.exe = main_exe.clone();
+                    thread.exe_basename_offset = main_exe_basename_offset;
+                    thread.exe_deleted = main_exe_deleted;
+                    thread.cwd = main_cwd.clone();
+                    thread.cgroup = main_cgroup.clone();
+                    thread.cgroup_short = main_cgroup_short.clone();
+                    thread.container_short = main_container_short.clone();
+                    
+                    // Mark as userland thread
+                    thread.is_userland_thread = true;
+                    thread.is_kernel_thread = false;
+                    
+                    // IO Priority (thread-specific)
+                    thread.io_priority = get_io_priority(tid);
+                    
+                    // Track max values
+                    if tid > max_pid {
+                        max_pid = tid;
+                    }
+                    if thread.percent_cpu > max_percent_cpu {
+                        max_percent_cpu = thread.percent_cpu;
+                    }
+                    
+                    thread.updated = true;
+                    machine.processes.add(thread);
+                }
+            }
+        }
     }
 
     // Update dynamic field widths based on scan results
