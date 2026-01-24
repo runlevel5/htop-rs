@@ -12,7 +12,8 @@ categories = ["command-line-utilities", "os"]
 
 [dependencies]
 # ncurses bindings with wide character support
-ncurses = { version = "6.0", features = ["wide"] }
+# Using our fork which fixes build failures with ncurses 6.5+ (Fedora 43+)
+ncurses = { git = "https://github.com/runlevel5/ncurses-rs.git", features = ["wide"] }
 
 # Command line argument parsing
 clap = { version = "4.4", features = ["derive"] }

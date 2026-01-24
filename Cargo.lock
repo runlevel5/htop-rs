@@ -429,9 +429,8 @@ dependencies = [
 
 [[package]]
 name = "ncurses"
-version = "6.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbd71afa95710e841d173521e8483e764004eb332bdf47bd01d00f568688027f"
+version = "6.0.2"
+source = "git+https://github.com/runlevel5/ncurses-rs.git#75cfc32ef5bd314671d7d59c03c7436080e70c97"
 dependencies = [
  "cc",
  "libc",
