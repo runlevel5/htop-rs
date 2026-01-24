@@ -1463,4 +1463,242 @@ mod tests {
         let meter_right = CpuMeter::right(1);
         assert_eq!(meter_right.cpu_range(1), (1, 1)); // Empty range for right half of 1 CPU
     }
+
+    // =========================================================================
+    // Bar values calculation tests (detailed_cpu_time option)
+    // =========================================================================
+
+    /// Helper to build bar values array (same logic as draw_cpu_bar_single)
+    fn build_bar_values(cpu: &CpuData, detailed_cpu_time: bool) -> Vec<(f64, ColorElement)> {
+        use crate::ui::ColorElement;
+
+        if detailed_cpu_time {
+            vec![
+                (cpu.user_percent, ColorElement::CpuNormal),
+                (cpu.nice_percent, ColorElement::CpuNice),
+                (cpu.system_percent, ColorElement::CpuSystem),
+                (cpu.irq_percent, ColorElement::CpuIrq),
+                (cpu.softirq_percent, ColorElement::CpuSoftIrq),
+                (cpu.steal_percent, ColorElement::CpuSteal),
+                (cpu.guest_percent, ColorElement::CpuGuest),
+                (cpu.iowait_percent, ColorElement::CpuIOWait),
+            ]
+        } else {
+            vec![
+                (cpu.user_percent, ColorElement::CpuNormal),
+                (cpu.nice_percent, ColorElement::CpuNice),
+                (
+                    cpu.system_percent + cpu.irq_percent + cpu.softirq_percent,
+                    ColorElement::CpuSystem,
+                ),
+                (
+                    cpu.steal_percent + cpu.guest_percent,
+                    ColorElement::CpuGuest,
+                ),
+            ]
+        }
+    }
+
+    /// Helper to calculate total (same logic as draw_cpu_bar_single)
+    fn calculate_total(cpu: &CpuData, account_guest: bool, detailed_cpu_time: bool) -> f64 {
+        cpu.user_percent
+            + cpu.nice_percent
+            + cpu.system_percent
+            + cpu.irq_percent
+            + cpu.softirq_percent
+            + cpu.steal_percent
+            + if account_guest || !detailed_cpu_time {
+                cpu.guest_percent
+            } else {
+                0.0
+            }
+            + cpu.iowait_percent
+    }
+
+    #[test]
+    fn test_bar_values_detailed_mode_segment_count() {
+        let cpu = create_test_cpu_data(
+            20.0, // user
+            5.0,  // nice
+            10.0, // system
+            2.0,  // irq
+            1.0,  // softirq
+            0.5,  // steal
+            0.3,  // guest
+            3.0,  // iowait
+            2400.0,
+        );
+
+        // Detailed mode should have 8 segments
+        let values = build_bar_values(&cpu, true);
+        assert_eq!(values.len(), 8, "Detailed mode should have 8 segments");
+    }
+
+    #[test]
+    fn test_bar_values_non_detailed_mode_segment_count() {
+        let cpu = create_test_cpu_data(
+            20.0, 5.0, 10.0, 2.0, 1.0, 0.5, 0.3, 3.0, 2400.0,
+        );
+
+        // Non-detailed mode should have 4 segments
+        let values = build_bar_values(&cpu, false);
+        assert_eq!(values.len(), 4, "Non-detailed mode should have 4 segments");
+    }
+
+    #[test]
+    fn test_bar_values_detailed_mode_individual_values() {
+        use crate::ui::ColorElement;
+
+        let cpu = create_test_cpu_data(
+            20.0, // user
+            5.0,  // nice
+            10.0, // system
+            2.0,  // irq
+            1.0,  // softirq
+            0.5,  // steal
+            0.3,  // guest
+            3.0,  // iowait
+            2400.0,
+        );
+
+        let values = build_bar_values(&cpu, true);
+
+        // Verify each segment has correct value and color
+        assert_eq!(values[0], (20.0, ColorElement::CpuNormal));  // user
+        assert_eq!(values[1], (5.0, ColorElement::CpuNice));     // nice
+        assert_eq!(values[2], (10.0, ColorElement::CpuSystem));  // system
+        assert_eq!(values[3], (2.0, ColorElement::CpuIrq));      // irq
+        assert_eq!(values[4], (1.0, ColorElement::CpuSoftIrq));  // softirq
+        assert_eq!(values[5], (0.5, ColorElement::CpuSteal));    // steal
+        assert_eq!(values[6], (0.3, ColorElement::CpuGuest));    // guest
+        assert_eq!(values[7], (3.0, ColorElement::CpuIOWait));   // iowait
+    }
+
+    #[test]
+    fn test_bar_values_non_detailed_mode_combined_values() {
+        use crate::ui::ColorElement;
+
+        let cpu = create_test_cpu_data(
+            20.0, // user
+            5.0,  // nice
+            10.0, // system
+            2.0,  // irq
+            1.0,  // softirq
+            0.5,  // steal
+            0.3,  // guest
+            3.0,  // iowait
+            2400.0,
+        );
+
+        let values = build_bar_values(&cpu, false);
+
+        // user stays as-is
+        assert_eq!(values[0], (20.0, ColorElement::CpuNormal));
+        // nice stays as-is
+        assert_eq!(values[1], (5.0, ColorElement::CpuNice));
+        // kernel = system + irq + softirq = 10 + 2 + 1 = 13
+        assert_eq!(values[2], (13.0, ColorElement::CpuSystem));
+        // virtual = steal + guest = 0.5 + 0.3 = 0.8
+        assert_eq!(values[3], (0.8, ColorElement::CpuGuest));
+    }
+
+    #[test]
+    fn test_bar_total_detailed_with_account_guest() {
+        let cpu = create_test_cpu_data(
+            20.0, // user
+            5.0,  // nice
+            10.0, // system
+            2.0,  // irq
+            1.0,  // softirq
+            0.5,  // steal
+            0.3,  // guest
+            3.0,  // iowait
+            2400.0,
+        );
+
+        // With account_guest=true, guest is included
+        let total = calculate_total(&cpu, true, true);
+        // 20 + 5 + 10 + 2 + 1 + 0.5 + 0.3 + 3 = 41.8
+        assert!((total - 41.8).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_bar_total_detailed_without_account_guest() {
+        let cpu = create_test_cpu_data(
+            20.0, // user
+            5.0,  // nice
+            10.0, // system
+            2.0,  // irq
+            1.0,  // softirq
+            0.5,  // steal
+            0.3,  // guest
+            3.0,  // iowait
+            2400.0,
+        );
+
+        // With account_guest=false and detailed=true, guest is excluded
+        let total = calculate_total(&cpu, false, true);
+        // 20 + 5 + 10 + 2 + 1 + 0.5 + 0 + 3 = 41.5
+        assert!((total - 41.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_bar_total_non_detailed_always_includes_guest() {
+        let cpu = create_test_cpu_data(
+            20.0, // user
+            5.0,  // nice
+            10.0, // system
+            2.0,  // irq
+            1.0,  // softirq
+            0.5,  // steal
+            0.3,  // guest
+            3.0,  // iowait
+            2400.0,
+        );
+
+        // With detailed=false, guest is always included regardless of account_guest
+        let total_with = calculate_total(&cpu, true, false);
+        let total_without = calculate_total(&cpu, false, false);
+        
+        // Both should be the same: 20 + 5 + 10 + 2 + 1 + 0.5 + 0.3 + 3 = 41.8
+        assert!((total_with - 41.8).abs() < 0.001);
+        assert!((total_without - 41.8).abs() < 0.001);
+        assert!((total_with - total_without).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_bar_values_zero_values() {
+        let cpu = create_test_cpu_data(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+        let detailed = build_bar_values(&cpu, true);
+        let non_detailed = build_bar_values(&cpu, false);
+
+        // All values should be 0
+        assert!(detailed.iter().all(|(v, _)| *v == 0.0));
+        assert!(non_detailed.iter().all(|(v, _)| *v == 0.0));
+
+        // Total should be 0
+        assert_eq!(calculate_total(&cpu, true, true), 0.0);
+        assert_eq!(calculate_total(&cpu, false, false), 0.0);
+    }
+
+    #[test]
+    fn test_bar_values_high_load() {
+        // Test with high CPU load (near 100%)
+        let cpu = create_test_cpu_data(
+            80.0, // user
+            5.0,  // nice
+            10.0, // system
+            1.0,  // irq
+            0.5,  // softirq
+            0.0,  // steal
+            0.0,  // guest
+            3.5,  // iowait
+            3600.0,
+        );
+
+        let total = calculate_total(&cpu, true, true);
+        // 80 + 5 + 10 + 1 + 0.5 + 0 + 0 + 3.5 = 100
+        assert!((total - 100.0).abs() < 0.001);
+    }
 }
