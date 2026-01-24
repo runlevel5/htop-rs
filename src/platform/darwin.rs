@@ -106,23 +106,36 @@ impl Default for ProcTaskInfo {
 }
 
 /// extern_proc structure from sys/proc.h
-/// Total size: 296 bytes, p_priority at offset 240
-/// We only define the fields we need, using padding for the rest
+/// Total size: 296 bytes
 #[repr(C)]
 struct ExternProc {
-    _pad_to_priority: [u8; 240], // padding to reach p_priority at offset 240
+    _pad0: [u8; 32],             // padding to p_flag at offset 32
+    p_flag: u32,                 // Process flags (offset 32)
+    p_stat: u8,                  // Process state (offset 36) - S=sleep, R=run, Z=zombie, etc.
+    _pad1: [u8; 3],              // padding
+    p_pid: i32,                  // Process ID (offset 40)
+    _pad2: [u8; 196],            // padding to p_priority at offset 240
     p_priority: u8,              // Process priority (offset 240)
-    p_usrpri: u8,                // User-priority based on p_cpu and p_nice (offset 241)
+    p_usrpri: u8,                // User-priority (offset 241)
     p_nice: i8,                  // Process "nice" value (offset 242)
-    _pad_to_end: [u8; 53],       // padding to reach total size of 296 bytes
+    p_comm: [u8; 17],            // Command name (offset 243, size 17 = MAXCOMLEN+1)
+    _pad3: [u8; 36],             // padding to total size 296
 }
 
-/// eproc structure from sys/sysctl.h
+/// eproc structure from sys/sysctl.h  
 /// Total size: 352 bytes
-/// We don't need any fields from this struct, just need correct size
 #[repr(C)]
 struct Eproc {
-    _pad: [u8; 352], // total size of eproc
+    _pad0: [u8; 96],             // padding to e_pcred at offset 96
+    _e_pcred_pad: [u8; 8],       // p_cred padding
+    e_pcred_p_ruid: u32,         // Real UID (offset 104)
+    _pad1: [u8; 156],            // padding to e_ppid at offset 264
+    e_ppid: i32,                 // Parent PID (offset 264)
+    e_pgid: i32,                 // Process group ID (offset 268)
+    _pad2: [u8; 4],              // padding
+    e_tdev: i32,                 // TTY device (offset 276)
+    e_tpgid: i32,                // TTY process group (offset 280)
+    _pad3: [u8; 68],             // padding to total size 352
 }
 
 /// kinfo_proc structure from sys/sysctl.h
@@ -158,6 +171,31 @@ fn get_process_priority(pid: i32) -> Option<u8> {
 
     if ret == 0 && size > 0 {
         Some(kinfo.kp_proc.p_priority)
+    } else {
+        None
+    }
+}
+
+/// Get process info from sysctl for PID 0 (kernel_task) or when proc_pidinfo fails
+/// Returns (comm, ppid, pgid, uid, nice, state, priority) if successful
+fn get_kinfo_proc(pid: i32) -> Option<KinfoProc> {
+    let mut mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid];
+    let mut kinfo: KinfoProc = Default::default();
+    let mut size = mem::size_of::<KinfoProc>();
+
+    let ret = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            4,
+            &mut kinfo as *mut _ as *mut c_void,
+            &mut size,
+            ptr::null_mut(),
+            0,
+        )
+    };
+
+    if ret == 0 && size > 0 {
+        Some(kinfo)
     } else {
         None
     }
@@ -809,7 +847,50 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
 
     // Process each PID
     for &pid in &pids {
-        if pid <= 0 {
+        if pid < 0 {
+            continue;
+        }
+
+        // For PID 0 (kernel_task), proc_pidinfo doesn't work, so we use sysctl
+        if pid == 0 {
+            if let Some(kinfo) = get_kinfo_proc(0) {
+                let is_new = machine.processes.get(0).is_none();
+                let mut process = if is_new {
+                    Process::new(0)
+                } else {
+                    machine.processes.get(0).cloned().unwrap_or_else(|| Process::new(0))
+                };
+
+                process.pid = 0;
+                process.ppid = kinfo.kp_eproc.e_ppid;
+                process.pgrp = kinfo.kp_eproc.e_pgid;
+                process.uid = kinfo.kp_eproc.e_pcred_p_ruid;
+                process.nice = kinfo.kp_proc.p_nice as i64;
+                process.priority = kinfo.kp_proc.p_priority as i64;
+                process.state = ProcessState::Running; // kernel_task is always "running"
+                process.is_kernel_thread = true;
+                process.user = Some(machine.get_username(process.uid));
+
+                // Get comm from kinfo_proc.kp_proc.p_comm
+                let comm_bytes = &kinfo.kp_proc.p_comm;
+                if let Some(pos) = comm_bytes.iter().position(|&c| c == 0) {
+                    if let Ok(comm) = std::str::from_utf8(&comm_bytes[..pos]) {
+                        process.comm = Some(comm.to_string());
+                    }
+                }
+
+                // kernel_task has no cmdline, exe, or cwd
+                process.nlwp = 0;
+                process.m_virt = 0;
+                process.m_resident = 0;
+                process.percent_cpu = 0.0;
+                process.percent_mem = 0.0;
+
+                process.updated = true;
+                machine.processes.add(process);
+                machine.total_tasks += 1;
+                machine.kernel_threads += 1;
+            }
             continue;
         }
 
