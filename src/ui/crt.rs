@@ -1419,24 +1419,28 @@ impl Crt {
         self.screen_height
     }
 
-    /// Set input delay
+    /// Set input delay (matches C htop CRT_enableDelay using halfdelay)
     pub fn set_delay(&mut self, delay: u32) {
         self.delay = delay;
-        // Convert tenths of seconds to milliseconds for timeout
-        let timeout_ms = (delay as i32 * 100).min(25500);
-        ncurses::timeout(timeout_ms);
+        // Use halfdelay like C htop - delay is in tenths of seconds (1-255)
+        // halfdelay makes getch() wait up to delay tenths of a second
+        let delay_tenths = (delay as i32).clamp(1, 255);
+        ncurses::halfdelay(delay_tenths);
     }
 
     /// Disable input delay (for instant response)
+    /// Matches C htop CRT_disableDelay
     pub fn disable_delay(&self) {
+        ncurses::nocbreak();
+        ncurses::cbreak();
         nodelay(stdscr(), true);
     }
 
     /// Enable input delay
+    /// Matches C htop CRT_enableDelay
     pub fn enable_delay(&self) {
-        nodelay(stdscr(), false);
-        let timeout_ms = (self.delay as i32 * 100).min(25500);
-        ncurses::timeout(timeout_ms);
+        let delay_tenths = (self.delay as i32).clamp(1, 255);
+        ncurses::halfdelay(delay_tenths);
     }
 
     /// Read a key from input
