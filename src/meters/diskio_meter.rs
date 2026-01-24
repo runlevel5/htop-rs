@@ -62,7 +62,7 @@ impl DiskIOMeter {
     }
 
     /// Format a rate value using human-readable units (like C htop's Meter_humanUnit)
-    fn human_unit(bytes_per_sec: f64) -> String {
+    pub(crate) fn human_unit(bytes_per_sec: f64) -> String {
         const UNIT_PREFIXES: [char; 5] = ['K', 'M', 'G', 'T', 'P'];
         // Convert to KiB/s first (divide by 1024)
         let mut val = bytes_per_sec / 1024.0;
@@ -309,5 +309,193 @@ impl Meter for DiskIOMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Machine;
+
+    // ==================== Constructor Tests ====================
+
+    #[test]
+    fn test_diskio_meter_new() {
+        let meter = DiskIOMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.status, RateStatus::Init);
+        assert_eq!(meter.read_rate, 0.0);
+        assert_eq!(meter.write_rate, 0.0);
+        assert_eq!(meter.utilization, 0.0);
+        assert_eq!(meter.num_disks, 0);
+    }
+
+    #[test]
+    fn test_diskio_meter_default() {
+        let meter = DiskIOMeter::default();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.status, RateStatus::Init);
+    }
+
+    // ==================== human_unit Tests ====================
+    // DiskIO human_unit converts bytes/sec to KiB/s first, then scales
+
+    #[test]
+    fn test_human_unit_bytes_to_kilobytes() {
+        // 0 bytes/sec = 0 KiB/s
+        assert_eq!(DiskIOMeter::human_unit(0.0), "0.00K");
+        
+        // 1024 bytes/sec = 1.00 KiB/s
+        assert_eq!(DiskIOMeter::human_unit(1024.0), "1.00K");
+        
+        // 5120 bytes/sec = 5.00 KiB/s
+        assert_eq!(DiskIOMeter::human_unit(5120.0), "5.00K");
+    }
+
+    #[test]
+    fn test_human_unit_kilobytes_precision() {
+        // Values < 10 get 2 decimal places
+        assert_eq!(DiskIOMeter::human_unit(1024.0), "1.00K");
+        assert_eq!(DiskIOMeter::human_unit(9.0 * 1024.0), "9.00K");
+        
+        // Values 10-99 get 1 decimal place
+        assert_eq!(DiskIOMeter::human_unit(10.0 * 1024.0), "10.0K");
+        assert_eq!(DiskIOMeter::human_unit(99.0 * 1024.0), "99.0K");
+        
+        // Values >= 100 get 0 decimal places
+        assert_eq!(DiskIOMeter::human_unit(100.0 * 1024.0), "100K");
+        assert_eq!(DiskIOMeter::human_unit(999.0 * 1024.0), "999K");
+    }
+
+    #[test]
+    fn test_human_unit_megabytes() {
+        // 1000 KiB/s = 1000K, which becomes ~0.98M (scales at 1000, not 1024)
+        // Actually the scaling happens when val >= 1000
+        
+        // 1 MiB/s = 1024 * 1024 bytes/sec
+        let mib = 1024.0 * 1024.0;
+        assert_eq!(DiskIOMeter::human_unit(mib), "1.00M");
+        
+        // 10 MiB/s
+        assert_eq!(DiskIOMeter::human_unit(10.0 * mib), "10.0M");
+        
+        // 100 MiB/s
+        assert_eq!(DiskIOMeter::human_unit(100.0 * mib), "100M");
+    }
+
+    #[test]
+    fn test_human_unit_gigabytes() {
+        // 1 GiB/s = 1024 * 1024 * 1024 bytes/sec
+        let gib = 1024.0 * 1024.0 * 1024.0;
+        assert_eq!(DiskIOMeter::human_unit(gib), "1.00G");
+        
+        // 5 GiB/s
+        assert_eq!(DiskIOMeter::human_unit(5.0 * gib), "5.00G");
+    }
+
+    #[test]
+    fn test_human_unit_typical_disk_rates() {
+        // Typical HDD sequential: ~150 MB/s
+        let hdd_rate = 150.0 * 1024.0 * 1024.0;
+        assert_eq!(DiskIOMeter::human_unit(hdd_rate), "150M");
+        
+        // Typical SSD: ~500 MB/s
+        let ssd_rate = 500.0 * 1024.0 * 1024.0;
+        assert_eq!(DiskIOMeter::human_unit(ssd_rate), "500M");
+        
+        // NVMe SSD: ~3 GB/s
+        let nvme_rate = 3.0 * 1024.0 * 1024.0 * 1024.0;
+        assert_eq!(DiskIOMeter::human_unit(nvme_rate), "3.00G");
+    }
+
+    // ==================== Update Tests ====================
+
+    #[test]
+    fn test_diskio_meter_update_init() {
+        let mut meter = DiskIOMeter::new();
+        let machine = Machine::default();
+        
+        // No previous data -> Init status
+        meter.update(&machine);
+        assert_eq!(meter.status, RateStatus::Init);
+    }
+
+    #[test]
+    fn test_diskio_meter_update_with_data() {
+        let mut meter = DiskIOMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.disk_io_last_update = 1000;
+        machine.realtime_ms = 1500; // 500ms since last update
+        machine.disk_io_read_rate = 1024.0 * 1024.0; // 1 MiB/s
+        machine.disk_io_write_rate = 512.0 * 1024.0; // 512 KiB/s
+        machine.disk_io_utilization = 50.0;
+        machine.disk_io_num_disks = 2;
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.status, RateStatus::Data);
+        assert_eq!(meter.read_rate, 1024.0 * 1024.0);
+        assert_eq!(meter.write_rate, 512.0 * 1024.0);
+        assert_eq!(meter.utilization, 50.0);
+        assert_eq!(meter.num_disks, 2);
+    }
+
+    #[test]
+    fn test_diskio_meter_update_stale() {
+        let mut meter = DiskIOMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.disk_io_last_update = 1000;
+        machine.realtime_ms = 32000; // 31 seconds since last update (> 30s = stale)
+        
+        meter.update(&machine);
+        assert_eq!(meter.status, RateStatus::Stale);
+    }
+
+    // ==================== Meter Trait Tests ====================
+
+    #[test]
+    fn test_diskio_meter_name() {
+        let meter = DiskIOMeter::new();
+        assert_eq!(meter.name(), "DiskIO");
+    }
+
+    #[test]
+    fn test_diskio_meter_caption() {
+        let meter = DiskIOMeter::new();
+        assert_eq!(meter.caption(), "Dsk");
+    }
+
+    #[test]
+    fn test_diskio_meter_mode() {
+        let mut meter = DiskIOMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_diskio_meter_height() {
+        let mut meter = DiskIOMeter::new();
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), 4);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.height(), 3);
     }
 }

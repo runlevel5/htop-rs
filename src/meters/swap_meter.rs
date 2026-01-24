@@ -41,7 +41,7 @@ impl SwapMeter {
     }
 
     /// Format memory value like C htop's Meter_humanUnit
-    fn human_unit(value: f64) -> String {
+    pub(crate) fn human_unit(value: f64) -> String {
         const UNIT_PREFIXES: [char; 5] = ['K', 'M', 'G', 'T', 'P'];
         let mut val = value;
         let mut i = 0;
@@ -255,5 +255,141 @@ impl Meter for SwapMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Machine;
+
+    // ==================== Constructor Tests ====================
+
+    #[test]
+    fn test_swap_meter_new() {
+        let meter = SwapMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert_eq!(meter.used, 0.0);
+        assert_eq!(meter.cache, 0.0);
+        assert_eq!(meter.total, 0.0);
+    }
+
+    #[test]
+    fn test_swap_meter_default() {
+        let meter = SwapMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert_eq!(meter.total, 0.0);
+    }
+
+    // ==================== human_unit Tests ====================
+    // Same algorithm as MemoryMeter, but we test it here too for coverage
+
+    #[test]
+    fn test_human_unit_kilobytes() {
+        assert_eq!(SwapMeter::human_unit(100.0), "100K");
+        assert_eq!(SwapMeter::human_unit(512.0), "512K");
+        assert_eq!(SwapMeter::human_unit(1023.0), "1023K");
+    }
+
+    #[test]
+    fn test_human_unit_megabytes() {
+        assert_eq!(SwapMeter::human_unit(1024.0), "1.00M");
+        assert_eq!(SwapMeter::human_unit(2048.0), "2.00M");
+        assert_eq!(SwapMeter::human_unit(10240.0), "10.0M");
+        assert_eq!(SwapMeter::human_unit(102400.0), "100M");
+    }
+
+    #[test]
+    fn test_human_unit_gigabytes() {
+        assert_eq!(SwapMeter::human_unit(1048576.0), "1.00G");
+        assert_eq!(SwapMeter::human_unit(8388608.0), "8.00G");
+        assert_eq!(SwapMeter::human_unit(16777216.0), "16.0G");
+    }
+
+    #[test]
+    fn test_human_unit_zero() {
+        assert_eq!(SwapMeter::human_unit(0.0), "0K");
+    }
+
+    // ==================== Update Tests ====================
+
+    #[test]
+    fn test_swap_meter_update() {
+        let mut meter = SwapMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.total_swap = 8 * 1024 * 1024; // 8 GB in KB
+        machine.used_swap = 2 * 1024 * 1024;   // 2 GB
+        machine.cached_swap = 512 * 1024;      // 512 MB
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.total, 8.0 * 1024.0 * 1024.0);
+        assert_eq!(meter.used, 2.0 * 1024.0 * 1024.0);
+        assert_eq!(meter.cache, 512.0 * 1024.0);
+    }
+
+    #[test]
+    fn test_swap_meter_update_zero_values() {
+        let mut meter = SwapMeter::new();
+        let machine = Machine::default();
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.total, 0.0);
+        assert_eq!(meter.used, 0.0);
+        assert_eq!(meter.cache, 0.0);
+    }
+
+    // ==================== Meter Trait Tests ====================
+
+    #[test]
+    fn test_swap_meter_name() {
+        let meter = SwapMeter::new();
+        assert_eq!(meter.name(), "Swap");
+    }
+
+    #[test]
+    fn test_swap_meter_caption() {
+        let meter = SwapMeter::new();
+        assert_eq!(meter.caption(), "Swp");
+    }
+
+    #[test]
+    fn test_swap_meter_mode() {
+        let mut meter = SwapMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_swap_meter_height() {
+        let mut meter = SwapMeter::new();
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.height(), 3);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), 4);
+    }
+
+    #[test]
+    fn test_swap_meter_default_mode() {
+        let meter = SwapMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Bar);
     }
 }

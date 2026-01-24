@@ -58,7 +58,7 @@ impl NetworkIOMeter {
     }
 
     /// Format a rate value using human-readable units (like C htop's Meter_humanUnit)
-    fn human_unit(bytes_per_sec: f64) -> String {
+    pub(crate) fn human_unit(bytes_per_sec: f64) -> String {
         const UNIT_PREFIXES: [char; 5] = ['K', 'M', 'G', 'T', 'P'];
         // Convert to KiB/s first (divide by 1024)
         let mut val = bytes_per_sec / 1024.0;
@@ -268,5 +268,166 @@ impl Meter for NetworkIOMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Machine;
+
+    // ==================== Constructor Tests ====================
+
+    #[test]
+    fn test_networkio_meter_new() {
+        let meter = NetworkIOMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.status, RateStatus::Init);
+        assert_eq!(meter.receive_rate, 0.0);
+        assert_eq!(meter.transmit_rate, 0.0);
+        assert_eq!(meter.receive_packets, 0);
+        assert_eq!(meter.transmit_packets, 0);
+    }
+
+    #[test]
+    fn test_networkio_meter_default() {
+        let meter = NetworkIOMeter::default();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.status, RateStatus::Init);
+    }
+
+    // ==================== human_unit Tests ====================
+    // NetworkIO human_unit is same as DiskIO - converts bytes/sec to KiB/s first
+
+    #[test]
+    fn test_human_unit_bytes_to_kilobytes() {
+        assert_eq!(NetworkIOMeter::human_unit(0.0), "0.00K");
+        assert_eq!(NetworkIOMeter::human_unit(1024.0), "1.00K");
+        assert_eq!(NetworkIOMeter::human_unit(5120.0), "5.00K");
+    }
+
+    #[test]
+    fn test_human_unit_kilobytes_precision() {
+        // Values < 10 get 2 decimal places
+        assert_eq!(NetworkIOMeter::human_unit(1024.0), "1.00K");
+        
+        // Values 10-99 get 1 decimal place  
+        assert_eq!(NetworkIOMeter::human_unit(10.0 * 1024.0), "10.0K");
+        
+        // Values >= 100 get 0 decimal places
+        assert_eq!(NetworkIOMeter::human_unit(100.0 * 1024.0), "100K");
+    }
+
+    #[test]
+    fn test_human_unit_megabytes() {
+        let mib = 1024.0 * 1024.0;
+        assert_eq!(NetworkIOMeter::human_unit(mib), "1.00M");
+        assert_eq!(NetworkIOMeter::human_unit(10.0 * mib), "10.0M");
+        assert_eq!(NetworkIOMeter::human_unit(100.0 * mib), "100M");
+    }
+
+    #[test]
+    fn test_human_unit_typical_network_rates() {
+        // 1 Mbps = 125 KB/s = 128000 bytes/sec
+        let one_mbps = 125.0 * 1024.0;
+        assert_eq!(NetworkIOMeter::human_unit(one_mbps), "125K");
+        
+        // 100 Mbps = 12.5 MB/s
+        let hundred_mbps = 12.5 * 1024.0 * 1024.0;
+        assert_eq!(NetworkIOMeter::human_unit(hundred_mbps), "12.5M");
+        
+        // 1 Gbps = 125 MB/s
+        let one_gbps = 125.0 * 1024.0 * 1024.0;
+        assert_eq!(NetworkIOMeter::human_unit(one_gbps), "125M");
+    }
+
+    // ==================== Update Tests ====================
+
+    #[test]
+    fn test_networkio_meter_update_init() {
+        let mut meter = NetworkIOMeter::new();
+        let machine = Machine::default();
+        
+        meter.update(&machine);
+        assert_eq!(meter.status, RateStatus::Init);
+    }
+
+    #[test]
+    fn test_networkio_meter_update_with_data() {
+        let mut meter = NetworkIOMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.net_io_last_update = 1000;
+        machine.realtime_ms = 1500;
+        machine.net_io_receive_rate = 1024.0 * 1024.0; // 1 MiB/s
+        machine.net_io_transmit_rate = 512.0 * 1024.0; // 512 KiB/s
+        machine.net_io_receive_packets = 1000;
+        machine.net_io_transmit_packets = 500;
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.status, RateStatus::Data);
+        assert_eq!(meter.receive_rate, 1024.0 * 1024.0);
+        assert_eq!(meter.transmit_rate, 512.0 * 1024.0);
+        assert_eq!(meter.receive_packets, 1000);
+        assert_eq!(meter.transmit_packets, 500);
+    }
+
+    #[test]
+    fn test_networkio_meter_update_stale() {
+        let mut meter = NetworkIOMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.net_io_last_update = 1000;
+        machine.realtime_ms = 32000; // > 30 seconds = stale
+        
+        meter.update(&machine);
+        assert_eq!(meter.status, RateStatus::Stale);
+    }
+
+    // ==================== Meter Trait Tests ====================
+
+    #[test]
+    fn test_networkio_meter_name() {
+        let meter = NetworkIOMeter::new();
+        assert_eq!(meter.name(), "NetworkIO");
+    }
+
+    #[test]
+    fn test_networkio_meter_caption() {
+        let meter = NetworkIOMeter::new();
+        assert_eq!(meter.caption(), "Net");
+    }
+
+    #[test]
+    fn test_networkio_meter_mode() {
+        let mut meter = NetworkIOMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_networkio_meter_height() {
+        let mut meter = NetworkIOMeter::new();
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), 4);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.height(), 3);
     }
 }

@@ -135,7 +135,7 @@ impl BatteryMeter {
         None
     }
 
-    fn format_battery(&self) -> String {
+    pub(crate) fn format_battery(&self) -> String {
         if !self.available {
             return "N/A".to_string();
         }
@@ -258,5 +258,136 @@ impl Meter for BatteryMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== Constructor Tests ====================
+
+    #[test]
+    fn test_battery_meter_new() {
+        let meter = BatteryMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert_eq!(meter.percent, 0.0);
+        assert_eq!(meter.ac_presence, ACPresence::Unknown);
+        assert!(!meter.available);
+    }
+
+    #[test]
+    fn test_battery_meter_default() {
+        let meter = BatteryMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert!(!meter.available);
+    }
+
+    // ==================== ACPresence Tests ====================
+
+    #[test]
+    fn test_ac_presence_default() {
+        let presence: ACPresence = ACPresence::default();
+        assert_eq!(presence, ACPresence::Unknown);
+    }
+
+    #[test]
+    fn test_ac_presence_variants() {
+        assert_eq!(ACPresence::Unknown, ACPresence::Unknown);
+        assert_eq!(ACPresence::Online, ACPresence::Online);
+        assert_eq!(ACPresence::Offline, ACPresence::Offline);
+        
+        assert_ne!(ACPresence::Online, ACPresence::Offline);
+        assert_ne!(ACPresence::Online, ACPresence::Unknown);
+    }
+
+    // ==================== format_battery Tests ====================
+
+    #[test]
+    fn test_format_battery_not_available() {
+        let meter = BatteryMeter::new();
+        assert_eq!(meter.format_battery(), "N/A");
+    }
+
+    #[test]
+    fn test_format_battery_unknown_ac() {
+        let mut meter = BatteryMeter::new();
+        meter.available = true;
+        meter.percent = 75.5;
+        meter.ac_presence = ACPresence::Unknown;
+        
+        assert_eq!(meter.format_battery(), "75.5%");
+    }
+
+    #[test]
+    fn test_format_battery_on_ac() {
+        let mut meter = BatteryMeter::new();
+        meter.available = true;
+        meter.percent = 100.0;
+        meter.ac_presence = ACPresence::Online;
+        
+        assert_eq!(meter.format_battery(), "100.0%; AC");
+    }
+
+    #[test]
+    fn test_format_battery_on_battery() {
+        let mut meter = BatteryMeter::new();
+        meter.available = true;
+        meter.percent = 45.3;
+        meter.ac_presence = ACPresence::Offline;
+        
+        assert_eq!(meter.format_battery(), "45.3%; BAT");
+    }
+
+    #[test]
+    fn test_format_battery_low() {
+        let mut meter = BatteryMeter::new();
+        meter.available = true;
+        meter.percent = 5.0;
+        meter.ac_presence = ACPresence::Offline;
+        
+        assert_eq!(meter.format_battery(), "5.0%; BAT");
+    }
+
+    #[test]
+    fn test_format_battery_zero() {
+        let mut meter = BatteryMeter::new();
+        meter.available = true;
+        meter.percent = 0.0;
+        meter.ac_presence = ACPresence::Offline;
+        
+        assert_eq!(meter.format_battery(), "0.0%; BAT");
+    }
+
+    // ==================== Meter Trait Tests ====================
+
+    #[test]
+    fn test_battery_meter_name() {
+        let meter = BatteryMeter::new();
+        assert_eq!(meter.name(), "Battery");
+    }
+
+    #[test]
+    fn test_battery_meter_caption() {
+        let meter = BatteryMeter::new();
+        assert_eq!(meter.caption(), "BAT");
+    }
+
+    #[test]
+    fn test_battery_meter_mode() {
+        let mut meter = BatteryMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_battery_meter_default_mode() {
+        let meter = BatteryMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Bar);
     }
 }

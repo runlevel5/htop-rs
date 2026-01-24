@@ -50,7 +50,7 @@ impl MemoryMeter {
     }
 
     /// Format memory value like C htop's Meter_humanUnit
-    fn human_unit(value: f64) -> String {
+    pub(crate) fn human_unit(value: f64) -> String {
         const UNIT_PREFIXES: [char; 5] = ['K', 'M', 'G', 'T', 'P'];
         let mut val = value;
         let mut i = 0;
@@ -340,5 +340,208 @@ impl Meter for MemoryMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Machine;
+
+    // ==================== Constructor Tests ====================
+
+    #[test]
+    fn test_memory_meter_new() {
+        let meter = MemoryMeter::new();
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert_eq!(meter.used, 0.0);
+        assert_eq!(meter.buffers, 0.0);
+        assert_eq!(meter.shared, 0.0);
+        assert_eq!(meter.compressed, 0.0);
+        assert_eq!(meter.cache, 0.0);
+        assert_eq!(meter.available, 0.0);
+        assert_eq!(meter.total, 0.0);
+    }
+
+    #[test]
+    fn test_memory_meter_default() {
+        let meter = MemoryMeter::default();
+        assert_eq!(meter.mode, MeterMode::Bar);
+        assert_eq!(meter.total, 0.0);
+    }
+
+    // ==================== human_unit Tests ====================
+
+    #[test]
+    fn test_human_unit_kilobytes_small() {
+        // Values < 1024K stay in K
+        assert_eq!(MemoryMeter::human_unit(100.0), "100K");
+        assert_eq!(MemoryMeter::human_unit(512.0), "512K");
+        assert_eq!(MemoryMeter::human_unit(1023.0), "1023K");
+    }
+
+    #[test]
+    fn test_human_unit_megabytes() {
+        // 1024K = 1M, values 1-9.99 get 2 decimal places
+        assert_eq!(MemoryMeter::human_unit(1024.0), "1.00M");
+        assert_eq!(MemoryMeter::human_unit(2048.0), "2.00M");
+        assert_eq!(MemoryMeter::human_unit(5120.0), "5.00M");
+        assert_eq!(MemoryMeter::human_unit(9216.0), "9.00M"); // 9M
+    }
+
+    #[test]
+    fn test_human_unit_megabytes_medium() {
+        // Values 10-99.9 get 1 decimal place
+        assert_eq!(MemoryMeter::human_unit(10240.0), "10.0M"); // 10M
+        assert_eq!(MemoryMeter::human_unit(51200.0), "50.0M"); // 50M
+        assert_eq!(MemoryMeter::human_unit(102400.0), "100M"); // 100M - 0 decimals
+    }
+
+    #[test]
+    fn test_human_unit_megabytes_large() {
+        // Values >= 100 get 0 decimal places
+        assert_eq!(MemoryMeter::human_unit(102400.0), "100M");
+        assert_eq!(MemoryMeter::human_unit(512000.0), "500M");
+        assert_eq!(MemoryMeter::human_unit(1023000.0), "999M"); // Just under 1G
+    }
+
+    #[test]
+    fn test_human_unit_gigabytes() {
+        // 1024M = 1G (1024 * 1024 K)
+        assert_eq!(MemoryMeter::human_unit(1048576.0), "1.00G"); // 1G
+        assert_eq!(MemoryMeter::human_unit(2097152.0), "2.00G"); // 2G
+        assert_eq!(MemoryMeter::human_unit(8388608.0), "8.00G"); // 8G
+        assert_eq!(MemoryMeter::human_unit(16777216.0), "16.0G"); // 16G
+        assert_eq!(MemoryMeter::human_unit(33554432.0), "32.0G"); // 32G
+        assert_eq!(MemoryMeter::human_unit(134217728.0), "128G"); // 128G
+    }
+
+    #[test]
+    fn test_human_unit_terabytes() {
+        // 1024G = 1T
+        assert_eq!(MemoryMeter::human_unit(1073741824.0), "1.00T"); // 1T
+        assert_eq!(MemoryMeter::human_unit(2147483648.0), "2.00T"); // 2T
+    }
+
+    #[test]
+    fn test_human_unit_petabytes() {
+        // 1024T = 1P
+        assert_eq!(MemoryMeter::human_unit(1099511627776.0), "1.00P"); // 1P
+    }
+
+    #[test]
+    fn test_human_unit_zero() {
+        assert_eq!(MemoryMeter::human_unit(0.0), "0K");
+    }
+
+    #[test]
+    fn test_human_unit_fractional_kilobytes() {
+        // Fractional values should work (truncated to int for K)
+        assert_eq!(MemoryMeter::human_unit(0.5), "0K");
+        assert_eq!(MemoryMeter::human_unit(1.5), "2K"); // rounds to 2
+    }
+
+    // ==================== Update Tests ====================
+
+    #[test]
+    fn test_memory_meter_update() {
+        let mut meter = MemoryMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.total_mem = 16 * 1024 * 1024; // 16 GB in KB
+        machine.used_mem = 8 * 1024 * 1024;    // 8 GB
+        machine.buffers_mem = 512 * 1024;      // 512 MB
+        machine.shared_mem = 256 * 1024;       // 256 MB
+        machine.compressed_mem = 0;
+        machine.cached_mem = 2 * 1024 * 1024;  // 2 GB
+        machine.available_mem = 6 * 1024 * 1024; // 6 GB
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.total, 16.0 * 1024.0 * 1024.0);
+        assert_eq!(meter.used, 8.0 * 1024.0 * 1024.0);
+        assert_eq!(meter.buffers, 512.0 * 1024.0);
+        assert_eq!(meter.shared, 256.0 * 1024.0);
+        assert_eq!(meter.compressed, 0.0);
+        assert_eq!(meter.cache, 2.0 * 1024.0 * 1024.0);
+        assert_eq!(meter.available, 6.0 * 1024.0 * 1024.0);
+    }
+
+    #[test]
+    fn test_memory_meter_update_zero_values() {
+        let mut meter = MemoryMeter::new();
+        let machine = Machine::default();
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.total, 0.0);
+        assert_eq!(meter.used, 0.0);
+    }
+
+    // ==================== Meter Trait Tests ====================
+
+    #[test]
+    fn test_memory_meter_name() {
+        let meter = MemoryMeter::new();
+        assert_eq!(meter.name(), "Memory");
+    }
+
+    #[test]
+    fn test_memory_meter_caption() {
+        let meter = MemoryMeter::new();
+        assert_eq!(meter.caption(), "Mem");
+    }
+
+    #[test]
+    fn test_memory_meter_mode() {
+        let mut meter = MemoryMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_memory_meter_height() {
+        let mut meter = MemoryMeter::new();
+        
+        // Bar mode: height 1
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.height(), 1);
+        
+        // Text mode: height 1
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.height(), 1);
+        
+        // LED mode: height 3
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.height(), 3);
+        
+        // Graph mode: height 4
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), 4);
+    }
+
+    #[test]
+    fn test_memory_meter_supported_modes() {
+        let meter = MemoryMeter::new();
+        // Default: all modes supported
+        let modes = meter.supported_modes();
+        assert!(modes & (1 << MeterMode::Bar as u32) != 0);
+        assert!(modes & (1 << MeterMode::Text as u32) != 0);
+        assert!(modes & (1 << MeterMode::Graph as u32) != 0);
+        assert!(modes & (1 << MeterMode::Led as u32) != 0);
+    }
+
+    #[test]
+    fn test_memory_meter_default_mode() {
+        let meter = MemoryMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Bar);
     }
 }

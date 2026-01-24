@@ -48,7 +48,7 @@ impl LoadAverageMeter {
     /// - Green (OK): load < 1.0
     /// - Yellow (Medium/Warn): load < activeCPUs
     /// - Red (High/Error): load >= activeCPUs
-    fn get_load_color(&self) -> ColorElement {
+    pub(crate) fn get_load_color(&self) -> ColorElement {
         if self.load1 < 1.0 {
             ColorElement::MeterValueOk
         } else if self.load1 < self.active_cpus as f64 {
@@ -264,7 +264,7 @@ impl LoadMeter {
     /// - Green (OK): load < 1.0
     /// - Yellow (Medium/Warn): load < activeCPUs
     /// - Red (High/Error): load >= activeCPUs
-    fn get_load_color(&self) -> ColorElement {
+    pub(crate) fn get_load_color(&self) -> ColorElement {
         if self.load1 < 1.0 {
             ColorElement::MeterValueOk
         } else if self.load1 < self.active_cpus as f64 {
@@ -428,5 +428,232 @@ impl Meter for LoadMeter {
 
     fn set_mode(&mut self, mode: MeterMode) {
         self.mode = mode;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Machine;
+
+    // ==================== LoadAverageMeter Constructor Tests ====================
+
+    #[test]
+    fn test_load_average_meter_new() {
+        let meter = LoadAverageMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.load1, 0.0);
+        assert_eq!(meter.load5, 0.0);
+        assert_eq!(meter.load15, 0.0);
+        assert_eq!(meter.active_cpus, 1);
+    }
+
+    #[test]
+    fn test_load_average_meter_default() {
+        let meter = LoadAverageMeter::default();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.active_cpus, 1);
+    }
+
+    // ==================== LoadAverageMeter get_load_color Tests ====================
+
+    #[test]
+    fn test_load_average_get_load_color_green() {
+        // load < 1.0 -> Green (Ok)
+        let mut meter = LoadAverageMeter::new();
+        meter.load1 = 0.0;
+        meter.active_cpus = 4;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueOk);
+
+        meter.load1 = 0.5;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueOk);
+
+        meter.load1 = 0.99;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueOk);
+    }
+
+    #[test]
+    fn test_load_average_get_load_color_yellow() {
+        // 1.0 <= load < activeCPUs -> Yellow (Warn)
+        let mut meter = LoadAverageMeter::new();
+        meter.active_cpus = 4;
+
+        meter.load1 = 1.0;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueWarn);
+
+        meter.load1 = 2.5;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueWarn);
+
+        meter.load1 = 3.99;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueWarn);
+    }
+
+    #[test]
+    fn test_load_average_get_load_color_red() {
+        // load >= activeCPUs -> Red (Error)
+        let mut meter = LoadAverageMeter::new();
+        meter.active_cpus = 4;
+
+        meter.load1 = 4.0;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueError);
+
+        meter.load1 = 8.0;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueError);
+
+        meter.load1 = 100.0;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueError);
+    }
+
+    #[test]
+    fn test_load_average_get_load_color_single_cpu() {
+        // With 1 CPU: load >= 1 is immediately red
+        let mut meter = LoadAverageMeter::new();
+        meter.active_cpus = 1;
+
+        meter.load1 = 0.5;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueOk);
+
+        meter.load1 = 1.0;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueError);
+    }
+
+    // ==================== LoadAverageMeter Update Tests ====================
+
+    #[test]
+    fn test_load_average_meter_update() {
+        let mut meter = LoadAverageMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.load_average = [1.5, 2.0, 1.8];
+        machine.active_cpus = 8;
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.load1, 1.5);
+        assert_eq!(meter.load5, 2.0);
+        assert_eq!(meter.load15, 1.8);
+        assert_eq!(meter.active_cpus, 8);
+    }
+
+    // ==================== LoadAverageMeter Trait Tests ====================
+
+    #[test]
+    fn test_load_average_meter_name() {
+        let meter = LoadAverageMeter::new();
+        assert_eq!(meter.name(), "LoadAverage");
+    }
+
+    #[test]
+    fn test_load_average_meter_caption() {
+        let meter = LoadAverageMeter::new();
+        assert_eq!(meter.caption(), "Load average: ");
+    }
+
+    #[test]
+    fn test_load_average_meter_mode() {
+        let mut meter = LoadAverageMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    // ==================== LoadMeter Constructor Tests ====================
+
+    #[test]
+    fn test_load_meter_new() {
+        let meter = LoadMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.load1, 0.0);
+        assert_eq!(meter.active_cpus, 1);
+    }
+
+    #[test]
+    fn test_load_meter_default() {
+        let meter = LoadMeter::default();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.active_cpus, 1);
+    }
+
+    // ==================== LoadMeter get_load_color Tests ====================
+
+    #[test]
+    fn test_load_get_load_color_green() {
+        let mut meter = LoadMeter::new();
+        meter.load1 = 0.5;
+        meter.active_cpus = 4;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueOk);
+    }
+
+    #[test]
+    fn test_load_get_load_color_yellow() {
+        let mut meter = LoadMeter::new();
+        meter.load1 = 2.0;
+        meter.active_cpus = 4;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueWarn);
+    }
+
+    #[test]
+    fn test_load_get_load_color_red() {
+        let mut meter = LoadMeter::new();
+        meter.load1 = 5.0;
+        meter.active_cpus = 4;
+        assert_eq!(meter.get_load_color(), ColorElement::MeterValueError);
+    }
+
+    // ==================== LoadMeter Update Tests ====================
+
+    #[test]
+    fn test_load_meter_update() {
+        let mut meter = LoadMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.load_average = [3.5, 2.0, 1.5];
+        machine.active_cpus = 4;
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.load1, 3.5);
+        assert_eq!(meter.active_cpus, 4);
+    }
+
+    // ==================== LoadMeter Trait Tests ====================
+
+    #[test]
+    fn test_load_meter_name() {
+        let meter = LoadMeter::new();
+        assert_eq!(meter.name(), "Load");
+    }
+
+    #[test]
+    fn test_load_meter_caption() {
+        let meter = LoadMeter::new();
+        assert_eq!(meter.caption(), "Load: ");
+    }
+
+    #[test]
+    fn test_load_meter_mode() {
+        let mut meter = LoadMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+    }
+
+    #[test]
+    fn test_load_meter_height() {
+        let mut meter = LoadMeter::new();
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), 4);
     }
 }

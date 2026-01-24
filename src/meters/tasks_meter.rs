@@ -276,3 +276,153 @@ impl Meter for TasksMeter {
         self.mode = mode;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Machine;
+
+    // ==================== Constructor Tests ====================
+
+    #[test]
+    fn test_tasks_meter_new() {
+        let meter = TasksMeter::new();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.total_tasks, 0);
+        assert_eq!(meter.running, 0);
+        assert_eq!(meter.userland_threads, 0);
+        assert_eq!(meter.kernel_threads, 0);
+        assert_eq!(meter.total_all, 0);
+    }
+
+    #[test]
+    fn test_tasks_meter_default() {
+        let meter = TasksMeter::default();
+        assert_eq!(meter.mode, MeterMode::Text);
+        assert_eq!(meter.total_tasks, 0);
+    }
+
+    // ==================== Update Tests ====================
+
+    #[test]
+    fn test_tasks_meter_update() {
+        let mut meter = TasksMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.total_tasks = 300;
+        machine.running_tasks = 5;
+        machine.kernel_threads = 100;
+        machine.userland_threads = 50;
+        machine.active_cpus = 8;
+        
+        meter.update(&machine);
+        
+        // total_tasks = total - kernel - userland = 300 - 100 - 50 = 150
+        assert_eq!(meter.total_tasks, 150);
+        assert_eq!(meter.kernel_threads, 100);
+        assert_eq!(meter.userland_threads, 50);
+        // running is capped at active_cpus
+        assert_eq!(meter.running, 5);
+        assert_eq!(meter.total_all, 300);
+    }
+
+    #[test]
+    fn test_tasks_meter_update_running_capped() {
+        let mut meter = TasksMeter::new();
+        let mut machine = Machine::default();
+        
+        machine.total_tasks = 100;
+        machine.running_tasks = 20; // More than active CPUs
+        machine.kernel_threads = 10;
+        machine.userland_threads = 10;
+        machine.active_cpus = 4;
+        
+        meter.update(&machine);
+        
+        // Running is capped at active_cpus
+        assert_eq!(meter.running, 4);
+    }
+
+    #[test]
+    fn test_tasks_meter_update_zero() {
+        let mut meter = TasksMeter::new();
+        let machine = Machine::default();
+        
+        meter.update(&machine);
+        
+        assert_eq!(meter.total_tasks, 0);
+        assert_eq!(meter.running, 0);
+        assert_eq!(meter.kernel_threads, 0);
+        assert_eq!(meter.userland_threads, 0);
+    }
+
+    #[test]
+    fn test_tasks_meter_update_saturating_sub() {
+        // Test that total_tasks doesn't underflow
+        let mut meter = TasksMeter::new();
+        let mut machine = Machine::default();
+        
+        // total_tasks < kernel + userland would cause underflow without saturating_sub
+        machine.total_tasks = 50;
+        machine.kernel_threads = 100;
+        machine.userland_threads = 100;
+        machine.active_cpus = 4;
+        
+        meter.update(&machine);
+        
+        // Should be 0, not negative/wrapped
+        assert_eq!(meter.total_tasks, 0);
+    }
+
+    // ==================== Meter Trait Tests ====================
+
+    #[test]
+    fn test_tasks_meter_name() {
+        let meter = TasksMeter::new();
+        assert_eq!(meter.name(), "Tasks");
+    }
+
+    #[test]
+    fn test_tasks_meter_caption() {
+        let meter = TasksMeter::new();
+        assert_eq!(meter.caption(), "Tasks: ");
+    }
+
+    #[test]
+    fn test_tasks_meter_mode() {
+        let mut meter = TasksMeter::new();
+        assert_eq!(meter.mode(), MeterMode::Text);
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.mode(), MeterMode::Bar);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.mode(), MeterMode::Graph);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.mode(), MeterMode::Led);
+    }
+
+    #[test]
+    fn test_tasks_meter_height() {
+        let mut meter = TasksMeter::new();
+        
+        meter.set_mode(MeterMode::Bar);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Text);
+        assert_eq!(meter.height(), 1);
+        
+        meter.set_mode(MeterMode::Graph);
+        assert_eq!(meter.height(), 4);
+        
+        meter.set_mode(MeterMode::Led);
+        assert_eq!(meter.height(), 3);
+    }
+
+    #[test]
+    fn test_tasks_meter_default_mode() {
+        let meter = TasksMeter::new();
+        assert_eq!(meter.default_mode(), MeterMode::Bar);
+    }
+}
