@@ -41,7 +41,7 @@ mach2 = "0.4"
 libc = "0.2"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.28", features = ["signal", "user", "process"] }
+nix = { version = "0.28", features = ["signal", "user", "process", "resource"] }
 libc = "0.2"
 
 [features]

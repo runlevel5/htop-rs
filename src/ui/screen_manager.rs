@@ -20,6 +20,37 @@ use super::Crt;
 use crate::core::{CommandStrParams, Machine, ProcessField, Settings};
 use crate::platform;
 
+/// Check if the current process can decrease nice values (increase priority).
+///
+/// On macOS, only root can decrease nice values.
+/// On Linux, non-root users can decrease nice if RLIMIT_NICE is configured.
+/// The formula is: nice_ceiling = 20 - rlim_cur
+/// - RLIMIT_NICE = 0 → ceiling = 20 → cannot decrease nice
+/// - RLIMIT_NICE = 20 → ceiling = 0 → can decrease to 0
+/// - RLIMIT_NICE = 40 → ceiling = -20 → full range (like root)
+fn can_decrease_nice() -> bool {
+    // Root can always decrease nice
+    if unsafe { libc::geteuid() == 0 } {
+        return true;
+    }
+
+    // On Linux, check RLIMIT_NICE
+    #[cfg(target_os = "linux")]
+    {
+        use nix::sys::resource::{getrlimit, Resource};
+
+        if let Ok((soft_limit, _hard_limit)) = getrlimit(Resource::RLIMIT_NICE) {
+            // nice_ceiling = 20 - rlim_cur
+            // If RLIMIT_NICE > 0, user has some ability to decrease nice
+            // (the higher the limit, the lower they can go)
+            return soft_limit > 0;
+        }
+    }
+
+    // On macOS (and fallback), non-root cannot decrease nice
+    false
+}
+
 /// Convert SPDX license identifier to display string
 fn license_display() -> &'static str {
     const LICENSE_SPDX: &str = env!("CARGO_PKG_LICENSE");
@@ -514,10 +545,11 @@ impl ScreenManager {
         self.main_panel.tree_view = self.settings.tree_view;
         self.update_function_bar_labels();
 
-        // Disable F7 "Nice -" when not running as root (requires privileges to lower nice)
+        // Disable F7 "Nice -" when user cannot decrease nice values.
+        // On macOS, only root can decrease nice.
+        // On Linux, RLIMIT_NICE may allow non-root users to decrease nice.
         // F7 is at index 6 (0-based: F1=0, F2=1, ..., F7=6)
-        let is_root = unsafe { libc::geteuid() == 0 };
-        self.main_panel.function_bar.set_enabled(6, is_root);
+        self.main_panel.function_bar.set_enabled(6, can_decrease_nice());
 
         // Build tree if starting in tree view mode
         if self.settings.tree_view {
@@ -1906,7 +1938,7 @@ impl ScreenManager {
             ("      c: ", "tag process and its children", false),
             ("      U: ", "untag all processes", false),
             ("   F9 k: ", "kill process/tagged processes", true),
-            ("   F7 ]: ", "higher priority (root only)", true),
+            ("   F7 ]: ", "higher priority (- nice)", true),
             ("   F8 [: ", "lower priority (+ nice)", true),
             ("      e: ", "show process environment", false),
             ("      i: ", "set IO priority", true),

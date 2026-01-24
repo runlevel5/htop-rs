@@ -4,12 +4,17 @@ This document outlines intentional improvements and enhancements made in htop-rs
 
 ## User Interface
 
-### Dimmed F7 "Nice -" When Not Root
+### Dimmed F7 "Nice -" When Unavailable
 
-htop-rs visually indicates when the F7 "Nice -" action is unavailable by dimming/graying out the function bar item when not running as root.
+htop-rs visually indicates when the F7 "Nice -" action is unavailable by dimming/graying out the function bar item.
 
-- **Why**: Decreasing a process's nice value (increasing its priority) requires root privileges on Unix systems
-- **Behavior**: F7 appears dimmed in the function bar when `geteuid() != 0`
+- **Why**: Decreasing a process's nice value (increasing its priority) typically requires elevated privileges
+- **Behavior**: 
+  - **Root users**: F7 is always enabled
+  - **macOS non-root**: F7 is always dimmed (macOS does not allow non-root users to decrease nice)
+  - **Linux non-root**: F7 is enabled/dimmed based on `RLIMIT_NICE` resource limit:
+    - `RLIMIT_NICE = 0` (default): F7 dimmed (cannot decrease nice)
+    - `RLIMIT_NICE > 0`: F7 enabled (can decrease nice within the configured limit)
 - **C htop behavior**: Shows F7 normally regardless of privileges; users only discover it doesn't work after pressing the key and seeing the operation fail
 
 This provides immediate visual feedback about available actions without requiring trial and error.
