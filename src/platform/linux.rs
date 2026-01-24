@@ -495,8 +495,25 @@ pub fn scan_processes(machine: &mut Machine) {
         }
 
         // IO statistics (requires root or same user)
-        // Read full /proc/[pid]/io data (more complete than procfs crate provides)
-        read_io_file(&mut process, pid, machine.realtime_ms, is_new);
+        // Use procfs crate's simple io() method instead of custom read_io_file
+        // which was causing CPU spikes on Linux
+        if let Ok(io) = proc.io() {
+            let prev_read = process.io_read_bytes;
+            let prev_write = process.io_write_bytes;
+
+            process.io_read_bytes = io.read_bytes;
+            process.io_write_bytes = io.write_bytes;
+
+            if !is_new && time_delta > 0.0 {
+                if process.io_read_bytes >= prev_read {
+                    process.io_read_rate = (process.io_read_bytes - prev_read) as f64 / time_delta;
+                }
+                if process.io_write_bytes >= prev_write {
+                    process.io_write_rate =
+                        (process.io_write_bytes - prev_write) as f64 / time_delta;
+                }
+            }
+        }
 
         // Check for deleted libraries by scanning /proc/PID/maps
         // Only check if exe is not deleted (if exe is deleted, no need to check libs)
