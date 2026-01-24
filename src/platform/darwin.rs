@@ -105,44 +105,47 @@ impl Default for ProcTaskInfo {
     }
 }
 
+// TODO: Remove these sysctl structures once libproc-rs supports PID 0 (kernel_task)
+// Tracking issue: https://github.com/andrewdavidmackenzie/libproc-rs/issues/169
+
 /// extern_proc structure from sys/proc.h
 /// Total size: 296 bytes
 #[repr(C)]
 struct ExternProc {
-    _pad0: [u8; 32],             // padding to p_flag at offset 32
-    p_flag: u32,                 // Process flags (offset 32)
-    p_stat: u8,                  // Process state (offset 36) - S=sleep, R=run, Z=zombie, etc.
-    _pad1: [u8; 3],              // padding
-    p_pid: i32,                  // Process ID (offset 40)
-    _pad2: [u8; 196],            // padding to p_priority at offset 240
-    p_priority: u8,              // Process priority (offset 240)
-    p_usrpri: u8,                // User-priority (offset 241)
-    p_nice: i8,                  // Process "nice" value (offset 242)
-    p_comm: [u8; 17],            // Command name (offset 243, size 17 = MAXCOMLEN+1)
-    _pad3: [u8; 36],             // padding to total size 296
+    _pad0: [u8; 32],  // padding to p_flag at offset 32
+    p_flag: u32,      // Process flags (offset 32)
+    p_stat: u8,       // Process state (offset 36) - S=sleep, R=run, Z=zombie, etc.
+    _pad1: [u8; 3],   // padding
+    p_pid: i32,       // Process ID (offset 40)
+    _pad2: [u8; 196], // padding to p_priority at offset 240
+    p_priority: u8,   // Process priority (offset 240)
+    p_usrpri: u8,     // User-priority (offset 241)
+    p_nice: i8,       // Process "nice" value (offset 242)
+    p_comm: [u8; 17], // Command name (offset 243, size 17 = MAXCOMLEN+1)
+    _pad3: [u8; 36],  // padding to total size 296
 }
 
 /// eproc structure from sys/sysctl.h  
 /// Total size: 352 bytes
 #[repr(C)]
 struct Eproc {
-    _pad0: [u8; 96],             // padding to e_pcred at offset 96
-    _e_pcred_pad: [u8; 8],       // p_cred padding
-    e_pcred_p_ruid: u32,         // Real UID (offset 104)
-    _pad1: [u8; 156],            // padding to e_ppid at offset 264
-    e_ppid: i32,                 // Parent PID (offset 264)
-    e_pgid: i32,                 // Process group ID (offset 268)
-    _pad2: [u8; 4],              // padding
-    e_tdev: i32,                 // TTY device (offset 276)
-    e_tpgid: i32,                // TTY process group (offset 280)
-    _pad3: [u8; 68],             // padding to total size 352
+    _pad0: [u8; 96],       // padding to e_pcred at offset 96
+    _e_pcred_pad: [u8; 8], // p_cred padding
+    e_pcred_p_ruid: u32,   // Real UID (offset 104)
+    _pad1: [u8; 156],      // padding to e_ppid at offset 264
+    e_ppid: i32,           // Parent PID (offset 264)
+    e_pgid: i32,           // Process group ID (offset 268)
+    _pad2: [u8; 4],        // padding
+    e_tdev: i32,           // TTY device (offset 276)
+    e_tpgid: i32,          // TTY process group (offset 280)
+    _pad3: [u8; 68],       // padding to total size 352
 }
 
 /// kinfo_proc structure from sys/sysctl.h
 #[repr(C)]
 struct KinfoProc {
-    kp_proc: ExternProc,      // proc structure
-    kp_eproc: Eproc,          // eproc structure
+    kp_proc: ExternProc, // proc structure
+    kp_eproc: Eproc,     // eproc structure
 }
 
 impl Default for KinfoProc {
@@ -769,7 +772,7 @@ fn get_process_cmdline(pid: i32) -> Option<(String, usize)> {
 /// This matches C htop's DarwinProcess_updateCwd behavior
 fn get_process_cwd(pid: i32) -> Option<String> {
     let mut vpi: ProcVnodePathInfo = Default::default();
-    
+
     let result = unsafe {
         proc_pidinfo(
             pid,
@@ -779,16 +782,16 @@ fn get_process_cwd(pid: i32) -> Option<String> {
             mem::size_of::<ProcVnodePathInfo>() as c_int,
         )
     };
-    
+
     if result <= 0 {
         return None;
     }
-    
+
     // Check if path is empty
     if vpi.pvi_cdir.vip_path[0] == 0 {
         return None;
     }
-    
+
     // Convert to string
     let path_bytes = &vpi.pvi_cdir.vip_path;
     if let Some(pos) = path_bytes.iter().position(|&c| c == 0) {
@@ -796,7 +799,7 @@ fn get_process_cwd(pid: i32) -> Option<String> {
             return Some(path.to_string());
         }
     }
-    
+
     None
 }
 
@@ -810,7 +813,7 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
     // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
     // This allows widths to shrink back when there are no longer processes with wide values
     machine.field_widths.reset_auto_widths();
-    
+
     // Get list of all PIDs
     let mut pids: Vec<i32> = vec![0; 4096];
     let count = unsafe {
@@ -852,13 +855,19 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
         }
 
         // For PID 0 (kernel_task), proc_pidinfo doesn't work, so we use sysctl
+        // TODO: Remove this workaround once libproc-rs handles kernel_task
+        // Tracking issue: https://github.com/andrewdavidmackenzie/libproc-rs/issues/169
         if pid == 0 {
             if let Some(kinfo) = get_kinfo_proc(0) {
                 let is_new = machine.processes.get(0).is_none();
                 let mut process = if is_new {
                     Process::new(0)
                 } else {
-                    machine.processes.get(0).cloned().unwrap_or_else(|| Process::new(0))
+                    machine
+                        .processes
+                        .get(0)
+                        .cloned()
+                        .unwrap_or_else(|| Process::new(0))
                 };
 
                 process.pid = 0;
@@ -1101,5 +1110,7 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
     machine.max_user_id = max_uid;
     machine.field_widths.set_pid_width(max_pid);
     machine.field_widths.set_uid_width(max_uid);
-    machine.field_widths.update_percent_cpu_width(max_percent_cpu);
+    machine
+        .field_widths
+        .update_percent_cpu_width(max_percent_cpu);
 }
