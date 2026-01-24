@@ -1,12 +1,21 @@
 //! Settings module
 //!
 //! This module contains user-configurable settings for htop.
+//!
+//! Config file search order (matches C htop Settings.c):
+//! 1. $HTOPRC environment variable (if set)
+//! 2. $XDG_CONFIG_HOME/htop/htoprc (or $HOME/.config/htop/htoprc)
+//! 3. Legacy $HOME/.htoprc (migrated if found)
+//! 4. System-wide /etc/htoprc (fallback, read-only)
 
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
 use super::process::ProcessField;
+
+/// Minimum config version we can read
+const CONFIG_READER_MIN_VERSION: u32 = 3;
 
 /// Header layout options (matches C htop HeaderLayout.h)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -204,6 +213,15 @@ impl MeterMode {
             _ => MeterMode::Bar,
         }
     }
+
+    pub fn to_i32(self) -> i32 {
+        match self {
+            MeterMode::Bar => 1,
+            MeterMode::Text => 2,
+            MeterMode::Graph => 3,
+            MeterMode::Led => 4,
+        }
+    }
 }
 
 /// Meter configuration
@@ -212,6 +230,28 @@ pub struct MeterConfig {
     pub name: String,
     pub param: u32,
     pub mode: MeterMode,
+}
+
+/// Parse meter name with optional parameter, e.g., "CPU(1)" -> ("CPU", 1)
+fn parse_meter_name(name: &str) -> (String, u32) {
+    if let Some(open_paren) = name.find('(') {
+        if let Some(close_paren) = name.find(')') {
+            let base_name = name[..open_paren].to_string();
+            let param_str = &name[open_paren + 1..close_paren];
+            let param = param_str.parse::<u32>().unwrap_or(0);
+            return (base_name, param);
+        }
+    }
+    (name.to_string(), 0)
+}
+
+/// Format meter name with optional parameter for config file
+fn format_meter_name(name: &str, param: u32) -> String {
+    if param > 0 {
+        format!("{}({})", name, param)
+    } else {
+        name.to_string()
+    }
 }
 
 /// Screen settings (per-tab settings)
@@ -437,10 +477,16 @@ impl Settings {
             },
         ];
 
+        // Find config file using C htop's search order
+        let (filename, readonly) = match find_config_path() {
+            Some(result) => (Some(result.path), result.readonly),
+            None => (None, false),
+        };
+
         Settings {
-            filename: Self::default_config_path(),
+            filename,
             changed: false,
-            readonly: false,
+            readonly,
             header_layout: HeaderLayout::TwoColumns5050,
             header_columns: vec![default_meters_left, default_meters_right],
             screens: ScreenSettings::default_screens(),
@@ -485,14 +531,20 @@ impl Settings {
         }
     }
 
-    /// Get the default config file path
-    fn default_config_path() -> Option<PathBuf> {
-        if let Some(config_dir) = dirs::config_dir() {
-            let htop_dir = config_dir.join("htop");
-            Some(htop_dir.join("htoprc"))
-        } else {
-            dirs::home_dir().map(|home| home.join(".config").join("htop").join("htoprc"))
+    /// Get the preferred path for writing config (XDG location)
+    fn get_write_path(&self) -> Option<PathBuf> {
+        // If HTOPRC is set, use that
+        if let Ok(htoprc) = std::env::var("HTOPRC") {
+            return Some(PathBuf::from(htoprc));
         }
+
+        // Otherwise use XDG config path
+        if let Some(config_dir) = dirs::config_dir() {
+            return Some(config_dir.join("htop").join("htoprc"));
+        }
+
+        // Fallback to ~/.config/htop/htoprc
+        dirs::home_dir().map(|home| home.join(".config").join("htop").join("htoprc"))
     }
 
     /// Load settings from the config file
@@ -509,6 +561,23 @@ impl Settings {
         let file = fs::File::open(&path)?;
         let reader = BufReader::new(file);
 
+        // Track config version for legacy format support
+        let mut config_version: u32 = CONFIG_READER_MIN_VERSION;
+        // Track if we found any screen definitions
+        let mut found_screens = false;
+        // Current screen being parsed (for .sort_key, etc.)
+        let mut current_screen_idx: Option<usize> = None;
+        // Temporary storage for legacy meter format
+        let mut legacy_left_meters: Vec<String> = Vec::new();
+        let mut legacy_right_meters: Vec<String> = Vec::new();
+        let mut legacy_left_modes: Vec<i32> = Vec::new();
+        let mut legacy_right_modes: Vec<i32> = Vec::new();
+        // New-style column meters (indexed)
+        let mut column_meters: std::collections::HashMap<usize, Vec<String>> =
+            std::collections::HashMap::new();
+        let mut column_modes: std::collections::HashMap<usize, Vec<i32>> =
+            std::collections::HashMap::new();
+
         for line in reader.lines() {
             let line = line?;
             let line = line.trim();
@@ -517,12 +586,287 @@ impl Settings {
                 continue;
             }
 
+            // Check for screen definition: "screen:Name=FIELD1 FIELD2 ..."
+            if let Some(rest) = line.strip_prefix("screen:") {
+                if let Some((name, fields_str)) = rest.split_once('=') {
+                    found_screens = true;
+                    // Clear default screens on first screen definition
+                    if self.screens.len() == ScreenSettings::default_screens().len()
+                        && current_screen_idx.is_none()
+                    {
+                        self.screens.clear();
+                    }
+                    let screen = self.parse_screen_definition(name.trim(), fields_str.trim());
+                    self.screens.push(screen);
+                    current_screen_idx = Some(self.screens.len() - 1);
+                }
+                continue;
+            }
+
+            // Check for screen property: ".sort_key=value"
+            if line.starts_with('.') {
+                if let Some(idx) = current_screen_idx {
+                    if let Some((key, value)) = line[1..].split_once('=') {
+                        self.parse_screen_property(idx, key.trim(), value.trim());
+                    }
+                }
+                continue;
+            }
+
+            // Regular key=value pairs
             if let Some((key, value)) = line.split_once('=') {
-                self.parse_setting(key.trim(), value.trim());
+                let key = key.trim();
+                let value = value.trim();
+
+                // Check for config version
+                if key == "config_reader_min_version" {
+                    if let Ok(v) = value.parse::<u32>() {
+                        config_version = v;
+                    }
+                    continue;
+                }
+
+                // Check for column_meters_N and column_meter_modes_N
+                if let Some(idx_str) = key.strip_prefix("column_meters_") {
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        let meters: Vec<String> =
+                            value.split_whitespace().map(|s| s.to_string()).collect();
+                        column_meters.insert(idx, meters);
+                    }
+                    continue;
+                }
+
+                if let Some(idx_str) = key.strip_prefix("column_meter_modes_") {
+                    if let Ok(idx) = idx_str.parse::<usize>() {
+                        let modes: Vec<i32> = value
+                            .split_whitespace()
+                            .filter_map(|s| s.parse::<i32>().ok())
+                            .collect();
+                        column_modes.insert(idx, modes);
+                    }
+                    continue;
+                }
+
+                // Legacy meter format
+                if key == "left_meters" {
+                    legacy_left_meters =
+                        value.split_whitespace().map(|s| s.to_string()).collect();
+                    continue;
+                }
+                if key == "right_meters" {
+                    legacy_right_meters =
+                        value.split_whitespace().map(|s| s.to_string()).collect();
+                    continue;
+                }
+                if key == "left_meter_modes" {
+                    legacy_left_modes = value
+                        .split_whitespace()
+                        .filter_map(|s| s.parse::<i32>().ok())
+                        .collect();
+                    continue;
+                }
+                if key == "right_meter_modes" {
+                    legacy_right_modes = value
+                        .split_whitespace()
+                        .filter_map(|s| s.parse::<i32>().ok())
+                        .collect();
+                    continue;
+                }
+
+                // Legacy fields format (config_version <= 2)
+                if key == "fields" && config_version < CONFIG_READER_MIN_VERSION {
+                    self.parse_legacy_fields(value);
+                    continue;
+                }
+
+                self.parse_setting(key, value);
             }
         }
 
+        // Apply meter configurations
+        if !column_meters.is_empty() {
+            // New-style column meters
+            self.apply_column_meters(&column_meters, &column_modes);
+        } else if !legacy_left_meters.is_empty() || !legacy_right_meters.is_empty() {
+            // Legacy two-column format
+            self.apply_legacy_meters(
+                &legacy_left_meters,
+                &legacy_right_meters,
+                &legacy_left_modes,
+                &legacy_right_modes,
+            );
+        }
+
+        // If no screens were defined, ensure we have default screens
+        if !found_screens && self.screens.is_empty() {
+            self.screens = ScreenSettings::default_screens();
+        }
+
         Ok(())
+    }
+
+    /// Parse a screen definition line: "Name=FIELD1 FIELD2 ..."
+    fn parse_screen_definition(&self, name: &str, fields_str: &str) -> ScreenSettings {
+        let fields: Vec<ProcessField> = fields_str
+            .split_whitespace()
+            .filter_map(|s| ProcessField::from_name(s))
+            .collect();
+
+        ScreenSettings {
+            heading: name.to_string(),
+            fields: if fields.is_empty() {
+                ScreenSettings::main_screen().fields
+            } else {
+                fields
+            },
+            sort_key: ProcessField::PercentCpu,
+            tree_sort_key: ProcessField::Pid,
+            direction: -1,
+            tree_direction: 1,
+            tree_view: false,
+            tree_view_always_by_pid: false,
+            all_branches_collapsed: false,
+        }
+    }
+
+    /// Parse a screen property: sort_key, tree_sort_key, etc.
+    fn parse_screen_property(&mut self, screen_idx: usize, key: &str, value: &str) {
+        if screen_idx >= self.screens.len() {
+            return;
+        }
+
+        let screen = &mut self.screens[screen_idx];
+
+        match key {
+            "sort_key" => {
+                // Can be field name or numeric ID
+                if let Some(field) = ProcessField::from_name(value) {
+                    screen.sort_key = field;
+                } else if let Ok(id) = value.parse::<u32>() {
+                    if let Some(field) = ProcessField::from_id(id) {
+                        screen.sort_key = field;
+                    }
+                }
+            }
+            "tree_sort_key" => {
+                if let Some(field) = ProcessField::from_name(value) {
+                    screen.tree_sort_key = field;
+                } else if let Ok(id) = value.parse::<u32>() {
+                    if let Some(field) = ProcessField::from_id(id) {
+                        screen.tree_sort_key = field;
+                    }
+                }
+            }
+            "sort_direction" => {
+                if let Ok(dir) = value.parse::<i32>() {
+                    screen.direction = if dir >= 0 { 1 } else { -1 };
+                }
+            }
+            "tree_sort_direction" => {
+                if let Ok(dir) = value.parse::<i32>() {
+                    screen.tree_direction = if dir >= 0 { 1 } else { -1 };
+                }
+            }
+            "tree_view" => {
+                screen.tree_view = value == "1";
+            }
+            "tree_view_always_by_pid" => {
+                screen.tree_view_always_by_pid = value == "1";
+            }
+            "all_branches_collapsed" => {
+                screen.all_branches_collapsed = value == "1";
+            }
+            _ => {}
+        }
+    }
+
+    /// Parse legacy fields format (numeric IDs separated by spaces)
+    fn parse_legacy_fields(&mut self, value: &str) {
+        let fields: Vec<ProcessField> = value
+            .split_whitespace()
+            .filter_map(|s| s.parse::<u32>().ok())
+            .filter_map(ProcessField::from_id)
+            .filter(|f| *f != ProcessField::Pid) // 0 is used as terminator
+            .collect();
+
+        if !fields.is_empty() && !self.screens.is_empty() {
+            self.screens[0].fields = fields;
+        }
+    }
+
+    /// Apply column meters from new format
+    fn apply_column_meters(
+        &mut self,
+        meters: &std::collections::HashMap<usize, Vec<String>>,
+        modes: &std::collections::HashMap<usize, Vec<i32>>,
+    ) {
+        let num_columns = self.header_layout.num_columns();
+        self.header_columns.clear();
+
+        for col_idx in 0..num_columns {
+            let col_meters = meters.get(&col_idx).cloned().unwrap_or_default();
+            let col_modes = modes.get(&col_idx).cloned().unwrap_or_default();
+
+            let configs: Vec<MeterConfig> = col_meters
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let mode_id = col_modes.get(i).copied().unwrap_or(1);
+                    let (meter_name, param) = parse_meter_name(name);
+                    MeterConfig {
+                        name: meter_name,
+                        param,
+                        mode: MeterMode::from_i32(mode_id),
+                    }
+                })
+                .collect();
+
+            self.header_columns.push(configs);
+        }
+    }
+
+    /// Apply legacy two-column meter format
+    fn apply_legacy_meters(
+        &mut self,
+        left_meters: &[String],
+        right_meters: &[String],
+        left_modes: &[i32],
+        right_modes: &[i32],
+    ) {
+        self.header_columns.clear();
+
+        // Left column
+        let left_configs: Vec<MeterConfig> = left_meters
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let mode_id = left_modes.get(i).copied().unwrap_or(1);
+                let (meter_name, param) = parse_meter_name(name);
+                MeterConfig {
+                    name: meter_name,
+                    param,
+                    mode: MeterMode::from_i32(mode_id),
+                }
+            })
+            .collect();
+
+        // Right column
+        let right_configs: Vec<MeterConfig> = right_meters
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let mode_id = right_modes.get(i).copied().unwrap_or(1);
+                let (meter_name, param) = parse_meter_name(name);
+                MeterConfig {
+                    name: meter_name,
+                    param,
+                    mode: MeterMode::from_i32(mode_id),
+                }
+            })
+            .collect();
+
+        self.header_columns.push(left_configs);
+        self.header_columns.push(right_configs);
     }
 
     /// Parse a single setting line
@@ -623,18 +967,104 @@ impl Settings {
             "strip_exe_from_cmdline" => {
                 self.strip_exe_from_cmdline = value == "1";
             }
+            "header_layout" => {
+                // Try to parse as name first, then as numeric index
+                if let Some(layout) = HeaderLayout::from_name(value) {
+                    self.header_layout = layout;
+                } else if let Ok(idx) = value.parse::<usize>() {
+                    if let Some(layout) = HeaderLayout::from_index(idx) {
+                        self.header_layout = layout;
+                    }
+                }
+            }
+            "sort_key" => {
+                // Global sort key (for legacy format or first screen)
+                if let Some(field) = ProcessField::from_name(value) {
+                    self.sort_key = Some(field);
+                    // Also update first screen
+                    if !self.screens.is_empty() {
+                        self.screens[0].sort_key = field;
+                    }
+                } else if let Ok(id) = value.parse::<u32>() {
+                    if let Some(field) = ProcessField::from_id(id) {
+                        self.sort_key = Some(field);
+                        if !self.screens.is_empty() {
+                            self.screens[0].sort_key = field;
+                        }
+                    }
+                }
+            }
+            "tree_sort_key" => {
+                if let Some(field) = ProcessField::from_name(value) {
+                    if !self.screens.is_empty() {
+                        self.screens[0].tree_sort_key = field;
+                    }
+                } else if let Ok(id) = value.parse::<u32>() {
+                    if let Some(field) = ProcessField::from_id(id) {
+                        if !self.screens.is_empty() {
+                            self.screens[0].tree_sort_key = field;
+                        }
+                    }
+                }
+            }
+            "sort_direction" => {
+                if let Ok(dir) = value.parse::<i32>() {
+                    self.sort_descending = dir < 0;
+                    if !self.screens.is_empty() {
+                        self.screens[0].direction = if dir >= 0 { 1 } else { -1 };
+                    }
+                }
+            }
+            "tree_sort_direction" => {
+                if let Ok(dir) = value.parse::<i32>() {
+                    if !self.screens.is_empty() {
+                        self.screens[0].tree_direction = if dir >= 0 { 1 } else { -1 };
+                    }
+                }
+            }
+            "tree_view_always_by_pid" => {
+                self.tree_view_always_by_pid = value == "1";
+                if !self.screens.is_empty() {
+                    self.screens[0].tree_view_always_by_pid = value == "1";
+                }
+            }
+            "all_branches_collapsed" => {
+                self.all_branches_collapsed = value == "1";
+                if !self.screens.is_empty() {
+                    self.screens[0].all_branches_collapsed = value == "1";
+                }
+            }
+            "cpu_count_from_one" => {
+                // Alternative name used in some configs
+                self.count_cpus_from_one = value == "1";
+            }
+            "show_cpu_temperature" => {
+                self.show_cpu_temperature = value == "1";
+            }
+            "degree_fahrenheit" => {
+                self.degree_fahrenheit = value == "1";
+            }
+            "hide_running_in_container" => {
+                self.hide_running_in_container = value == "1";
+            }
+            "shadow_distribution_path_prefix" => {
+                // Alternative name from C htop
+                self.shadow_dist_path_prefix = value == "1";
+            }
             _ => {}
         }
     }
 
     /// Write settings to the config file
+    /// Matches C htop's Settings_write() format
     pub fn write(&self) -> anyhow::Result<()> {
         if self.readonly {
             return Ok(());
         }
 
-        let path = match &self.filename {
-            Some(p) => p.clone(),
+        // Get the write path (prefer XDG location, handles migration from legacy)
+        let path = match self.get_write_path() {
+            Some(p) => p,
             None => return Ok(()),
         };
 
@@ -643,30 +1073,29 @@ impl Settings {
             fs::create_dir_all(parent)?;
         }
 
-        let mut file = fs::File::create(&path)?;
+        // Write to temporary file first for atomic operation
+        let temp_path = path.with_extension("tmp");
+        let mut file = fs::File::create(&temp_path)?;
 
-        writeln!(file, "# htop-rs configuration file")?;
-        writeln!(file, "# Automatically generated by htop-rs")?;
-        writeln!(file)?;
+        // Header comment (matches C htop)
+        writeln!(
+            file,
+            "# Beware! This file is rewritten by htop when settings are changed in the interface."
+        )?;
+        writeln!(
+            file,
+            "# The parser is also very primitive, and not human-friendly."
+        )?;
 
-        writeln!(file, "delay={}", self.delay)?;
-        writeln!(file, "color_scheme={}", self.color_scheme as i32)?;
+        // Version info
+        writeln!(file, "htop_version=3.3.0")?;
         writeln!(
             file,
-            "enable_mouse={}",
-            if self.enable_mouse { 1 } else { 0 }
+            "config_reader_min_version={}",
+            CONFIG_READER_MIN_VERSION
         )?;
-        writeln!(file, "tree_view={}", if self.tree_view { 1 } else { 0 })?;
-        writeln!(
-            file,
-            "show_program_path={}",
-            if self.show_program_path { 1 } else { 0 }
-        )?;
-        writeln!(
-            file,
-            "shadow_other_users={}",
-            if self.shadow_other_users { 1 } else { 0 }
-        )?;
+
+        // Boolean settings (in C htop order)
         writeln!(
             file,
             "hide_kernel_threads={}",
@@ -679,8 +1108,38 @@ impl Settings {
         )?;
         writeln!(
             file,
+            "hide_running_in_container={}",
+            if self.hide_running_in_container { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "shadow_other_users={}",
+            if self.shadow_other_users { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "show_thread_names={}",
+            if self.show_thread_names { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "show_program_path={}",
+            if self.show_program_path { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
             "highlight_base_name={}",
             if self.highlight_base_name { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "highlight_deleted_exe={}",
+            if self.highlight_deleted_exe { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "shadow_distribution_path_prefix={}",
+            if self.shadow_dist_path_prefix { 1 } else { 0 }
         )?;
         writeln!(
             file,
@@ -704,12 +1163,33 @@ impl Settings {
         )?;
         writeln!(
             file,
+            "find_comm_in_cmdline={}",
+            if self.find_comm_in_cmdline { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "strip_exe_from_cmdline={}",
+            if self.strip_exe_from_cmdline { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "show_merged_command={}",
+            if self.show_merged_command { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "header_margin={}",
+            if self.header_margin { 1 } else { 0 }
+        )?;
+        writeln!(file, "screen_tabs={}", if self.screen_tabs { 1 } else { 0 })?;
+        writeln!(
+            file,
             "detailed_cpu_time={}",
             if self.detailed_cpu_time { 1 } else { 0 }
         )?;
         writeln!(
             file,
-            "count_cpus_from_one={}",
+            "cpu_count_from_one={}",
             if self.count_cpus_from_one { 1 } else { 0 }
         )?;
         writeln!(
@@ -724,60 +1204,82 @@ impl Settings {
         )?;
         writeln!(
             file,
-            "header_margin={}",
-            if self.header_margin { 1 } else { 0 }
-        )?;
-        writeln!(file, "screen_tabs={}", if self.screen_tabs { 1 } else { 0 })?;
-        writeln!(
-            file,
-            "show_thread_names={}",
-            if self.show_thread_names { 1 } else { 0 }
+            "show_cpu_temperature={}",
+            if self.show_cpu_temperature { 1 } else { 0 }
         )?;
         writeln!(
             file,
-            "account_guest_in_cpu_meter={}",
-            if self.account_guest_in_cpu_meter {
-                1
-            } else {
-                0
-            }
-        )?;
-        writeln!(
-            file,
-            "show_cached_memory={}",
-            if self.show_cached_memory { 1 } else { 0 }
+            "degree_fahrenheit={}",
+            if self.degree_fahrenheit { 1 } else { 0 }
         )?;
         writeln!(
             file,
             "update_process_names={}",
             if self.update_process_names { 1 } else { 0 }
         )?;
+        writeln!(
+            file,
+            "account_guest_in_cpu_meter={}",
+            if self.account_guest_in_cpu_meter { 1 } else { 0 }
+        )?;
+        writeln!(
+            file,
+            "enable_mouse={}",
+            if self.enable_mouse { 1 } else { 0 }
+        )?;
+
+        // Integer settings
+        writeln!(file, "delay={}", self.delay)?;
+        writeln!(file, "color_scheme={}", self.color_scheme as i32)?;
         writeln!(file, "hide_function_bar={}", self.hide_function_bar)?;
-        writeln!(
-            file,
-            "show_merged_command={}",
-            if self.show_merged_command { 1 } else { 0 }
-        )?;
-        writeln!(
-            file,
-            "highlight_deleted_exe={}",
-            if self.highlight_deleted_exe { 1 } else { 0 }
-        )?;
-        writeln!(
-            file,
-            "shadow_dist_path_prefix={}",
-            if self.shadow_dist_path_prefix { 1 } else { 0 }
-        )?;
-        writeln!(
-            file,
-            "find_comm_in_cmdline={}",
-            if self.find_comm_in_cmdline { 1 } else { 0 }
-        )?;
-        writeln!(
-            file,
-            "strip_exe_from_cmdline={}",
-            if self.strip_exe_from_cmdline { 1 } else { 0 }
-        )?;
+
+        // Header layout
+        writeln!(file, "header_layout={}", self.header_layout.name())?;
+
+        // Meter columns
+        for (idx, column) in self.header_columns.iter().enumerate() {
+            // Write meter names
+            let meter_names: Vec<String> = column
+                .iter()
+                .map(|m| format_meter_name(&m.name, m.param))
+                .collect();
+            writeln!(file, "column_meters_{}={}", idx, meter_names.join(" "))?;
+
+            // Write meter modes
+            let meter_modes: Vec<String> = column.iter().map(|m| m.mode.to_i32().to_string()).collect();
+            writeln!(file, "column_meter_modes_{}={}", idx, meter_modes.join(" "))?;
+        }
+
+        // Screen definitions
+        for screen in &self.screens {
+            // Screen header: "screen:Name=FIELD1 FIELD2 ..."
+            let field_names: Vec<&str> = screen.fields.iter().map(|f| f.name()).collect();
+            writeln!(file, "screen:{}={}", screen.heading, field_names.join(" "))?;
+
+            // Screen properties
+            writeln!(file, ".sort_key={}", screen.sort_key.name())?;
+            writeln!(file, ".tree_sort_key={}", screen.tree_sort_key.name())?;
+            writeln!(file, ".sort_direction={}", screen.direction)?;
+            writeln!(file, ".tree_sort_direction={}", screen.tree_direction)?;
+            writeln!(file, ".tree_view={}", if screen.tree_view { 1 } else { 0 })?;
+            writeln!(
+                file,
+                ".tree_view_always_by_pid={}",
+                if screen.tree_view_always_by_pid { 1 } else { 0 }
+            )?;
+            writeln!(
+                file,
+                ".all_branches_collapsed={}",
+                if screen.all_branches_collapsed { 1 } else { 0 }
+            )?;
+        }
+
+        // Ensure file is fully written
+        file.sync_all()?;
+        drop(file);
+
+        // Atomic rename
+        fs::rename(&temp_path, &path)?;
 
         Ok(())
     }
@@ -807,4 +1309,74 @@ mod dirs {
     pub fn home_dir() -> Option<PathBuf> {
         std::env::var("HOME").ok().map(PathBuf::from)
     }
+}
+
+/// Config file search result
+struct ConfigSearchResult {
+    path: PathBuf,
+    readonly: bool,
+}
+
+/// Find config file following C htop's search order:
+/// 1. $HTOPRC environment variable
+/// 2. $XDG_CONFIG_HOME/htop/htoprc
+/// 3. Legacy $HOME/.htoprc (will be migrated)
+/// 4. /etc/htoprc (read-only fallback)
+fn find_config_path() -> Option<ConfigSearchResult> {
+    // 1. Check HTOPRC environment variable
+    if let Ok(htoprc) = std::env::var("HTOPRC") {
+        let path = PathBuf::from(&htoprc);
+        if path.exists() {
+            return Some(ConfigSearchResult {
+                path,
+                readonly: false,
+            });
+        }
+        // HTOPRC is set but doesn't exist - use it as target for writing
+        return Some(ConfigSearchResult {
+            path,
+            readonly: false,
+        });
+    }
+
+    // 2. Check XDG_CONFIG_HOME/htop/htoprc
+    if let Some(config_dir) = dirs::config_dir() {
+        let xdg_path = config_dir.join("htop").join("htoprc");
+        if xdg_path.exists() {
+            return Some(ConfigSearchResult {
+                path: xdg_path,
+                readonly: false,
+            });
+        }
+
+        // 3. Check legacy ~/.htoprc
+        if let Some(home) = dirs::home_dir() {
+            let legacy_path = home.join(".htoprc");
+            if legacy_path.exists() {
+                // Legacy file exists - we'll use it but prefer XDG path for writing
+                // (migration happens on write)
+                return Some(ConfigSearchResult {
+                    path: legacy_path,
+                    readonly: false,
+                });
+            }
+        }
+
+        // XDG path doesn't exist but is our preferred location
+        return Some(ConfigSearchResult {
+            path: xdg_path,
+            readonly: false,
+        });
+    }
+
+    // 4. Fall back to system-wide config (read-only)
+    let etc_path = PathBuf::from("/etc/htoprc");
+    if etc_path.exists() {
+        return Some(ConfigSearchResult {
+            path: etc_path,
+            readonly: true,
+        });
+    }
+
+    None
 }

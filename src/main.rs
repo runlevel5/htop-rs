@@ -179,8 +179,11 @@ fn main() -> Result<()> {
 
     let mut machine = Machine::new(user_id);
 
-    // Create settings
+    // Create settings and load from config file
     let mut settings = Settings::new();
+    if let Err(e) = settings.load() {
+        eprintln!("Warning: Failed to load settings: {}", e);
+    }
 
     // Apply command line arguments
     if args.no_color {
@@ -242,13 +245,18 @@ fn main() -> Result<()> {
     // Main loop (platform::scan is called inside run())
     screen_manager.run(&mut crt, &mut machine, &RUNNING)?;
 
+    // Get the updated settings back from screen manager
+    let settings = screen_manager.take_settings();
+
     // Cleanup
     crt.done();
     platform::done();
 
     // Save settings if changed
     if settings.changed {
-        settings.write()?;
+        if let Err(e) = settings.write() {
+            eprintln!("Warning: Failed to save settings: {}", e);
+        }
     }
 
     Ok(())

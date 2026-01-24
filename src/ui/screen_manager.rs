@@ -123,6 +123,17 @@ impl ScreenManager {
         }
     }
 
+    /// Take the settings out of ScreenManager (consumes internal settings)
+    /// Used at the end of run() to return the potentially modified settings
+    pub fn take_settings(self) -> Settings {
+        self.settings
+    }
+
+    /// Get a reference to the current settings
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
     /// Add a panel (for compatibility - we have a single main panel)
     pub fn add_panel(&mut self, panel: MainPanel) {
         self.main_panel = panel;
