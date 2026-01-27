@@ -198,6 +198,7 @@ impl MainPanel {
             self.filter = Some(filter.to_string());
         }
         self.invalidate_display_list();
+        self.needs_redraw = true;
     }
 
     /// Clear the filter
@@ -208,6 +209,7 @@ impl MainPanel {
         self.following = false;
         self.selection_color = ColorElement::PanelSelectionFocus;
         self.invalidate_display_list();
+        self.needs_redraw = true;
     }
 
     /// Check if filtering is active (has filter text)
@@ -272,11 +274,10 @@ impl MainPanel {
     }
 
     /// Invalidate the cached display list (call when filters change)
+    /// Note: This only invalidates the cache. Call `set_needs_redraw(true)` separately
+    /// if a full redraw is needed, or let draw() handle partial updates.
     pub fn invalidate_display_list(&mut self) {
         self.display_list_valid = false;
-        // When display list changes (filter/sort/etc), we need a full redraw
-        // since the set of visible processes may have changed
-        self.needs_redraw = true;
     }
 
     /// Rebuild the cached display list (like C htop's Table_rebuildPanel)
@@ -1816,6 +1817,7 @@ impl MainPanel {
                     self.inc_search.clear();
                     self.filter = None;
                     self.invalidate_display_list();
+                    self.needs_redraw = true;
                 }
                 self.inc_search.stop();
                 // Reset to normal selection color when exiting search/filter without active filter
@@ -1831,6 +1833,7 @@ impl MainPanel {
                 if is_filter {
                     self.filter = None;
                     self.invalidate_display_list();
+                    self.needs_redraw = true;
                 }
                 // Reset selection color since text is cleared
                 self.following = false;
@@ -1848,6 +1851,7 @@ impl MainPanel {
                         Some(self.inc_search.text.clone())
                     };
                     self.invalidate_display_list();
+                    self.needs_redraw = true;
                 }
                 self.do_incremental_search(machine);
                 HandlerResult::Handled
@@ -1858,6 +1862,7 @@ impl MainPanel {
                     // Update filter in real-time
                     self.filter = Some(self.inc_search.text.clone());
                     self.invalidate_display_list();
+                    self.needs_redraw = true;
                 }
                 self.do_incremental_search(machine);
                 HandlerResult::Handled
@@ -1873,6 +1878,7 @@ impl MainPanel {
                         Some(self.inc_search.text.clone())
                     };
                     self.invalidate_display_list();
+                    self.needs_redraw = true;
                     // Keep yellow "following" selection when filter is active
                     if self.filter.is_some() {
                         self.following = true;

@@ -222,6 +222,7 @@ impl ScreenManager {
             machine.processes.sort_by(field, !sort_descending);
         }
         self.main_panel.invalidate_display_list();
+        self.main_panel.needs_redraw = true;
     }
 
     /// Take the settings out of ScreenManager (consumes internal settings)
@@ -620,21 +621,6 @@ impl ScreenManager {
                 crt.addstr_raw("PAUSED");
                 crt.attrset(A_NORMAL);
             }
-
-            // Show update interval counter on the right side (debug builds only)
-            #[cfg(debug_assertions)]
-            {
-                let delay_ms = self.settings.delay as u64 * 100;
-                let elapsed_ms = self.last_update.elapsed().as_millis() as u64;
-                let remaining_ms = delay_ms.saturating_sub(elapsed_ms);
-                let remaining_secs = remaining_ms as f64 / 1000.0;
-                let counter_str = format!("{:.1}s", remaining_secs);
-                let counter_x = crt.width() - counter_str.len() as i32;
-                crt.mv(y, counter_x);
-                crt.attrset(crt.color(ColorElement::MeterText));
-                crt.addstr_raw(&counter_str);
-                crt.attrset(A_NORMAL);
-            }
         }
 
         crt.refresh();
@@ -724,7 +710,10 @@ impl ScreenManager {
             }
 
             // Determine if we should update (time-based, like C htop checkRecalculation)
+            // Also skip scan entirely when user is actively interacting (sort_timeout > 0)
+            // to keep UI responsive during rapid key presses
             let should_update = !self.paused
+                && self.sort_timeout == 0
                 && self.last_update.elapsed()
                     >= Duration::from_millis(self.settings.delay as u64 * 100);
 
@@ -898,16 +887,8 @@ impl ScreenManager {
                 if self.sort_timeout > 0 {
                     self.sort_timeout -= 1;
                 }
-                // In debug builds, always redraw to update the countdown timer
-                // In release builds, skip redraw when there's no input
-                #[cfg(debug_assertions)]
-                {
-                    redraw = true;
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    redraw = false;
-                }
+                // Skip redraw when there's no input and no data update
+                redraw = false;
             }
         }
 
@@ -1377,6 +1358,7 @@ impl ScreenManager {
             machine.processes.sort_by(screen.sort_key, ascending);
         }
         self.main_panel.invalidate_display_list();
+        self.main_panel.needs_redraw = true;
     }
 
     /// Toggle tree view - matches C htop actionToggleTreeView behavior
