@@ -70,6 +70,12 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Profiling: optimized but with debug symbols
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+
 # Optimize dependencies even in debug builds for better dev experience
 [profile.dev.package."*"]
 opt-level = 2
