@@ -280,11 +280,8 @@ impl Panel {
         };
 
         // Fill header line
-        crt.mv(self.y, self.x);
         crt.attrset(attr);
-        for _ in 0..self.w {
-            crt.addch_raw(' ' as u32);
-        }
+        crt.hline(self.y, self.x, ' ' as u32, self.w);
 
         // Draw header text
         if !self.header.is_empty() {

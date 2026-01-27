@@ -138,11 +138,8 @@ impl FunctionBar {
         let disabled_color = crt.color(ColorElement::Disabled);
 
         // First fill entire line with spaces in FUNCTION_BAR color
-        crt.mv(y, 0);
         crt.attrset(bar_color);
-        for _ in 0..width {
-            crt.addch_raw(' ' as u32);
-        }
+        crt.hline(y, 0, ' ' as u32, width);
 
         // Draw each key-label pair consecutively (no padding between pairs)
         let mut x = 0i32;
@@ -191,11 +188,8 @@ impl FunctionBar {
         let disabled_color = crt.color(ColorElement::Disabled);
 
         // First fill entire line with spaces in FUNCTION_BAR color
-        crt.mv(y, 0);
         crt.attrset(bar_color);
-        for _ in 0..width {
-            crt.addch_raw(' ' as u32);
-        }
+        crt.hline(y, 0, ' ' as u32, width);
 
         // Draw each key-label pair consecutively (no padding between pairs)
         let mut x = 0i32;
