@@ -1120,10 +1120,13 @@ pub fn show_strace(crt: &mut Crt, pid: i32, command: &str) {
                         // Search from current+1 to end, then wrap to beginning
                         for offset in 0..len {
                             let i = (start + offset) % len;
-                            let idx = filtered_indices[i];
-                            if lines[idx].to_lowercase().contains(&search_lower) {
-                                selected = i as i32;
-                                break;
+                            if let Some(&idx) = filtered_indices.get(i) {
+                                if let Some(line) = lines.get(idx) {
+                                    if line.to_lowercase().contains(&search_lower) {
+                                        selected = i as i32;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -1142,10 +1145,13 @@ pub fn show_strace(crt: &mut Crt, pid: i32, command: &str) {
                             // Search backwards with wrap
                             for offset in 0..len {
                                 let i = (start + len - offset) % len;
-                                let idx = filtered_indices[i];
-                                if lines[idx].to_lowercase().contains(&search_lower) {
-                                    selected = i as i32;
-                                    break;
+                                if let Some(&idx) = filtered_indices.get(i) {
+                                    if let Some(line) = lines.get(idx) {
+                                        if line.to_lowercase().contains(&search_lower) {
+                                            selected = i as i32;
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }

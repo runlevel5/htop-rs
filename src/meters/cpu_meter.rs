@@ -834,7 +834,9 @@ impl Meter for CpuMeter {
                                 // Record value in this CPU's graph data
                                 {
                                     let mut graph_data = self.graph_data.borrow_mut();
-                                    graph_data[i].record(normalized, settings.delay * 100);
+                                    if let Some(gd) = graph_data.get_mut(i) {
+                                        gd.record(normalized, settings.delay * 100);
+                                    }
                                 }
 
                                 // Calculate position in grid
@@ -853,15 +855,17 @@ impl Meter for CpuMeter {
                                 let caption = format!("{:>3}", display_id);
 
                                 let graph_data = self.graph_data.borrow();
-                                draw_graph(
-                                    crt,
-                                    col_x,
-                                    row_y,
-                                    col_width,
-                                    graph_height,
-                                    &graph_data[i],
-                                    &caption,
-                                );
+                                if let Some(gd) = graph_data.get(i) {
+                                    draw_graph(
+                                        crt,
+                                        col_x,
+                                        row_y,
+                                        col_width,
+                                        graph_height,
+                                        gd,
+                                        &caption,
+                                    );
+                                }
                             }
                         }
                     }
@@ -1059,7 +1063,9 @@ impl Meter for CpuMeter {
                                 {
                                     let mut stacked_graph_data =
                                         self.stacked_graph_data.borrow_mut();
-                                    stacked_graph_data[i].record(segments, settings.delay * 100);
+                                    if let Some(sgd) = stacked_graph_data.get_mut(i) {
+                                        sgd.record(segments, settings.delay * 100);
+                                    }
                                 }
 
                                 // Calculate position in grid
@@ -1078,16 +1084,18 @@ impl Meter for CpuMeter {
                                 let caption = format!("{:>3}", display_id);
 
                                 let stacked_graph_data = self.stacked_graph_data.borrow();
-                                draw_cpu_stacked_graph(
-                                    crt,
-                                    col_x,
-                                    row_y,
-                                    col_width,
-                                    graph_height,
-                                    &stacked_graph_data[i],
-                                    &caption,
-                                    &segment_colors,
-                                );
+                                if let Some(sgd) = stacked_graph_data.get(i) {
+                                    draw_cpu_stacked_graph(
+                                        crt,
+                                        col_x,
+                                        row_y,
+                                        col_width,
+                                        graph_height,
+                                        sgd,
+                                        &caption,
+                                        &segment_colors,
+                                    );
+                                }
                             }
                         }
                     }

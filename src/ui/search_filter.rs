@@ -143,8 +143,10 @@ impl SearchFilterState {
         }
         let search_lower = self.search_text.to_lowercase();
         for (i, &idx) in filtered_indices.iter().enumerate() {
-            if items[idx].to_lowercase().contains(&search_lower) {
-                return Some(i);
+            if let Some(item) = items.get(idx) {
+                if item.to_lowercase().contains(&search_lower) {
+                    return Some(i);
+                }
             }
         }
         None
@@ -167,9 +169,12 @@ impl SearchFilterState {
         // Search from current+1 to end, then from 0 to current
         for offset in 1..=len {
             let i = (current + offset) % len;
-            let idx = filtered_indices[i];
-            if items[idx].to_lowercase().contains(&search_lower) {
-                return Some(i);
+            if let Some(&idx) = filtered_indices.get(i) {
+                if let Some(item) = items.get(idx) {
+                    if item.to_lowercase().contains(&search_lower) {
+                        return Some(i);
+                    }
+                }
             }
         }
         None
@@ -192,9 +197,12 @@ impl SearchFilterState {
         // Search from current-1 backwards, wrapping around
         for offset in 1..=len {
             let i = (current + len - offset) % len;
-            let idx = filtered_indices[i];
-            if items[idx].to_lowercase().contains(&search_lower) {
-                return Some(i);
+            if let Some(&idx) = filtered_indices.get(i) {
+                if let Some(item) = items.get(idx) {
+                    if item.to_lowercase().contains(&search_lower) {
+                        return Some(i);
+                    }
+                }
             }
         }
         None
