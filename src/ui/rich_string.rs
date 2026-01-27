@@ -71,22 +71,25 @@ impl RichString {
 
     /// Append a string with attributes
     pub fn append(&mut self, text: &str, attr: attr_t) {
+        self.chars.reserve(text.len());
         for ch in text.chars() {
-            self.append_char(ch, attr);
+            self.chars.push(RichChar::new(ch, attr));
         }
     }
 
     /// Append first n characters of a string with attributes
     pub fn append_n(&mut self, text: &str, attr: attr_t, n: usize) {
+        self.chars.reserve(n);
         for ch in text.chars().take(n) {
-            self.append_char(ch, attr);
+            self.chars.push(RichChar::new(ch, attr));
         }
     }
 
     /// Append a character repeated n times
     pub fn append_chr(&mut self, ch: char, attr: attr_t, n: usize) {
+        self.chars.reserve(n);
         for _ in 0..n {
-            self.append_char(ch, attr);
+            self.chars.push(RichChar::new(ch, attr));
         }
     }
 

@@ -110,10 +110,7 @@ pub fn show_help(crt: &mut Crt, settings: &Settings) {
     // Fill screen with HELP_BOLD background (like C htop)
     crt.attrset(bold);
     for i in 0..height - 1 {
-        crt.mv(i, 0);
-        for _ in 0..width {
-            crt.addch_raw(' ' as u32);
-        }
+        crt.hline(i, 0, ' ' as u32, width);
     }
 
     let mut line = 0;

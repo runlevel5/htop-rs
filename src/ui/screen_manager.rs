@@ -298,26 +298,12 @@ impl ScreenManager {
         let pause_width = if crt.utf8 { 4 } else { 8 };
         let paused_color = crt.color(ColorElement::ScreensCurText);
 
-        // Prepare tab info
-        let tabs: Vec<_> = self
-            .settings
-            .screens
-            .iter()
-            .enumerate()
-            .map(|(i, screen)| {
-                let is_current = i == self.settings.active_screen;
-                (screen.heading.clone(), is_current)
-            })
-            .collect();
-
         let mut x = SCREEN_TAB_MARGIN_LEFT;
 
         // Fill the entire tab row with the reset color background first
         crt.attrset(reset_color);
         crt.mv(y, 0);
-        for _ in 0..max_x {
-            crt.addch_raw(' ' as u32);
-        }
+        crt.hline(y, 0, ' ' as u32, max_x);
 
         if x >= max_x {
             return;
@@ -341,14 +327,15 @@ impl ScreenManager {
             }
         }
 
-        // Draw all tabs
-        for (i, (heading, is_current)) in tabs.iter().enumerate() {
-            let border_attr = if *is_current {
+        // Draw all tabs - iterate directly without allocating
+        for (i, screen) in self.settings.screens.iter().enumerate() {
+            let is_current = i == self.settings.active_screen;
+            let border_attr = if is_current {
                 cur_border_attr
             } else {
                 other_border_attr
             };
-            let text_attr = if *is_current {
+            let text_attr = if is_current {
                 cur_text_attr
             } else {
                 other_text_attr
@@ -365,10 +352,10 @@ impl ScreenManager {
             }
 
             // Draw heading text
-            let name_width = heading.len().min((max_x - x) as usize);
+            let name_width = screen.heading.len().min((max_x - x) as usize);
             crt.attrset(text_attr);
             crt.mv(y, x);
-            crt.addnstr_raw(heading, name_width as i32);
+            crt.addnstr_raw(&screen.heading, name_width as i32);
             x += name_width as i32;
 
             if x >= max_x {
@@ -382,7 +369,7 @@ impl ScreenManager {
             x += 1;
 
             // Space between tabs
-            if i < tabs.len() - 1 {
+            if i < self.settings.screens.len() - 1 {
                 x += 1;
             }
 

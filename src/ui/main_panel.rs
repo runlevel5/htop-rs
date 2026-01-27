@@ -140,6 +140,10 @@ pub struct MainPanel {
     // This avoids filtering on every draw, matching C htop's Table_rebuildPanel
     cached_display_indices: Vec<usize>,
     display_list_valid: bool,
+
+    // Reusable buffers to avoid allocations in hot paths
+    shown_indices: Vec<usize>, // Reused in draw() to track drawn processes
+    fmt_buf: String,           // Reused for field formatting
 }
 
 impl MainPanel {
@@ -181,6 +185,8 @@ impl MainPanel {
             pid_search: None,
             cached_display_indices: Vec::new(),
             display_list_valid: false,
+            shown_indices: Vec::with_capacity(64), // Typical visible rows
+            fmt_buf: String::with_capacity(64),    // Typical field width
         }
     }
 
@@ -276,21 +282,21 @@ impl MainPanel {
     /// Rebuild the cached display list (like C htop's Table_rebuildPanel)
     /// This filters processes once per update cycle instead of on every draw
     pub fn rebuild_display_list(&mut self, machine: &Machine, settings: &Settings) {
-        use std::collections::HashMap;
-
         self.cached_display_indices.clear();
 
-        // Build PID→index map for O(1) lookups (avoids O(n²) linear search)
-        // This is built fresh each time since indices change after sorting
-        let pid_to_idx: HashMap<i32, usize> = machine
-            .processes
-            .processes
-            .iter()
-            .enumerate()
-            .map(|(idx, p)| (p.pid, idx))
-            .collect();
-
         if self.tree_view {
+            use std::collections::HashMap;
+
+            // Build PID→index map for O(1) lookups (avoids O(n²) linear search)
+            // Only needed in tree view mode for looking up PIDs from tree_display_order
+            let pid_to_idx: HashMap<i32, usize> = machine
+                .processes
+                .processes
+                .iter()
+                .enumerate()
+                .map(|(idx, p)| (p.pid, idx))
+                .collect();
+
             // In tree view, iterate tree_display_order directly (PIDs in tree order)
             // We use the PID→index map to avoid the O(n²) lookup that iter_tree() does
             for &pid in &machine.processes.tree_display_order {
@@ -375,11 +381,8 @@ impl MainPanel {
         };
 
         // Fill the line with the header attribute (starting at self.x, not 0)
-        crt.mv(y, self.x);
         crt.attrset(header_attr);
-        for _ in 0..self.w {
-            crt.addch_raw(' ' as u32);
-        }
+        crt.hline(y, self.x, ' ' as u32, self.w);
         crt.attrset(A_NORMAL);
 
         // Draw field titles with highlighting for sort column
@@ -1571,8 +1574,8 @@ impl MainPanel {
         // For scroll changes, needsRedraw is set by PANEL_SCROLL macro in C htop,
         // so we don't need special handling here.
 
-        // Collect indices of drawn processes to mark was_shown afterward
-        let mut shown_indices: Vec<usize> = Vec::new();
+        // Clear and reuse shown_indices buffer to track drawn processes
+        self.shown_indices.clear();
 
         if self.needs_redraw {
             // Full redraw: draw all visible rows
@@ -1598,14 +1601,11 @@ impl MainPanel {
                             active_cpus,
                             &machine.field_widths,
                         );
-                        shown_indices.push(process_idx);
+                        self.shown_indices.push(process_idx);
                     }
                 } else {
                     // Empty line
-                    crt.mv(y, self.x);
-                    for _ in 0..self.w {
-                        crt.addch_raw(' ' as u32);
-                    }
+                    crt.hline(y, self.x, ' ' as u32, self.w);
                 }
             }
         } else {
@@ -1641,7 +1641,7 @@ impl MainPanel {
                             active_cpus,
                             &machine.field_widths,
                         );
-                        shown_indices.push(process_idx);
+                        self.shown_indices.push(process_idx);
                     }
                 }
             }
@@ -1667,14 +1667,14 @@ impl MainPanel {
                             active_cpus,
                             &machine.field_widths,
                         );
-                        shown_indices.push(process_idx);
+                        self.shown_indices.push(process_idx);
                     }
                 }
             }
         }
 
         // Mark all drawn processes as was_shown (for highlight_changes tomb feature)
-        for idx in shown_indices {
+        for &idx in &self.shown_indices {
             if let Some(process) = machine.processes.processes.get_mut(idx) {
                 process.was_shown = true;
             }
