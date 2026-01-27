@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_bar, draw_graph, draw_led, GraphData, Meter, MeterMode};
+use super::{draw_bar_with_text, draw_graph, draw_led, BarSegment, GraphData, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -93,8 +93,10 @@ impl Meter for DiskIOMeter {
     }
 
     fn update(&mut self, machine: &Machine) {
-        // Check if we have valid data
-        if machine.disk_io_last_update == 0 {
+        // Check if we have valid rate data
+        // disk_io_last_update > 0 means we've scanned at least once
+        // disk_io_num_disks > 0 means we found disks and have valid data
+        if machine.disk_io_last_update == 0 || machine.disk_io_num_disks == 0 {
             self.status = RateStatus::Init;
             return;
         }
@@ -108,7 +110,7 @@ impl Meter for DiskIOMeter {
             return;
         }
 
-        // We have valid data
+        // We have valid data (rates may be 0 if disk is idle, that's fine)
         self.status = RateStatus::Data;
         self.read_rate = machine.disk_io_read_rate;
         self.write_rate = machine.disk_io_write_rate;
@@ -136,84 +138,57 @@ impl Meter for DiskIOMeter {
     ) {
         match self.mode {
             MeterMode::Bar => {
-                // Draw caption "Dsk" (exactly 3 chars)
-                let caption_attr = crt.color(ColorElement::MeterText);
-                let reset_attr = crt.color(ColorElement::ResetColor);
-                let value_attr = crt.color(ColorElement::MeterValue);
-
-                crt.with_window(|win| {
-                    let _ = win.mv(y, x);
-                    let _ = win.attrset(caption_attr);
-                    let _ = win.addstr("Dsk");
-                });
-
-                // Bar area starts after caption
-                let bar_x = x + 3;
-                let bar_width = width - 3;
-
-                if bar_width < 4 {
-                    crt.with_window(|win| {
-                        let _ = win.attrset(reset_attr);
-                    });
-                    return;
-                }
+                // C htop style: single bar with text inside
+                // Format: "Dsk[|||||      r: 0KiB/s w: 0KiB/s 0.0%]"
 
                 // Handle non-data states
-                if self.status != RateStatus::Data {
-                    let text = match self.status {
-                        RateStatus::Init => "init",
-                        RateStatus::Stale => "stale",
-                        RateStatus::NoData => "no data",
+                let text = if self.status != RateStatus::Data {
+                    match self.status {
+                        RateStatus::Init => "init".to_string(),
+                        RateStatus::Stale => "stale".to_string(),
+                        RateStatus::NoData => "no data".to_string(),
                         RateStatus::Data => unreachable!(),
-                    };
-                    crt.with_window(|win| {
-                        let _ = win.attrset(value_attr);
-                        let _ = win.mvaddnstr(y, bar_x, text, bar_width);
-                        let _ = win.attrset(reset_attr);
-                    });
-                    return;
-                }
+                    }
+                } else {
+                    // Format: "r: <rate>iB/s w: <rate>iB/s <util>%"
+                    let read_str = Self::human_unit(self.read_rate);
+                    let write_str = Self::human_unit(self.write_rate);
+                    format!(
+                        "r:{}iB/s w:{}iB/s {:.1}%",
+                        read_str, write_str, self.utilization
+                    )
+                };
 
-                // Split into two half-width bars like C htop
-                let col_width = bar_width / 2;
-                let diff = bar_width % 2;
-
-                // First bar: Read/Write rate (uses ioread/iowrite colors)
+                // Bar segments: read rate + write rate (stacked)
                 // Normalize rates for display - use a logarithmic scale or fixed max
-                // For simplicity, use a fixed max of 1GB/s per direction
                 const MAX_RATE: f64 = 1024.0 * 1024.0 * 1024.0; // 1 GB/s
                 let read_norm = (self.read_rate / MAX_RATE).min(1.0);
                 let write_norm = (self.write_rate / MAX_RATE).min(1.0);
 
-                // Draw rate bar
-                let rate_values = [
-                    (read_norm, crt.color(ColorElement::MeterValueIORead) as i32),
-                    (
-                        write_norm,
-                        crt.color(ColorElement::MeterValueIOWrite) as i32,
-                    ),
+                let segments = [
+                    BarSegment {
+                        value: read_norm,
+                        attr: crt.color(ColorElement::MeterValueIORead),
+                    },
+                    BarSegment {
+                        value: write_norm,
+                        attr: crt.color(ColorElement::MeterValueIOWrite),
+                    },
                 ];
-                draw_bar(crt, bar_x, y, col_width, &rate_values, 1.0);
 
-                // Second bar: Utilization
-                let util_values = [(
-                    self.utilization_norm,
-                    crt.color(ColorElement::MeterValueNotice) as i32,
-                )];
-                draw_bar(
-                    crt,
-                    bar_x + col_width + diff,
-                    y,
-                    col_width,
-                    &util_values,
-                    1.0,
-                );
-
-                crt.with_window(|win| {
-                    let _ = win.attrset(reset_attr);
-                });
+                draw_bar_with_text(crt, x, y, width, self.caption(), &segments, 1.0, &text);
             }
             MeterMode::Text => {
+                let caption_attr = crt.color(ColorElement::MeterText);
+                let reset_attr = crt.color(ColorElement::ResetColor);
+
+                crt.with_window(|win| {
+                    let _ = win.mv(y, x);
+                    let _ = win.attrset(caption_attr);
+                    let _ = win.addstr(self.caption());
+                    let _ = win.addstr(": ");
+                });
+
                 // Handle non-data states
                 if self.status != RateStatus::Data {
                     let (text, color) = match self.status {
@@ -223,9 +198,7 @@ impl Meter for DiskIOMeter {
                         RateStatus::Data => unreachable!(),
                     };
                     let attr = crt.color(color);
-                    let reset_attr = crt.color(ColorElement::ResetColor);
                     crt.with_window(|win| {
-                        let _ = win.mv(y, x);
                         let _ = win.attrset(attr);
                         let _ = win.addstr(text);
                         let _ = win.attrset(reset_attr);
@@ -237,7 +210,6 @@ impl Meter for DiskIOMeter {
                 let read_attr = crt.color(ColorElement::MeterValueIORead);
                 let write_attr = crt.color(ColorElement::MeterValueIOWrite);
                 let value_attr = crt.color(ColorElement::MeterValue);
-                let reset_attr = crt.color(ColorElement::ResetColor);
 
                 // Utilization - highlight if > 40%
                 let util_color = if self.utilization > 40.0 {
@@ -249,15 +221,14 @@ impl Meter for DiskIOMeter {
                 let read_str = Self::human_unit(self.read_rate);
                 let write_str = Self::human_unit(self.write_rate);
                 let util_str = format!("{:.1}%", self.utilization);
-                let disks_str = format!("{}", self.num_disks);
-                let show_disks = self.num_disks > 1 && self.num_disks < 1000;
 
+                // Format: "Disk IO: <util>% read: <rate>KiB/s write: <rate>KiB/s"
                 crt.with_window(|win| {
-                    let _ = win.mv(y, x);
+                    let _ = win.attrset(util_color);
+                    let _ = win.addstr(&util_str);
 
-                    // "read: XiB/s write: YiB/s; Z% busy (N disks)"
                     let _ = win.attrset(text_attr);
-                    let _ = win.addstr("read: ");
+                    let _ = win.addstr(" read: ");
 
                     let _ = win.attrset(read_attr);
                     let _ = win.addstr(&read_str);
@@ -269,24 +240,6 @@ impl Meter for DiskIOMeter {
                     let _ = win.attrset(write_attr);
                     let _ = win.addstr(&write_str);
                     let _ = win.addstr("iB/s");
-
-                    let _ = win.attrset(text_attr);
-                    let _ = win.addstr("; ");
-
-                    let _ = win.attrset(util_color);
-                    let _ = win.addstr(&util_str);
-
-                    let _ = win.attrset(text_attr);
-                    let _ = win.addstr(" busy");
-
-                    // Show disk count if more than 1
-                    if show_disks {
-                        let _ = win.addstr(" (");
-                        let _ = win.attrset(value_attr);
-                        let _ = win.addstr(&disks_str);
-                        let _ = win.attrset(text_attr);
-                        let _ = win.addstr(" disks)");
-                    }
 
                     let _ = win.attrset(reset_attr);
                 });
@@ -304,10 +257,11 @@ impl Meter for DiskIOMeter {
                 }
 
                 let graph_data = self.graph_data.borrow();
-                draw_graph(crt, x, y, width, self.height(), &graph_data, "Dsk");
+                draw_graph(crt, x, y, width, self.height(), &graph_data, self.caption());
             }
             MeterMode::Led => {
                 // Format rate values for LED display
+                let caption = format!("{}: ", self.caption());
                 if self.status != RateStatus::Data {
                     let text = match self.status {
                         RateStatus::Init => "----",
@@ -315,14 +269,16 @@ impl Meter for DiskIOMeter {
                         RateStatus::NoData => "N/A",
                         RateStatus::Data => unreachable!(),
                     };
-                    draw_led(crt, x, y, width, "Dsk ", text);
+                    draw_led(crt, x, y, width, &caption, text);
                 } else {
+                    // Same format as Text mode: "<util>% read: <rate>iB/s write: <rate>iB/s"
                     let text = format!(
-                        "r:{}iB/s w:{}iB/s",
+                        "{:.1}% read: {}iB/s write: {}iB/s",
+                        self.utilization,
                         Self::human_unit(self.read_rate),
                         Self::human_unit(self.write_rate)
                     );
-                    draw_led(crt, x, y, width, "Dsk ", &text);
+                    draw_led(crt, x, y, width, &caption, &text);
                 }
             }
             MeterMode::StackedGraph => {
@@ -479,6 +435,7 @@ mod tests {
         let mut machine = Machine::default();
 
         machine.disk_io_last_update = 1000;
+        machine.disk_io_num_disks = 1; // Need disks to not be Init
         machine.realtime_ms = 32000; // 31 seconds since last update (> 30s = stale)
 
         meter.update(&machine);

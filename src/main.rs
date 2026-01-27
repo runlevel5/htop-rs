@@ -152,6 +152,14 @@ fn ctrlc_handler() {
 }
 
 fn main() -> Result<()> {
+    // Set up panic hook to write backtrace to file
+    std::panic::set_hook(Box::new(|panic_info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let msg = format!("PANIC: {}\n\nBacktrace:\n{}", panic_info, backtrace);
+        let _ = std::fs::write("/tmp/htop-rs-panic.log", &msg);
+        eprintln!("{}", msg);
+    }));
+
     let args = Args::parse();
 
     // Handle help and version flags first

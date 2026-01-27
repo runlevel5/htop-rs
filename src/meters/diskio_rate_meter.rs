@@ -81,12 +81,14 @@ impl Meter for DiskIORateMeter {
     }
 
     fn caption(&self) -> &str {
-        "Dsk"
+        "Disk IO"
     }
 
     fn update(&mut self, machine: &Machine) {
-        // Check if we have valid data
-        if machine.disk_io_last_update == 0 {
+        // Check if we have valid rate data
+        // disk_io_last_update > 0 means we've scanned at least once
+        // disk_io_num_disks > 0 means we found disks and have valid data
+        if machine.disk_io_last_update == 0 || machine.disk_io_num_disks == 0 {
             self.status = RateStatus::Init;
             return;
         }
@@ -100,7 +102,7 @@ impl Meter for DiskIORateMeter {
             return;
         }
 
-        // We have valid data
+        // We have valid data (rates may be 0 if disk is idle, that's fine)
         self.status = RateStatus::Data;
         self.read_rate = machine.disk_io_read_rate;
         self.write_rate = machine.disk_io_write_rate;
@@ -117,7 +119,8 @@ impl Meter for DiskIORateMeter {
     ) {
         match self.mode {
             MeterMode::Bar => {
-                // Draw caption "Dsk" (exactly 3 chars)
+                let caption = self.caption();
+                let caption_len = caption.len() as i32;
                 let caption_attr = crt.color(ColorElement::MeterText);
                 let reset_attr = crt.color(ColorElement::ResetColor);
                 let value_attr = crt.color(ColorElement::MeterValue);
@@ -125,12 +128,12 @@ impl Meter for DiskIORateMeter {
                 crt.with_window(|win| {
                     let _ = win.mv(y, x);
                     let _ = win.attrset(caption_attr);
-                    let _ = win.addstr("Dsk");
+                    let _ = win.addstr(caption);
                 });
 
                 // Bar area starts after caption
-                let bar_x = x + 3;
-                let bar_width = width - 3;
+                let bar_x = x + caption_len;
+                let bar_width = width - caption_len;
 
                 if bar_width < 4 {
                     crt.with_window(|win| {
@@ -235,10 +238,11 @@ impl Meter for DiskIORateMeter {
                 }
 
                 let graph_data = self.graph_data.borrow();
-                draw_graph(crt, x, y, width, self.height(), &graph_data, "Dsk");
+                draw_graph(crt, x, y, width, self.height(), &graph_data, self.caption());
             }
             MeterMode::Led => {
                 // Format rate values for LED display
+                let caption = format!("{} ", self.caption());
                 if self.status != RateStatus::Data {
                     let text = match self.status {
                         RateStatus::Init => "----",
@@ -246,14 +250,14 @@ impl Meter for DiskIORateMeter {
                         RateStatus::NoData => "N/A",
                         RateStatus::Data => unreachable!(),
                     };
-                    draw_led(crt, x, y, width, "Dsk ", text);
+                    draw_led(crt, x, y, width, &caption, text);
                 } else {
                     let text = format!(
                         "r:{}iB/s w:{}iB/s",
                         Self::human_unit(self.read_rate),
                         Self::human_unit(self.write_rate)
                     );
-                    draw_led(crt, x, y, width, "Dsk ", &text);
+                    draw_led(crt, x, y, width, &caption, &text);
                 }
             }
             MeterMode::StackedGraph => {
@@ -387,6 +391,7 @@ mod tests {
         let mut machine = Machine::default();
 
         machine.disk_io_last_update = 1000;
+        machine.disk_io_num_disks = 1; // Need disks to not be Init
         machine.realtime_ms = 1500; // 500ms since last update
         machine.disk_io_read_rate = 1024.0 * 1024.0; // 1 MiB/s
         machine.disk_io_write_rate = 512.0 * 1024.0; // 512 KiB/s
@@ -404,6 +409,7 @@ mod tests {
         let mut machine = Machine::default();
 
         machine.disk_io_last_update = 1000;
+        machine.disk_io_num_disks = 1; // Need disks to not be Init
         machine.realtime_ms = 32000; // 31 seconds since last update (> 30s = stale)
 
         meter.update(&machine);
@@ -421,7 +427,7 @@ mod tests {
     #[test]
     fn test_diskio_rate_meter_caption() {
         let meter = DiskIORateMeter::new();
-        assert_eq!(meter.caption(), "Dsk");
+        assert_eq!(meter.caption(), "Disk IO");
     }
 
     #[test]

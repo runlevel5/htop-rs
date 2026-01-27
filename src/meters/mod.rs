@@ -955,8 +955,14 @@ pub fn draw_bar_with_text(
 }
 
 /// Draw a bar meter
+/// Note: values contains (percentage, attr) where attr is already a color attribute from crt.color()
 pub fn draw_bar(crt: &mut Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)], total: f64) {
     use crate::ui::ColorElement;
+
+    // Need at least 3 chars for brackets and one char of content: [x]
+    if width < 3 {
+        return;
+    }
 
     let bar_width = (width - 2) as usize; // Account for [ and ]
 
@@ -965,11 +971,8 @@ pub fn draw_bar(crt: &mut Crt, x: i32, y: i32, width: i32, values: &[(f64, i32)]
     // Pre-compute bar characters for each value segment (theme-agnostic)
     let value_bar_chars: Vec<char> = (0..values.len()).map(|i| crt.bar_char(i)).collect();
 
-    // Pre-calculate all colors for values
-    let value_attrs: Vec<_> = values
-        .iter()
-        .map(|(_, color)| crt.colors[*color as usize])
-        .collect();
+    // The color values passed in are already attr_t values (from crt.color()), not indices
+    let value_attrs: Vec<_> = values.iter().map(|(_, attr)| *attr as u32).collect();
 
     crt.with_window(|win| {
         // Draw brackets

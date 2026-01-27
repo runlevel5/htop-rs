@@ -158,6 +158,9 @@ pub fn get_system_info(machine: &mut Machine) {
 
 /// Perform a full system scan
 pub fn scan(machine: &mut Machine) {
+    // Update timing first - disk/network IO meters need realtime_ms for rate calculations
+    machine.scan();
+
     scan_cpu(machine);
     scan_cpu_frequency(machine);
     scan_memory(machine);
