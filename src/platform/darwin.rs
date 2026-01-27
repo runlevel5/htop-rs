@@ -514,13 +514,14 @@ pub fn scan_cpu(machine: &mut Machine) {
             let idle = unsafe { *cpu_info.add(base + CPU_STATE_IDLE) } as u64;
             let nice = unsafe { *cpu_info.add(base + CPU_STATE_NICE) } as u64;
 
-            // Update this CPU's data
-            let cpu = &mut machine.cpus[i];
-            cpu.user_time = user;
-            cpu.system_time = system;
-            cpu.idle_time = idle;
-            cpu.nice_time = nice;
-            cpu.update();
+            // Update this CPU's data (bounds-checked)
+            if let Some(cpu) = machine.cpus.get_mut(i) {
+                cpu.user_time = user;
+                cpu.system_time = system;
+                cpu.idle_time = idle;
+                cpu.nice_time = nice;
+                cpu.update();
+            }
 
             // Accumulate for average
             total_user += user;

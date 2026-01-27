@@ -494,8 +494,8 @@ pub trait StackedGraphValues {
         self.len() == 0
     }
 
-    /// Get segment values at a given index, returning a slice
-    fn get_segments(&self, index: usize) -> &[f64];
+    /// Get segment values at a given index, returning a slice if in bounds
+    fn get_segments(&self, index: usize) -> Option<&[f64]>;
 
     /// Get a zero-filled segment array for this type
     fn zero_segments(&self) -> Vec<f64>;
@@ -508,8 +508,8 @@ impl StackedGraphValues for StackedGraphData {
     fn len(&self) -> usize {
         self.values.len()
     }
-    fn get_segments(&self, index: usize) -> &[f64] {
-        &self.values[index]
+    fn get_segments(&self, index: usize) -> Option<&[f64]> {
+        self.values.get(index).map(|v| v.as_slice())
     }
     fn zero_segments(&self) -> Vec<f64> {
         vec![0.0; STACKED_GRAPH_SEGMENTS]
@@ -523,8 +523,8 @@ impl StackedGraphValues for CpuStackedGraphData {
     fn len(&self) -> usize {
         self.values.len()
     }
-    fn get_segments(&self, index: usize) -> &[f64] {
-        &self.values[index]
+    fn get_segments(&self, index: usize) -> Option<&[f64]> {
+        self.values.get(index).map(|v| v.as_slice())
     }
     fn zero_segments(&self) -> Vec<f64> {
         vec![0.0; CPU_STACKED_GRAPH_SEGMENTS]
@@ -538,8 +538,8 @@ impl StackedGraphValues for SwapStackedGraphData {
     fn len(&self) -> usize {
         self.values.len()
     }
-    fn get_segments(&self, index: usize) -> &[f64] {
-        &self.values[index]
+    fn get_segments(&self, index: usize) -> Option<&[f64]> {
+        self.values.get(index).map(|v| v.as_slice())
     }
     fn zero_segments(&self) -> Vec<f64> {
         vec![0.0; SWAP_STACKED_GRAPH_SEGMENTS]
@@ -553,8 +553,8 @@ impl StackedGraphValues for LoadStackedGraphData {
     fn len(&self) -> usize {
         self.values.len()
     }
-    fn get_segments(&self, index: usize) -> &[f64] {
-        &self.values[index]
+    fn get_segments(&self, index: usize) -> Option<&[f64]> {
+        self.values.get(index).map(|v| v.as_slice())
     }
     fn zero_segments(&self) -> Vec<f64> {
         vec![0.0; LOAD_STACKED_GRAPH_SEGMENTS]
@@ -568,8 +568,8 @@ impl StackedGraphValues for TasksStackedGraphData {
     fn len(&self) -> usize {
         self.values.len()
     }
-    fn get_segments(&self, index: usize) -> &[f64] {
-        &self.values[index]
+    fn get_segments(&self, index: usize) -> Option<&[f64]> {
+        self.values.get(index).map(|v| v.as_slice())
     }
     fn zero_segments(&self) -> Vec<f64> {
         vec![0.0; TASKS_STACKED_GRAPH_SEGMENTS]
@@ -1521,19 +1521,27 @@ pub fn draw_stacked_graph_generic<T: StackedGraphValues>(
                 let (segs_left, segs_right): (&[f64], &[f64]) = if num_values >= needed_values {
                     let start = num_values - needed_values;
                     (
-                        graph_data.get_segments(start + pair_idx),
-                        graph_data.get_segments(start + pair_idx + 1),
+                        graph_data
+                            .get_segments(start + pair_idx)
+                            .unwrap_or(&zero_segs),
+                        graph_data
+                            .get_segments(start + pair_idx + 1)
+                            .unwrap_or(&zero_segs),
                     )
                 } else {
                     // Not enough data - calculate offset
                     let offset = needed_values - num_values;
                     let left = if pair_idx >= offset {
-                        graph_data.get_segments(pair_idx - offset)
+                        graph_data
+                            .get_segments(pair_idx - offset)
+                            .unwrap_or(&zero_segs)
                     } else {
                         &zero_segs
                     };
                     let right = if pair_idx + 1 >= offset {
-                        graph_data.get_segments(pair_idx + 1 - offset)
+                        graph_data
+                            .get_segments(pair_idx + 1 - offset)
+                            .unwrap_or(&zero_segs)
                     } else {
                         &zero_segs
                     };
