@@ -169,6 +169,61 @@ impl ScreenManager {
         self.settings.sort_descending = descending;
     }
 
+    /// Apply sort field selection - handles both new field and same-field (invert direction).
+    /// Used by both F6 sort menu and header column clicks.
+    fn apply_sort_field(&mut self, machine: &mut Machine, field: ProcessField) {
+        let screen = &mut self.settings.screens[self.settings.active_screen];
+
+        // Track final sort direction for immediate sort
+        let sort_descending: bool;
+        let mut rebuild_tree = false;
+
+        if screen.tree_view && screen.tree_view_always_by_pid {
+            // In tree view with treeViewAlwaysByPID: disable tree view first
+            screen.tree_view = false;
+            screen.sort_key = field;
+            screen.direction = if field.default_sort_desc() { -1 } else { 1 };
+            sort_descending = screen.direction < 0;
+            self.settings.tree_view = false;
+            self.main_panel.tree_view = false;
+        } else if screen.tree_view {
+            // In tree view (not always-by-PID): update tree_sort_key
+            if field == screen.tree_sort_key {
+                // Same field: invert direction
+                screen.tree_direction = -screen.tree_direction;
+            } else {
+                // Different field: set new field with default direction
+                screen.tree_sort_key = field;
+                screen.tree_direction = if field.default_sort_desc() { -1 } else { 1 };
+            }
+            sort_descending = screen.tree_direction < 0;
+            rebuild_tree = true;
+        } else {
+            // Not in tree view: use regular sort_key
+            if field == screen.sort_key {
+                // Same field: invert direction
+                screen.direction = -screen.direction;
+            } else {
+                // Different field: set new field with default direction
+                screen.sort_key = field;
+                screen.direction = if field.default_sort_desc() { -1 } else { 1 };
+            }
+            sort_descending = screen.direction < 0;
+        }
+
+        // Sync to machine and settings
+        self.sync_sort_to_machine(machine, field, sort_descending);
+        self.settings.changed = true;
+
+        // Rebuild tree or sort immediately
+        if rebuild_tree {
+            machine.processes.build_tree(field, !sort_descending);
+        } else {
+            machine.processes.sort_by(field, !sort_descending);
+        }
+        self.main_panel.invalidate_display_list();
+    }
+
     /// Take the settings out of ScreenManager (consumes internal settings)
     /// Used at the end of run() to return the potentially modified settings
     pub fn take_settings(self) -> Settings {
@@ -971,75 +1026,9 @@ impl ScreenManager {
             }
             KEY_HEADER_CLICK => {
                 // Handle click on header row - change sort field or invert order
-                // Matches C htop MainPanel_eventHandler header click handling
                 if let Some(event) = crt.last_mouse_event() {
                     if let Some(field) = self.main_panel.field_at_x(event.x) {
-                        let screen = &mut self.settings.screens[self.settings.active_screen];
-
-                        // Track what sync operation to perform after screen borrow ends
-                        let mut sync_field: Option<(ProcessField, bool)> = None;
-                        let mut rebuild_tree: Option<(ProcessField, bool)> = None;
-                        let mut request_sort = false;
-
-                        if screen.tree_view && screen.tree_view_always_by_pid {
-                            // In tree view with treeViewAlwaysByPID: disable tree view first
-                            screen.tree_view = false;
-                            screen.direction = 1;
-                            screen.sort_key = field;
-                            self.settings.tree_view = false;
-                            self.main_panel.tree_view = false;
-                            sync_field = Some((field, field.default_sort_desc()));
-                            request_sort = true;
-                        } else if screen.tree_view {
-                            // In tree view (not always-by-PID): use tree_sort_key
-                            if field == screen.tree_sort_key {
-                                // Clicking on current tree sort column inverts the order
-                                screen.tree_direction = -screen.tree_direction;
-                                let descending = screen.tree_direction < 0;
-                                self.settings.sort_descending = descending;
-                                machine.sort_descending = descending;
-                            } else {
-                                // Clicking on different column changes the tree sort field
-                                screen.tree_sort_key = field;
-                                screen.tree_direction =
-                                    if field.default_sort_desc() { -1 } else { 1 };
-                                sync_field = Some((field, field.default_sort_desc()));
-                            }
-                            // Rebuild tree with new sort settings
-                            rebuild_tree = Some((screen.tree_sort_key, screen.tree_direction > 0));
-                        } else {
-                            // Not in tree view: use regular sort_key
-                            if field == screen.sort_key {
-                                // Clicking on current sort column inverts the order
-                                screen.direction = -screen.direction;
-                                let descending = screen.direction < 0;
-                                self.settings.sort_descending = descending;
-                                machine.sort_descending = descending;
-                            } else {
-                                // Clicking on different column changes the sort field
-                                screen.sort_key = field;
-                                screen.direction = if field.default_sort_desc() { -1 } else { 1 };
-                                sync_field = Some((field, field.default_sort_desc()));
-                            }
-                            request_sort = true;
-                        }
-
-                        // Now perform the operations that need &mut self
-                        if let Some((f, desc)) = sync_field {
-                            self.sync_sort_to_machine(machine, f, desc);
-                        }
-                        if let Some((sort_key, ascending)) = rebuild_tree {
-                            machine.processes.build_tree(sort_key, ascending);
-                            self.main_panel.invalidate_display_list();
-                        }
-                        if request_sort {
-                            // Immediately sort and invalidate for instant feedback
-                            let sort_key = machine.sort_key;
-                            let ascending = !machine.sort_descending;
-                            machine.processes.sort_by(sort_key, ascending);
-                            self.main_panel.invalidate_display_list();
-                        }
-                        self.settings.changed = true;
+                        self.apply_sort_field(machine, field);
                     }
                 }
                 return HandlerResult::Handled;
@@ -1597,33 +1586,7 @@ impl ScreenManager {
 
         // Apply the selection
         if let Some(field) = result.field {
-            // Match C htop ScreenSettings_setSortKey behavior:
-            let screen = &mut self.settings.screens[self.settings.active_screen];
-
-            if screen.tree_view_always_by_pid || !screen.tree_view {
-                // Normal sort or tree-always-by-pid: update sortKey and direction
-                screen.sort_key = field;
-                screen.direction = if field.default_sort_desc() { -1 } else { 1 };
-                screen.tree_view = false;
-                self.main_panel.tree_view = false;
-                self.settings.tree_view = false;
-            } else {
-                // In tree view (not always-by-PID): update treeSortKey
-                screen.tree_sort_key = field;
-                screen.tree_direction = if field.default_sort_desc() { -1 } else { 1 };
-                // Rebuild tree with new sort settings
-                let ascending = screen.tree_direction > 0;
-                machine.processes.build_tree(field, ascending);
-            }
-
-            // Also update machine sort settings for immediate effect
-            self.sync_sort_to_machine(machine, field, field.default_sort_desc());
-            self.settings.changed = true;
-
-            // Immediately sort and invalidate display list for instant feedback
-            let ascending = !field.default_sort_desc();
-            machine.processes.sort_by(field, ascending);
-            self.main_panel.invalidate_display_list();
+            self.apply_sort_field(machine, field);
         }
     }
 

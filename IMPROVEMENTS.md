@@ -234,3 +234,19 @@ htop-rs adds mouse support for side panel menus (Kill/Signal menu F9, Sort menu 
 - **C htop behavior**: No mouse support in side panel menus; must use keyboard navigation
 - **htop-rs behavior**: Full mouse support including quick selection with right-click
 
+### Sort Column: Direction Toggle on Re-selection
+
+htop-rs allows toggling sort direction by selecting the same column again in the F6 Sort By menu, matching the behavior of header column clicks.
+
+| Action | Effect |
+|--------|--------|
+| F6 → Select different column | Sort by new column with default direction |
+| F6 → Select same column | Invert sort direction (ascending ↔ descending) |
+| Click different header column | Sort by new column with default direction |
+| Click same header column | Invert sort direction (ascending ↔ descending) |
+
+This provides a consistent experience between keyboard (F6 menu) and mouse (header clicks) for sort operations.
+
+- **C htop behavior**: F6 menu always resets to default sort direction; only header clicks can invert direction
+- **htop-rs behavior**: Both F6 menu and header clicks support direction toggle when selecting the current sort column
+
