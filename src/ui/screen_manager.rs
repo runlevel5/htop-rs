@@ -1352,25 +1352,7 @@ impl ScreenManager {
             ((current - 1 + num_screens as i32) % num_screens as i32) as usize
         };
 
-        self.settings.active_screen = new_screen;
-
-        // Update main panel with new screen's fields
-        let screen = &self.settings.screens[new_screen];
-        self.main_panel.fields = screen.fields.clone();
-        self.main_panel.tree_view = screen.tree_view;
-
-        // Update global sort settings from the screen
-        self.settings.sort_key = Some(screen.sort_key);
-        self.settings.sort_descending = screen.direction < 0;
-        self.settings.tree_view = screen.tree_view;
-
-        // Update machine sort settings for immediate effect
-        machine.sort_key = screen.sort_key;
-        machine.sort_descending = screen.direction < 0;
-
-        // Rebuild labels for the new columns
-        let has_filter = self.main_panel.filter.is_some();
-        self.main_panel.update_labels(screen.tree_view, has_filter);
+        self.switch_to_screen(new_screen, machine);
     }
 
     /// Switch to a specific screen tab by index
@@ -1399,6 +1381,15 @@ impl ScreenManager {
         // Rebuild labels for the new columns
         let has_filter = self.main_panel.filter.is_some();
         self.main_panel.update_labels(screen.tree_view, has_filter);
+
+        // Immediately sort and invalidate for instant feedback
+        let ascending = !machine.sort_descending;
+        if screen.tree_view {
+            machine.processes.build_tree(screen.sort_key, ascending);
+        } else {
+            machine.processes.sort_by(screen.sort_key, ascending);
+        }
+        self.main_panel.invalidate_display_list();
     }
 
     /// Toggle tree view - matches C htop actionToggleTreeView behavior
