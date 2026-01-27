@@ -2183,8 +2183,8 @@ impl Crt {
             libc::FD_SET(libc::STDIN_FILENO, &mut fds);
 
             let mut timeout = libc::timeval {
-                tv_sec: (timeout_ms / 1000) as libc::time_t,
-                tv_usec: ((timeout_ms % 1000) * 1000) as libc::suseconds_t,
+                tv_sec: (timeout_ms / 1000) as _,
+                tv_usec: ((timeout_ms % 1000) * 1000) as _,
             };
 
             let result = libc::select(
