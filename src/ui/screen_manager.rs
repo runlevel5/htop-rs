@@ -1030,9 +1030,14 @@ impl ScreenManager {
                         }
                         if let Some((sort_key, ascending)) = rebuild_tree {
                             machine.processes.build_tree(sort_key, ascending);
+                            self.main_panel.invalidate_display_list();
                         }
                         if request_sort {
-                            machine.request_sort();
+                            // Immediately sort and invalidate for instant feedback
+                            let sort_key = machine.sort_key;
+                            let ascending = !machine.sort_descending;
+                            machine.processes.sort_by(sort_key, ascending);
+                            self.main_panel.invalidate_display_list();
                         }
                         self.settings.changed = true;
                     }
@@ -1614,6 +1619,11 @@ impl ScreenManager {
             // Also update machine sort settings for immediate effect
             self.sync_sort_to_machine(machine, field, field.default_sort_desc());
             self.settings.changed = true;
+
+            // Immediately sort and invalidate display list for instant feedback
+            let ascending = !field.default_sort_desc();
+            machine.processes.sort_by(field, ascending);
+            self.main_panel.invalidate_display_list();
         }
     }
 
