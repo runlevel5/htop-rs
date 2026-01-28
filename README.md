@@ -63,6 +63,10 @@ Not yet implemented:
 - Graph meter mode
 - Some platform-specific features
 
+## Known Issues
+
+- **Kitty Keyboard Protocol**: htop-rs has known compatibility issues with terminal emulators that use the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). If you experience keyboard input problems, it is advised to disable the Kitty keyboard protocol in your terminal settings.
+
 ## Platform Support
 
 | Platform | Status |
