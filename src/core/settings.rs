@@ -429,6 +429,12 @@ pub struct Settings {
     // Sort settings
     pub sort_key: Option<ProcessField>,
     pub sort_descending: bool,
+
+    // Performance settings
+    /// Number of worker threads for parallel operations (0 = auto, default: 2)
+    /// A monitoring tool should be conservative with CPU usage.
+    /// Can be overridden with HTOP_WORKER_THREADS environment variable.
+    pub worker_threads: usize,
 }
 
 impl Default for Settings {
@@ -531,6 +537,7 @@ impl Settings {
             all_branches_collapsed: false,
             sort_key: None,
             sort_descending: true,
+            worker_threads: 2, // Conservative default like btop++
         }
     }
 
@@ -1052,6 +1059,11 @@ impl Settings {
                 // Alternative name from C htop
                 self.shadow_dist_path_prefix = value == "1";
             }
+            "worker_threads" => {
+                if let Ok(v) = value.parse::<usize>() {
+                    self.worker_threads = v;
+                }
+            }
             _ => {}
         }
     }
@@ -1237,6 +1249,7 @@ impl Settings {
         writeln!(file, "delay={}", self.delay)?;
         writeln!(file, "color_scheme={}", self.color_scheme as i32)?;
         writeln!(file, "hide_function_bar={}", self.hide_function_bar)?;
+        writeln!(file, "worker_threads={}", self.worker_threads)?;
 
         // Header layout
         writeln!(file, "header_layout={}", self.header_layout.name())?;

@@ -94,4 +94,5 @@ GPL-2.0-or-later (same as htop)
 ## Acknowledgments
 
 - The [htop](https://htop.dev/) project and its maintainers
+- [btop++](https://github.com/aristocratos/btop) for inspiration on conservative threading design
 - Everyone who has contributed to htop over the years

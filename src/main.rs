@@ -160,6 +160,21 @@ fn main() -> Result<()> {
         eprintln!("{}", msg);
     }));
 
+    // Configure rayon thread pool early, before any parallel operations.
+    // A monitoring tool should be conservative with CPU usage - we default to 2 threads
+    // like btop++, rather than using all cores like the rayon default.
+    // Users can override via HTOP_WORKER_THREADS environment variable.
+    let worker_threads = std::env::var("HTOP_WORKER_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(2) // Default: 2 threads (conservative like btop++)
+        .max(1); // At least 1 thread
+
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(worker_threads)
+        .build_global()
+        .expect("Failed to configure rayon thread pool");
+
     let args = Args::parse();
 
     // Handle help and version flags first

@@ -983,6 +983,77 @@ To add a new meter with expensive data (e.g., GPU meter):
 
 ---
 
+## Threading Model
+
+htop-rs uses a conservative threading model to avoid competing with user workloads for CPU time. When users open htop, it's often because their system is already overloaded - a monitoring tool that hogs CPU cores would be counterproductive.
+
+### Comparison with Other Tools
+
+| Tool | Threading Model | Worker Threads |
+|------|-----------------|----------------|
+| htop (C) | Single-threaded | 0 |
+| btop++ | Main + runner | 2 total |
+| **htop-rs** | Main + rayon pool | **2 workers** (default) |
+
+### Default Configuration
+
+By default, htop-rs configures rayon with **2 worker threads**, matching btop++'s conservative approach:
+
+```rust
+// In main.rs, configured early before any parallel operations
+rayon::ThreadPoolBuilder::new()
+    .num_threads(2)
+    .build_global()
+    .expect("Failed to configure rayon thread pool");
+```
+
+This is a deliberate departure from rayon's default (N-1 cores) because:
+1. A monitoring tool should be a "good citizen" - minimal resource footprint
+2. Users typically open htop when their system is stressed
+3. Most htop operations are I/O-bound (reading /proc), not CPU-bound
+4. 2 threads provides enough parallelism for meter updates without hogging cores
+
+### Overriding Thread Count
+
+Power users who want more parallelism (e.g., on systems with many cores and light load) can set the `HTOP_WORKER_THREADS` environment variable:
+
+```bash
+# Use 4 worker threads
+HTOP_WORKER_THREADS=4 htop
+
+# Use all available cores (not recommended)
+HTOP_WORKER_THREADS=0 htop  # 0 means rayon's default (all cores - 1)
+```
+
+This setting can also be configured in `~/.config/htop/htoprc`:
+
+```
+worker_threads=4
+```
+
+### What Uses the Thread Pool
+
+The rayon thread pool is used for:
+
+1. **Meter updates** (`Header::update()`): Meters are updated in parallel via `par_iter_mut()`
+2. **Future expansion**: Process list operations could be parallelized if needed
+
+Note that the **background scanners** (process and meter) use their own dedicated threads via `std::thread::spawn()`, not the rayon pool. This ensures they don't compete with the main UI thread for rayon workers.
+
+### Thread Summary
+
+| Thread | Purpose | Source |
+|--------|---------|--------|
+| Main thread | UI rendering, input handling | `main()` |
+| Rayon worker 1 | Parallel meter updates | `rayon::ThreadPoolBuilder` |
+| Rayon worker 2 | Parallel meter updates | `rayon::ThreadPoolBuilder` |
+| Process BG scanner | Expensive process data (smaps, cgroups) | `std::thread::spawn()` |
+| Meter BG scanner | Expensive meter data (battery, etc.) | `std::thread::spawn()` |
+
+Total: 5 threads maximum (main + 2 rayon + 2 background scanners)
+
+---
+
 ## Terminal Layer (ncurses-rs)
 
 htop-rs uses [ncurses-rs](https://github.com/runlevel5/ncurses-pure-rs), a pure Rust implementation of the ncurses API. This eliminates the dependency on system ncurses libraries.
