@@ -21,6 +21,7 @@ mod hugepages_meter;
 mod load_meter;
 mod memory_meter;
 mod memoryswap_meter;
+pub mod meter_bg_scanner;
 mod networkio_meter;
 mod pressure_stall_meter;
 mod selinux_meter;
@@ -626,6 +627,8 @@ pub trait Meter: std::fmt::Debug + Send {
     fn init(&mut self) {}
 
     /// Update meter values from machine state
+    /// This should only do fast operations (copying from Machine).
+    /// Expensive operations should use the background scanner.
     fn update(&mut self, machine: &Machine);
 
     /// Get the height of the meter in lines
@@ -670,6 +673,18 @@ pub trait Meter: std::fmt::Debug + Send {
     fn supports_mode(&self, mode: MeterMode) -> bool {
         (self.supported_modes() & (1 << mode as u32)) != 0
     }
+
+    /// Get the expensive data ID for this meter, if any.
+    /// Meters that need background data collection should return Some(id).
+    /// Default is None (no expensive data needed).
+    fn expensive_data_id(&self) -> Option<meter_bg_scanner::MeterDataId> {
+        None
+    }
+
+    /// Merge expensive data from background scanner.
+    /// Called when background results are available.
+    /// Default implementation does nothing.
+    fn merge_expensive_data(&mut self, _data: &meter_bg_scanner::MeterExpensiveData) {}
 }
 
 /// Meter type enum for creating meters by name

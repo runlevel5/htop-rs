@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use super::crt::{ColorElement, A_NORMAL};
 use super::Crt;
 use crate::core::{HeaderLayout, Machine, Settings};
+use crate::meters::meter_bg_scanner::{MeterBackgroundScanner, MeterDataId};
 use crate::meters::{Meter, MeterType};
 
 /// Header containing meters
@@ -27,6 +28,9 @@ pub struct Header {
 
     /// Whether header margin is enabled
     header_margin: bool,
+
+    /// Background scanner for expensive meter data
+    bg_scanner: MeterBackgroundScanner,
 }
 
 impl Header {
@@ -44,6 +48,7 @@ impl Header {
             height: 0,
             pad,
             header_margin,
+            bg_scanner: MeterBackgroundScanner::new(),
         }
     }
 
@@ -127,18 +132,47 @@ impl Header {
         self.height
     }
 
-    /// Update meter data (parallel using rayon)
+    /// Update meter data using background scanner pattern
     ///
-    /// Meters are updated in parallel since some (like BatteryMeter) may do
-    /// expensive I/O operations. Most meters just copy data from Machine,
-    /// but parallelizing ensures expensive meters don't block others.
+    /// 1. Merge any completed background results into meters
+    /// 2. Update meters with fast data from Machine (parallel)
+    /// 3. Start background scan for expensive meter data
     pub fn update(&mut self, machine: &Machine) {
-        // Update all meters in parallel across all columns
+        // 1. Merge completed background results from previous frame
+        if let Some(bg_results) = self.bg_scanner.try_take_results() {
+            for column in &mut self.columns {
+                for meter in column {
+                    if let Some(id) = meter.expensive_data_id() {
+                        if let Some(data) = bg_results.get(&id) {
+                            meter.merge_expensive_data(data);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Update all meters with fast data from Machine (parallel)
         self.columns.par_iter_mut().for_each(|column| {
             column.par_iter_mut().for_each(|meter| {
                 meter.update(machine);
             });
         });
+
+        // 3. Collect IDs of meters that need expensive data and start background scan
+        let mut requested: Vec<MeterDataId> = Vec::new();
+        for column in &self.columns {
+            for meter in column {
+                if let Some(id) = meter.expensive_data_id() {
+                    if !requested.contains(&id) {
+                        requested.push(id);
+                    }
+                }
+            }
+        }
+        if !requested.is_empty() {
+            self.bg_scanner.start_scan(requested);
+        }
+
         // Recalculate height since CPU meter height depends on CPU count
         self.calculate_height();
     }
