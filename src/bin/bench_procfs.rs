@@ -573,7 +573,7 @@ fn main() {
         let num_threads = *num_threads;
 
         let par_start = Instant::now();
-        let chunk_size = (pids.len() + num_threads - 1) / num_threads;
+        let chunk_size = pids.len().div_ceil(num_threads);
         let chunks: Vec<_> = pids.chunks(chunk_size).collect();
 
         let handles: Vec<_> = chunks
@@ -594,7 +594,7 @@ fn main() {
             })
             .collect();
 
-        let par_results: Vec<_> = handles
+        let _par_results: Vec<_> = handles
             .into_iter()
             .flat_map(|h| h.join().unwrap())
             .collect();
@@ -639,7 +639,7 @@ fn main() {
         let num_threads = *num_threads;
 
         let exp_par_start = Instant::now();
-        let chunk_size = (pids.len() + num_threads - 1) / num_threads;
+        let chunk_size = pids.len().div_ceil(num_threads);
         let chunks: Vec<_> = pids.chunks(chunk_size).collect();
 
         let handles: Vec<_> = chunks
