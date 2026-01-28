@@ -507,11 +507,13 @@ pub fn scan_processes(machine: &mut Machine) {
             process.user = Some(machine.get_username(process.uid));
         }
 
-        // Memory details from statm
-        if let Ok(statm) = proc.statm() {
-            process.m_share = (statm.shared * page_size as u64) as i64;
-            process.m_text = (statm.text * page_size as u64) as i64;
-            process.m_data = (statm.data * page_size as u64) as i64;
+        // Memory details from statm - only read when M_SHARE/M_TEXT/M_DATA columns displayed
+        if flags.contains(ScanFlags::STATM) {
+            if let Ok(statm) = proc.statm() {
+                process.m_share = (statm.shared * page_size as u64) as i64;
+                process.m_text = (statm.text * page_size as u64) as i64;
+                process.m_data = (statm.data * page_size as u64) as i64;
+            }
         }
 
         // Check for kernel thread (ppid == 2 is kthreadd)

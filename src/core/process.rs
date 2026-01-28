@@ -113,6 +113,8 @@ bitflags::bitflags! {
         const GPU          = 0x0010_0000;
         /// Check if process is running in a container
         const CONTAINER    = 0x0020_0000;
+        /// Read /proc/[pid]/statm for shared/text/data memory
+        const STATM        = 0x0040_0000;
     }
 }
 
@@ -788,6 +790,9 @@ impl ProcessField {
 
             // GPU fields require reading GPU-specific data
             ProcessField::GpuTime | ProcessField::GpuPercent => ScanFlags::GPU,
+
+            // STATM fields require reading /proc/[pid]/statm
+            ProcessField::MShare | ProcessField::MText | ProcessField::MData => ScanFlags::STATM,
 
             // All other fields have no special flags (cheap to read)
             _ => ScanFlags::empty(),
