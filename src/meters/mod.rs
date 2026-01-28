@@ -613,7 +613,9 @@ impl From<crate::core::MeterMode> for MeterMode {
 }
 
 /// Meter trait - all meters implement this
-pub trait Meter: std::fmt::Debug {
+///
+/// Meters must be `Send` to support parallel updates via rayon.
+pub trait Meter: std::fmt::Debug + Send {
     /// Get the meter name
     fn name(&self) -> &'static str;
 

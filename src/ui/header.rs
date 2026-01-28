@@ -2,6 +2,8 @@
 
 #![allow(dead_code)]
 
+use rayon::prelude::*;
+
 use super::crt::{ColorElement, A_NORMAL};
 use super::Crt;
 use crate::core::{HeaderLayout, Machine, Settings};
@@ -125,13 +127,18 @@ impl Header {
         self.height
     }
 
-    /// Update meter data
+    /// Update meter data (parallel using rayon)
+    ///
+    /// Meters are updated in parallel since some (like BatteryMeter) may do
+    /// expensive I/O operations. Most meters just copy data from Machine,
+    /// but parallelizing ensures expensive meters don't block others.
     pub fn update(&mut self, machine: &Machine) {
-        for column in &mut self.columns {
-            for meter in column {
+        // Update all meters in parallel across all columns
+        self.columns.par_iter_mut().for_each(|column| {
+            column.par_iter_mut().for_each(|meter| {
                 meter.update(machine);
-            }
-        }
+            });
+        });
         // Recalculate height since CPU meter height depends on CPU count
         self.calculate_height();
     }
