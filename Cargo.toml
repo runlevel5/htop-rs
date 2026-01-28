@@ -38,11 +38,13 @@ os_info = "3.14"
 # Platform-specific dependencies
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18"
+rayon = "1.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libproc = "0.14"
 mach2 = "0.6"
 libc = "1.0.0-alpha.2"
+rayon = "1.10"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["signal", "user", "process", "resource"] }

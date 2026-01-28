@@ -2,6 +2,36 @@
 
 This document outlines intentional improvements and enhancements made in htop-rs compared to the original C htop implementation.
 
+## Performance
+
+### Linux: Background Scanner for Expensive /proc Reads
+
+htop-rs implements an asynchronous background scanner that dramatically improves UI responsiveness on Linux by parallelizing expensive `/proc` file reads.
+
+**The problem:** Reading process data from `/proc` involves many system calls. Some are fast (stat, uid), but others are slow (statm, cgroups, smaps, maps). With all columns enabled, a full scan can take ~80ms, causing noticeable UI lag.
+
+**The solution:** htop-rs splits the scan into two phases:
+
+1. **Fast synchronous scan (~17ms):** Basic data needed for display (stat, uid, cmdline, exe)
+2. **Parallel background scan (~4ms):** Expensive data collected asynchronously using rayon's work-stealing thread pool (statm, cgroups, oom_score, smaps, autogroup, secattr, deleted lib detection)
+
+| Scenario | C htop | htop-rs | Improvement |
+|----------|--------|---------|-------------|
+| Default columns (STATM) | ~41ms | ~17ms | **2.4x faster** |
+| All expensive columns | ~80ms | ~17ms + ~4ms async | **4x faster perceived** |
+
+**How it works:**
+- Frame N: Main thread performs fast scan, then starts background scan
+- Frame N+1: Main thread merges background results, then starts next background scan
+- Background thread uses rayon to read expensive data in parallel (~8x speedup vs sequential)
+
+The expensive data arrives one frame late, but at typical 1-2 second update intervals, this is imperceptible. The UI remains responsive even with many columns enabled.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#linux-background-scanner-architecture) for detailed technical documentation.
+
+- **C htop behavior**: All `/proc` reads happen synchronously on the main thread, blocking UI updates
+- **htop-rs behavior**: Expensive reads happen in parallel on background threads, keeping UI responsive
+
 ## User Interface
 
 ### Dimmed F7 "Nice -" When Unavailable

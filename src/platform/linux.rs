@@ -11,6 +11,10 @@ use std::time::Duration;
 
 use crate::core::{CpuData, Machine, Process, ProcessState, ScanFlags};
 
+use super::linux_bg_scanner::{
+    start_linux_bg_scan, LinuxBackgroundScanner, LinuxExpensiveData, LinuxScanParams,
+};
+
 // IO Priority constants (from linux/ioprio.h)
 pub const IOPRIO_CLASS_NONE: i32 = 0;
 pub const IOPRIO_CLASS_RT: i32 = 1; // Real-time
@@ -345,6 +349,62 @@ fn is_kernel_thread_pid(pid: i32) -> bool {
     false
 }
 
+/// Merge expensive data from background scanner into a process
+fn merge_expensive_data(process: &mut Process, data: &LinuxExpensiveData) {
+    if let Some(v) = data.m_share {
+        process.m_share = v;
+    }
+    if let Some(v) = data.m_text {
+        process.m_text = v;
+    }
+    if let Some(v) = data.m_data {
+        process.m_data = v;
+    }
+    if let Some(ref v) = data.cgroup {
+        process.cgroup = Some(v.clone());
+    }
+    if let Some(ref v) = data.cgroup_short {
+        process.cgroup_short = Some(v.clone());
+    }
+    if let Some(ref v) = data.container_short {
+        process.container_short = Some(v.clone());
+    }
+    if let Some(v) = data.oom_score {
+        process.oom_score = v;
+    }
+    if let Some(v) = data.m_pss {
+        process.m_pss = v;
+    }
+    if let Some(v) = data.m_swap {
+        process.m_swap = v;
+    }
+    if let Some(v) = data.m_psswp {
+        process.m_psswp = v;
+    }
+    if let Some(v) = data.autogroup_id {
+        process.autogroup_id = v;
+    }
+    if let Some(v) = data.autogroup_nice {
+        process.autogroup_nice = v;
+    }
+    if let Some(ref v) = data.secattr {
+        process.sec_attr = Some(v.clone());
+    }
+    if let Some(v) = data.uses_deleted_lib {
+        process.uses_deleted_lib = v;
+    }
+}
+
+/// Flags that should be handled by background scanner (expensive reads)
+const BG_SCAN_FLAGS: ScanFlags = ScanFlags::from_bits_truncate(
+    ScanFlags::STATM.bits()
+        | ScanFlags::CGROUP.bits()
+        | ScanFlags::OOM.bits()
+        | ScanFlags::SMAPS.bits()
+        | ScanFlags::AUTOGROUP.bits()
+        | ScanFlags::SEC_ATTR.bits(),
+);
+
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
     // Timing instrumentation (enabled via HTOP_DEBUG_TIMING=1 env var)
@@ -359,6 +419,25 @@ pub fn scan_processes(machine: &mut Machine) {
 
     // Get scan flags for conditional expensive reads
     let flags = machine.scan_flags;
+
+    // Check which expensive flags are requested - these will be handled by background scanner
+    let bg_flags = flags & BG_SCAN_FLAGS;
+    let has_bg_work = !bg_flags.is_empty() || machine.check_deleted_libs;
+
+    // Merge any completed background scan results into processes
+    // This applies data from the previous frame's background scan
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        if let Some(bg_results) = scanner.try_take_results() {
+            if debug_timing {
+                eprintln!("[SCAN] Merging {} background results", bg_results.len());
+            }
+            for (pid, data) in bg_results.iter() {
+                if let Some(process) = machine.processes.get_mut(*pid) {
+                    merge_expensive_data(process, data);
+                }
+            }
+        }
+    }
 
     // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
     // This allows widths to shrink back when there are no longer processes with wide values
@@ -520,14 +599,8 @@ pub fn scan_processes(machine: &mut Machine) {
             process.user = Some(machine.get_username(process.uid));
         }
 
-        // Memory details from statm - only read when M_SHARE/M_TEXT/M_DATA columns displayed
-        if flags.contains(ScanFlags::STATM) {
-            if let Ok(statm) = proc.statm() {
-                process.m_share = (statm.shared * page_size as u64) as i64;
-                process.m_text = (statm.text * page_size as u64) as i64;
-                process.m_data = (statm.data * page_size as u64) as i64;
-            }
-        }
+        // NOTE: Memory details from statm (STATM flag) are now handled by background scanner
+        // This includes: m_share, m_text, m_data
 
         // Check for kernel thread (ppid == 2 is kthreadd)
         process.is_kernel_thread = process.ppid == 2 || pid == 2;
@@ -561,66 +634,26 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
 
-        // Check for deleted libraries by scanning /proc/PID/maps
-        // Only check if:
-        // - check_deleted_libs is enabled (highlight_deleted_exe setting)
-        // - exe is not deleted (if exe is deleted, no need to check libs)
-        // - not a kernel thread or userland thread
-        // Throttle check to every ~2 seconds per process (like C htop) to avoid performance hit
-        const DELETED_LIB_CHECK_INTERVAL_MS: u64 = 2000;
-        if machine.check_deleted_libs
-            && !process.exe_deleted
-            && !process.is_kernel_thread
-            && !process.is_userland_thread
-        {
-            let time_since_last_check = machine
-                .realtime_ms
-                .saturating_sub(process.last_deleted_lib_check_ms);
-            if process.last_deleted_lib_check_ms == 0
-                || time_since_last_check >= DELETED_LIB_CHECK_INTERVAL_MS
-            {
-                process.uses_deleted_lib = check_deleted_libs(pid);
-                process.last_deleted_lib_check_ms = machine.realtime_ms;
-            }
-        }
+        // NOTE: Deleted library check is now handled by background scanner
+        // The check scans /proc/PID/maps which is expensive
 
-        // OOM score - only read when OOM column is displayed
-        if flags.contains(ScanFlags::OOM) {
-            if let Ok(oom) = std::fs::read_to_string(format!("/proc/{}/oom_score", pid)) {
-                if let Ok(score) = oom.trim().parse::<i32>() {
-                    process.oom_score = score;
-                }
-            }
-        }
+        // NOTE: OOM score is now handled by background scanner
+        // Reading /proc/PID/oom_score for each process adds latency
 
         // IO Priority - only read when IO_PRIORITY column is displayed
-        // (syscall per process)
+        // (syscall per process - kept synchronous as it's fast)
         if flags.contains(ScanFlags::IO_PRIORITY) {
             process.io_priority = get_io_priority(pid);
         }
 
-        // CGroup - only read when CGROUP/CCGROUP/CONTAINER columns are displayed
-        if flags.contains(ScanFlags::CGROUP) {
-            if let Ok(cgroups) = proc.cgroups() {
-                if let Some(cgroup) = cgroups.0.first() {
-                    let cgroup_path = cgroup.pathname.clone();
-                    // Generate compressed cgroup name and detect container
-                    process.cgroup_short = Some(filter_cgroup_name(&cgroup_path));
-                    process.container_short = filter_container(&cgroup_path);
-                    process.cgroup = Some(cgroup_path);
-                }
-            }
-        }
+        // NOTE: CGroup reading is now handled by background scanner
+        // Reading /proc/PID/cgroup for each process adds latency
 
-        // Smaps data (PSS, Swap, SwapPss) - DISABLED: too expensive, causes 100% CPU
-        // TODO: Only read when PSS/MSwap/MPsswp columns are displayed
-        // if !process.is_kernel_thread {
-        //     read_smaps_file(&mut process, pid);
-        // }
+        // NOTE: Smaps data (PSS, Swap, SwapPss) is now handled by background scanner
+        // These were previously disabled due to causing 100% CPU
 
-        // Autogroup data - DISABLED: causes CPU spike
-        // TODO: Only read when autogroup columns are displayed
-        // read_autogroup(&mut process, pid);
+        // NOTE: Autogroup data is now handled by background scanner
+        // This was previously disabled due to causing CPU spike
 
         // Library size from maps - DISABLED: too expensive, causes 100% CPU
         // TODO: Only read when M_LIB column is displayed
@@ -819,6 +852,38 @@ pub fn scan_processes(machine: &mut Machine) {
         .field_widths
         .update_percent_cpu_width(max_percent_cpu);
 
+    // Start background scan for expensive data if there's work to do
+    // This collects PIDs of all main processes (not threads) for parallel processing
+    if has_bg_work {
+        // Collect PIDs for background scan (only main processes, not threads)
+        let pids: Vec<i32> = machine
+            .processes
+            .processes
+            .iter()
+            .filter(|p| !p.is_userland_thread && p.updated)
+            .map(|p| p.pid)
+            .collect();
+
+        // Initialize background scanner if needed
+        if machine.bg_scanner.is_none() {
+            machine.bg_scanner = Some(LinuxBackgroundScanner::new());
+        }
+
+        // Start background scan
+        if let Some(ref mut scanner) = machine.bg_scanner {
+            let page_size_bytes = procfs::page_size() as i64;
+            start_linux_bg_scan(
+                scanner,
+                LinuxScanParams {
+                    pids,
+                    flags: bg_flags,
+                    check_deleted_libs: machine.check_deleted_libs,
+                    page_size: page_size_bytes,
+                },
+            );
+        }
+    }
+
     // Output timing if debug enabled
     if let Some(start) = scan_start {
         let elapsed = start.elapsed();
@@ -833,7 +898,7 @@ pub fn scan_processes(machine: &mut Machine) {
 
 /// Check if a process uses deleted libraries by scanning /proc/PID/maps
 /// Returns true if any executable memory-mapped file has " (deleted)" suffix
-fn check_deleted_libs(pid: i32) -> bool {
+pub fn check_deleted_libs(pid: i32) -> bool {
     use std::io::{BufRead, BufReader};
 
     let maps_path = format!("/proc/{}/maps", pid);

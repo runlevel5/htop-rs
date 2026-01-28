@@ -10,8 +10,18 @@ use crate::core::Machine;
 #[cfg(target_os = "linux")]
 pub mod linux;
 
+#[cfg(target_os = "linux")]
+pub mod linux_bg_scanner;
+
 #[cfg(target_os = "macos")]
 mod darwin;
+
+#[cfg(target_os = "macos")]
+pub mod darwin_bg_scanner;
+
+// Cross-platform background scanner framework
+#[cfg(unix)]
+pub mod bg_scanner;
 
 /// Initialize platform-specific resources
 pub fn init() -> Result<()> {

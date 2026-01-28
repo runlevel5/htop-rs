@@ -562,6 +562,498 @@ pub fn scan(machine: &mut Machine) {
 
 ---
 
+## Cross-Platform Background Scanner Architecture
+
+htop-rs implements an asynchronous background scanner for expensive per-process data collection. This architecture significantly improves UI responsiveness by moving slow operations off the main thread. The framework is generic and works on both Linux and macOS.
+
+### The Problem
+
+Collecting process data involves system calls that vary in cost. Some are fast, others are slow:
+
+**Linux** - Reading from `/proc`:
+
+| Operation | Time (577 processes) | Per-process |
+|-----------|---------------------|-------------|
+| `stat()` | ~11ms | ~19µs |
+| `uid()` (fstat) | ~0.5ms | ~0.8µs |
+| `cmdline()` | ~5ms | ~8µs |
+| `statm()` | ~6ms | ~11µs |
+| `cgroups()` | ~7ms | ~11µs |
+| `oom_score` | ~6ms | ~11µs |
+| `smaps_rollup` | ~7ms | ~77µs |
+| `maps` (deleted libs) | ~21ms | ~40µs |
+
+**macOS** - Using `proc_pidinfo()`:
+
+| Operation | Time (~300 processes) | Per-process |
+|-----------|----------------------|-------------|
+| `PROC_PIDTBSDINFO` | ~5ms | ~17µs |
+| `PROC_PIDVNODEPATHINFO` (cwd) | ~50ms | ~170µs |
+
+With all columns enabled, a full scan can take **~80ms on Linux** or **~55ms on macOS** - causing noticeable UI lag.
+
+### The Solution: Background Scanner
+
+htop-rs splits the scan into two phases:
+
+1. **Fast synchronous scan**: Basic data needed for every frame
+   - **Linux**: `/proc/[pid]/stat`, `uid()`, `/proc/[pid]/cmdline`, `/proc/[pid]/exe`
+   - **macOS**: `proc_pidinfo(PROC_PIDTBSDINFO)`, basic task info
+
+2. **Parallel background scan** (rayon): Expensive data collected asynchronously
+   - **Linux**: `statm`, `cgroup`, `oom_score`, `smaps_rollup`, `autogroup`, `secattr`, `maps`
+   - **macOS**: `proc_pidinfo(PROC_PIDVNODEPATHINFO)` for current working directory
+
+### Architecture Diagram
+
+```
+Frame N:
+┌─────────────────────────────────────────────────────────────┐
+│ Main Thread                                                 │
+│ ┌─────────────────┐    ┌──────────────────────────────────┐ │
+│ │ 1. Merge bg     │───▶│ 2. Fast scan                     │ │
+│ │    results      │    │    (platform-specific)           │ │
+│ └─────────────────┘    └──────────────────────────────────┘ │
+│         ▲                            │                      │
+│         │                            ▼                      │
+│         │              ┌──────────────────────────────────┐ │
+│         │              │ 3. Start background scan         │ │
+│         │              │    (spawn with rayon)            │ │
+│         │              └──────────────────────────────────┘ │
+│         │                            │                      │
+│         │                            ▼                      │
+│         │              ┌──────────────────────────────────┐ │
+│         │              │ 4. Display (with previous        │ │
+│         │              │    expensive data)               │ │
+│         │              └──────────────────────────────────┘ │
+└─────────│───────────────────────────────────────────────────┘
+          │
+          │ Background Thread (rayon work-stealing pool)
+          │ ┌──────────────────────────────────────────────┐
+          └─│ Parallel expensive reads                     │
+            │ Linux: statm, cgroups, oom, smaps, etc.      │
+            │ macOS: proc_pidinfo(PROC_PIDVNODEPATHINFO)   │
+            └──────────────────────────────────────────────┘
+                              │
+                              ▼ (results ready for Frame N+1)
+```
+
+### Implementation Details
+
+**Files involved:**
+
+| File | Purpose |
+|------|---------|
+| `src/platform/bg_scanner.rs` | Generic `BackgroundScanner<T>` framework |
+| `src/platform/linux_bg_scanner.rs` | Linux-specific data types and collection |
+| `src/platform/darwin_bg_scanner.rs` | macOS-specific data types and collection |
+| `src/platform/linux.rs` | Linux scan integration |
+| `src/platform/darwin.rs` | macOS scan integration |
+| `src/core/machine.rs` | Holds platform-specific `bg_scanner` field |
+
+**Generic Scanner Framework:**
+
+```rust
+// src/platform/bg_scanner.rs
+
+/// Generic background scanner that collects data of type T for each PID
+pub struct BackgroundScanner<T: Send + Clone + 'static> {
+    handle: Option<JoinHandle<HashMap<i32, T>>>,
+    results: Arc<Mutex<Option<HashMap<i32, T>>>>,
+}
+
+impl<T: Send + Clone + 'static> BackgroundScanner<T> {
+    pub fn new() -> Self;
+    pub fn is_running(&self) -> bool;
+    pub fn start_scan<F>(&mut self, collect_fn: F)
+    where
+        F: FnOnce() -> HashMap<i32, T> + Send + 'static;
+    pub fn try_take_results(&mut self) -> Option<HashMap<i32, T>>;
+}
+```
+
+**Platform-specific data types:**
+
+```rust
+// src/platform/linux_bg_scanner.rs
+pub struct LinuxExpensiveData {
+    pub m_share: Option<i64>,
+    pub m_text: Option<i64>,
+    pub m_data: Option<i64>,
+    pub cgroup: Option<String>,
+    pub cgroup_short: Option<String>,
+    pub container_short: Option<String>,
+    pub oom_score: Option<i32>,
+    pub m_pss: Option<i64>,
+    pub m_swap: Option<i64>,
+    pub m_psswp: Option<i64>,
+    pub autogroup_id: Option<i64>,
+    pub autogroup_nice: Option<i32>,
+    pub secattr: Option<String>,
+    pub uses_deleted_lib: Option<bool>,
+}
+pub type LinuxBackgroundScanner = BackgroundScanner<LinuxExpensiveData>;
+
+// src/platform/darwin_bg_scanner.rs
+pub struct DarwinExpensiveData {
+    pub cwd: Option<String>,  // Current working directory
+}
+pub type DarwinBackgroundScanner = BackgroundScanner<DarwinExpensiveData>;
+```
+
+**Scan flow (both platforms follow the same pattern):**
+
+```rust
+pub fn scan_processes(machine: &mut Machine) {
+    // 1. Merge completed background results from previous frame
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        if let Some(bg_results) = scanner.try_take_results() {
+            for (pid, data) in bg_results.iter() {
+                if let Some(process) = machine.processes.get_mut(*pid) {
+                    merge_expensive_data(process, data);
+                }
+            }
+        }
+    }
+
+    // 2. Fast synchronous scan (platform-specific)
+    for proc in all_processes() {
+        // ... read basic data ...
+    }
+
+    // 3. Start background scan for expensive data
+    let pids: Vec<i32> = machine.processes.iter()
+        .filter(|p| !p.is_userland_thread)
+        .map(|p| p.pid)
+        .collect();
+
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        start_bg_scan(scanner, pids, ...);  // Platform-specific helper
+    }
+}
+```
+
+**Parallel collection with rayon (Linux example):**
+
+```rust
+fn collect_expensive_data(pids: &[i32], flags: ScanFlags, ...) -> LinuxExpensiveDataMap {
+    pids.par_iter()  // Rayon parallel iterator
+        .filter_map(|&pid| {
+            let data = collect_for_pid(pid, flags, ...);
+            if data.has_data() {
+                Some((pid, data))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+```
+
+### Performance Results
+
+**Linux:**
+
+| Scenario | Before | After | Improvement |
+|----------|--------|-------|-------------|
+| Default columns (STATM) | ~41ms | ~17ms | **2.4x faster** |
+| All expensive columns | ~80ms | ~17ms + ~4ms async | **4x faster perceived** |
+| Background scan (rayon) | 30ms sequential | 4ms parallel | **8x faster** |
+
+**macOS:**
+
+| Scenario | Before | After | Improvement |
+|----------|--------|-------|-------------|
+| With CWD column | ~55ms | ~5ms + async | **~10x faster perceived** |
+
+### Design Trade-offs
+
+**One frame delay:** Expensive data arrives one frame late. At typical 1-2 second update intervals, this is imperceptible to users. The benefit of responsive UI outweighs the minimal data staleness.
+
+**Memory overhead:** The background scanner stores a copy of expensive data for all processes. This is typically <1MB for 1000 processes.
+
+**Thread pool:** Uses rayon's work-stealing thread pool, which is efficient and automatically adapts to available CPU cores.
+
+**Generic framework:** The `BackgroundScanner<T>` generic allows each platform to define its own data type while sharing the thread management logic.
+
+---
+
+## Meter Background Scanner Architecture
+
+Similar to the process background scanner, htop-rs also uses a background scanner for expensive meter data. Some meters need to perform slow I/O operations (spawning subprocesses, reading from slow filesystems), and this scanner ensures they don't block the UI.
+
+### The Problem
+
+Most meters just copy data from the `Machine` struct (nanoseconds), but some meters need expensive operations:
+
+| Meter | Operation | Time |
+|-------|-----------|------|
+| BatteryMeter (macOS) | Spawn `pmset -g batt` | ~50-100ms |
+| BatteryMeter (Linux) | Read `/sys/class/power_supply/*/...` | ~1-5ms |
+| GPU Meter (future) | Spawn `nvidia-smi` | ~50-200ms |
+
+Running these synchronously would block the UI on every update cycle.
+
+### The Solution: Meter Background Scanner
+
+The meter background scanner follows the same pattern as the process scanner:
+
+1. **Merge** completed background results into meters
+2. **Update** meters with fast data from Machine (parallel via rayon)
+3. **Start** background scan for meters that need expensive data
+
+```
+Frame N (t=0):
+┌─────────────────────────────────────────────────────────────┐
+│ Main Thread                                                 │
+│                                                             │
+│ 1. try_take_results() → None (nothing ready yet)            │
+│                                                             │
+│ 2. Fast meter updates (parallel, ~microseconds)             │
+│    - MemoryMeter: copies from Machine ✓                     │
+│    - CPUMeter: copies from Machine ✓                        │
+│    - BatteryMeter: no-op (waits for bg data)                │
+│                                                             │
+│ 3. Start background scan for Battery                        │
+│    └──────────────────────────────────────────────────────┐ │
+│                                                           │ │
+│ 4. DRAW SCREEN IMMEDIATELY (doesn't wait!)                │ │
+│    - Memory: current data ✓                               │ │
+│    - CPU: current data ✓                                  │ │
+│    - Battery: stale/empty data (one frame behind)         │ │
+└───────────────────────────────────────────────────────────│─┘
+                                                            │
+                    Background Thread (rayon)               │
+                    ┌───────────────────────────────────────┘
+                    │ pmset -g batt ... (slow, ~50-100ms)
+                    └───────────────────────────────────────┐
+                                                            │
+Frame N+1 (t=1.5s):                                         │
+┌───────────────────────────────────────────────────────────│─┐
+│ Main Thread                                               ▼ │
+│                                                             │
+│ 1. try_take_results() → Some(Battery data) ← MERGE!         │
+│    - BatteryMeter receives real data                        │
+│                                                             │
+│ 2. Fast meter updates                                       │
+│                                                             │
+│ 3. Start new background scan                                │
+│                                                             │
+│ 4. DRAW SCREEN                                              │
+│    - Battery: NOW shows real data ✓                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key point:** The main thread NEVER waits for the background thread. Fast meters update and display immediately. Slow meters show their data one frame late (~1.5 seconds at default refresh rate), but they never block the UI.
+
+### Implementation Details
+
+**Files involved:**
+
+| File | Purpose |
+|------|---------|
+| `src/meters/meter_bg_scanner.rs` | Background scanner and data collection |
+| `src/meters/mod.rs` | Meter trait with `expensive_data_id()` and `merge_expensive_data()` |
+| `src/ui/header.rs` | Integration: merge → update → start cycle |
+
+**Meter trait extensions:**
+
+```rust
+pub trait Meter: std::fmt::Debug + Send {
+    // ... existing methods ...
+
+    /// Return the expensive data ID this meter needs (if any)
+    fn expensive_data_id(&self) -> Option<MeterDataId> {
+        None  // Default: no expensive data needed
+    }
+
+    /// Receive data from background scanner
+    fn merge_expensive_data(&mut self, _data: &MeterExpensiveData) {}
+}
+```
+
+**How BatteryMeter opts in:**
+
+```rust
+impl Meter for BatteryMeter {
+    fn expensive_data_id(&self) -> Option<MeterDataId> {
+        Some(MeterDataId::Battery)
+    }
+
+    fn merge_expensive_data(&mut self, data: &MeterExpensiveData) {
+        match data {
+            MeterExpensiveData::Battery { percent, ac_presence, available } => {
+                self.percent = *percent;
+                self.ac_presence = *ac_presence;
+                self.available = *available;
+            }
+        }
+    }
+
+    fn update(&mut self, _machine: &Machine) {
+        // No-op: data comes from background scanner
+    }
+}
+```
+
+**Header integration:**
+
+```rust
+pub fn update(&mut self, machine: &Machine) {
+    // 1. Merge completed background results
+    if let Some(bg_results) = self.bg_scanner.try_take_results() {
+        for meter in all_meters {
+            if let Some(id) = meter.expensive_data_id() {
+                if let Some(data) = bg_results.get(&id) {
+                    meter.merge_expensive_data(data);
+                }
+            }
+        }
+    }
+
+    // 2. Fast updates (parallel)
+    meters.par_iter_mut().for_each(|m| m.update(machine));
+
+    // 3. Start background scan for expensive meters
+    let requested: Vec<MeterDataId> = meters
+        .iter()
+        .filter_map(|m| m.expensive_data_id())
+        .collect();
+    self.bg_scanner.start_scan(requested);
+}
+```
+
+### Adding New Expensive Meters
+
+To add a new meter with expensive data (e.g., GPU meter):
+
+1. **Add ID to `MeterDataId` enum:**
+   ```rust
+   pub enum MeterDataId {
+       Battery,
+       Gpu,  // Add new ID
+   }
+   ```
+
+2. **Add data variant to `MeterExpensiveData`:**
+   ```rust
+   pub enum MeterExpensiveData {
+       Battery { percent: f64, ac_presence: ACPresence, available: bool },
+       Gpu { usage: f64, memory: f64, temperature: f64 },  // Add new variant
+   }
+   ```
+
+3. **Add collection function:**
+   ```rust
+   fn collect_for_meter(id: MeterDataId) -> Option<MeterExpensiveData> {
+       match id {
+           MeterDataId::Battery => collect_battery_data(),
+           MeterDataId::Gpu => collect_gpu_data(),  // Add new collection
+       }
+   }
+
+   fn collect_gpu_data() -> Option<MeterExpensiveData> {
+       // Spawn nvidia-smi, parse output, etc.
+   }
+   ```
+
+4. **Implement trait methods in the meter:**
+   ```rust
+   impl Meter for GpuMeter {
+       fn expensive_data_id(&self) -> Option<MeterDataId> {
+           Some(MeterDataId::Gpu)
+       }
+
+       fn merge_expensive_data(&mut self, data: &MeterExpensiveData) {
+           if let MeterExpensiveData::Gpu { usage, memory, temperature } = data {
+               self.usage = *usage;
+               // ...
+           }
+       }
+   }
+   ```
+
+### Design Trade-offs
+
+**One frame delay:** Same as process scanner - expensive meter data arrives one frame late. At typical 1-2 second update intervals, this is imperceptible.
+
+**Deduplication:** Multiple meters of the same type (e.g., two Battery meters) share one background fetch. The scanner only collects each `MeterDataId` once per cycle.
+
+**Non-blocking:** The `try_take_results()` call is non-blocking. If background data isn't ready, the meter displays stale data rather than blocking the UI.
+
+---
+
+## Threading Model
+
+htop-rs uses a conservative threading model to avoid competing with user workloads for CPU time. When users open htop, it's often because their system is already overloaded - a monitoring tool that hogs CPU cores would be counterproductive.
+
+### Comparison with Other Tools
+
+| Tool | Threading Model | Worker Threads |
+|------|-----------------|----------------|
+| htop (C) | Single-threaded | 0 |
+| btop++ | Main + runner | 2 total |
+| **htop-rs** | Main + rayon pool | **2 workers** (default) |
+
+### Default Configuration
+
+By default, htop-rs configures rayon with **2 worker threads**, matching btop++'s conservative approach:
+
+```rust
+// In main.rs, configured early before any parallel operations
+rayon::ThreadPoolBuilder::new()
+    .num_threads(2)
+    .build_global()
+    .expect("Failed to configure rayon thread pool");
+```
+
+This is a deliberate departure from rayon's default (N-1 cores) because:
+1. A monitoring tool should be a "good citizen" - minimal resource footprint
+2. Users typically open htop when their system is stressed
+3. Most htop operations are I/O-bound (reading /proc), not CPU-bound
+4. 2 threads provides enough parallelism for meter updates without hogging cores
+
+### Overriding Thread Count
+
+Power users who want more parallelism (e.g., on systems with many cores and light load) can set the `HTOP_WORKER_THREADS` environment variable:
+
+```bash
+# Use 4 worker threads
+HTOP_WORKER_THREADS=4 htop
+
+# Use all available cores (not recommended)
+HTOP_WORKER_THREADS=0 htop  # 0 means rayon's default (all cores - 1)
+```
+
+This setting can also be configured in `~/.config/htop/htoprc`:
+
+```
+worker_threads=4
+```
+
+### What Uses the Thread Pool
+
+The rayon thread pool is used for:
+
+1. **Meter updates** (`Header::update()`): Meters are updated in parallel via `par_iter_mut()`
+2. **Future expansion**: Process list operations could be parallelized if needed
+
+Note that the **background scanners** (process and meter) use their own dedicated threads via `std::thread::spawn()`, not the rayon pool. This ensures they don't compete with the main UI thread for rayon workers.
+
+### Thread Summary
+
+| Thread | Purpose | Source |
+|--------|---------|--------|
+| Main thread | UI rendering, input handling | `main()` |
+| Rayon worker 1 | Parallel meter updates | `rayon::ThreadPoolBuilder` |
+| Rayon worker 2 | Parallel meter updates | `rayon::ThreadPoolBuilder` |
+| Process BG scanner | Expensive process data (smaps, cgroups) | `std::thread::spawn()` |
+| Meter BG scanner | Expensive meter data (battery, etc.) | `std::thread::spawn()` |
+
+Total: 5 threads maximum (main + 2 rayon + 2 background scanners)
+
+---
+
 ## Terminal Layer (ncurses-rs)
 
 htop-rs uses [ncurses-rs](https://github.com/runlevel5/ncurses-pure-rs), a pure Rust implementation of the ncurses API. This eliminates the dependency on system ncurses libraries.

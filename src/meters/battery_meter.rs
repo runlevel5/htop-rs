@@ -1,7 +1,12 @@
 //! Battery Meter
 //!
 //! Displays battery percentage and charging status.
+//!
+//! Battery information is collected via the background scanner since it can be
+//! expensive (especially on macOS where it spawns an external process).
+//! The meter receives updates via `merge_expensive_data()`.
 
+use super::meter_bg_scanner::{MeterDataId, MeterExpensiveData};
 use super::{draw_bar, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -17,7 +22,7 @@ pub enum ACPresence {
 }
 
 /// Battery Meter - displays battery percentage and AC status
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BatteryMeter {
     mode: MeterMode,
     percent: f64,
@@ -25,114 +30,20 @@ pub struct BatteryMeter {
     available: bool,
 }
 
+impl Default for BatteryMeter {
+    fn default() -> Self {
+        Self {
+            mode: MeterMode::Bar,
+            percent: 0.0,
+            ac_presence: ACPresence::Unknown,
+            available: false,
+        }
+    }
+}
+
 impl BatteryMeter {
     pub fn new() -> Self {
         BatteryMeter::default()
-    }
-
-    /// Get battery information (platform-specific)
-    #[cfg(target_os = "macos")]
-    fn get_battery_info() -> Option<(f64, ACPresence)> {
-        use std::process::Command;
-
-        // Use pmset to get battery info on macOS
-        let output = Command::new("pmset").arg("-g").arg("batt").output().ok()?;
-
-        let output_str = String::from_utf8_lossy(&output.stdout);
-
-        // Parse output like:
-        // Now drawing from 'Battery Power'
-        //  -InternalBattery-0 (id=...)    100%; charged; 0:00 remaining present: true
-        // OR:
-        // Now drawing from 'AC Power'
-        //  -InternalBattery-0 (id=...)    100%; charging; ...
-
-        let mut percent = None;
-        let mut ac_presence = ACPresence::Unknown;
-
-        for line in output_str.lines() {
-            if line.contains("AC Power") {
-                ac_presence = ACPresence::Online;
-            } else if line.contains("Battery Power") {
-                ac_presence = ACPresence::Offline;
-            }
-
-            // Look for percentage like "100%"
-            if let Some(pct_pos) = line.find('%') {
-                // Find the start of the number
-                let before = &line[..pct_pos];
-                if let Some(num_start) = before.rfind(|c: char| !c.is_ascii_digit() && c != '.') {
-                    if let Ok(pct) = before[num_start + 1..].trim().parse::<f64>() {
-                        percent = Some(pct);
-                    }
-                } else if let Ok(pct) = before.trim().parse::<f64>() {
-                    percent = Some(pct);
-                }
-            }
-        }
-
-        percent.map(|p| (p, ac_presence))
-    }
-
-    #[cfg(target_os = "linux")]
-    fn get_battery_info() -> Option<(f64, ACPresence)> {
-        use std::fs;
-        use std::path::Path;
-
-        let power_supply_path = Path::new("/sys/class/power_supply");
-
-        if !power_supply_path.exists() {
-            return None;
-        }
-
-        let mut total_capacity = 0.0;
-        let mut battery_count = 0;
-        let mut ac_presence = ACPresence::Unknown;
-
-        if let Ok(entries) = fs::read_dir(power_supply_path) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let path = entry.path();
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-
-                // Check for AC adapter
-                if name_str.starts_with("AC")
-                    || name_str.starts_with("ACAD")
-                    || name_str.contains("ADP")
-                {
-                    let online_path = path.join("online");
-                    if let Ok(content) = fs::read_to_string(&online_path) {
-                        ac_presence = if content.trim() == "1" {
-                            ACPresence::Online
-                        } else {
-                            ACPresence::Offline
-                        };
-                    }
-                }
-
-                // Check for battery
-                if name_str.starts_with("BAT") {
-                    let capacity_path = path.join("capacity");
-                    if let Ok(content) = fs::read_to_string(&capacity_path) {
-                        if let Ok(cap) = content.trim().parse::<f64>() {
-                            total_capacity += cap;
-                            battery_count += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        if battery_count > 0 {
-            Some((total_capacity / battery_count as f64, ac_presence))
-        } else {
-            None
-        }
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    fn get_battery_info() -> Option<(f64, ACPresence)> {
-        None
     }
 
     pub(crate) fn format_battery(&self) -> String {
@@ -160,14 +71,26 @@ impl Meter for BatteryMeter {
     }
 
     fn update(&mut self, _machine: &Machine) {
-        if let Some((percent, ac_presence)) = Self::get_battery_info() {
-            self.percent = percent;
-            self.ac_presence = ac_presence;
-            self.available = true;
-        } else {
-            self.percent = 0.0;
-            self.ac_presence = ACPresence::Unknown;
-            self.available = false;
+        // Battery data comes from background scanner via merge_expensive_data()
+        // Nothing to do here - we just display whatever data we have
+    }
+
+    fn expensive_data_id(&self) -> Option<MeterDataId> {
+        Some(MeterDataId::Battery)
+    }
+
+    fn merge_expensive_data(&mut self, data: &MeterExpensiveData) {
+        // Use match to be future-proof when more variants are added
+        match data {
+            MeterExpensiveData::Battery {
+                percent,
+                ac_presence,
+                available,
+            } => {
+                self.percent = *percent;
+                self.ac_presence = *ac_presence;
+                self.available = *available;
+            }
         }
     }
 
@@ -285,6 +208,45 @@ mod tests {
     fn test_battery_meter_default() {
         let meter = BatteryMeter::default();
         assert_eq!(meter.mode, MeterMode::Bar);
+        assert!(!meter.available);
+    }
+
+    // ==================== Background Scanner Integration Tests ====================
+
+    #[test]
+    fn test_battery_meter_expensive_data_id() {
+        let meter = BatteryMeter::new();
+        assert_eq!(meter.expensive_data_id(), Some(MeterDataId::Battery));
+    }
+
+    #[test]
+    fn test_battery_meter_merge_expensive_data() {
+        let mut meter = BatteryMeter::new();
+        assert!(!meter.available);
+
+        // Simulate background scanner providing data
+        meter.merge_expensive_data(&MeterExpensiveData::Battery {
+            percent: 75.5,
+            ac_presence: ACPresence::Online,
+            available: true,
+        });
+
+        assert!(meter.available);
+        assert_eq!(meter.percent, 75.5);
+        assert_eq!(meter.ac_presence, ACPresence::Online);
+    }
+
+    #[test]
+    fn test_battery_meter_merge_unavailable() {
+        let mut meter = BatteryMeter::new();
+
+        // Simulate no battery found
+        meter.merge_expensive_data(&MeterExpensiveData::Battery {
+            percent: 0.0,
+            ac_presence: ACPresence::Unknown,
+            available: false,
+        });
+
         assert!(!meter.available);
     }
 
