@@ -1,6 +1,6 @@
 # htop-rs
 
-<img src="logo-alternative.png" width="800" height="537" alt="htop-rs">
+<img src="logo-small.png" alt="htop-rs">
 
 A Rust port of [htop](https://htop.dev/), the beloved interactive process viewer.
 
