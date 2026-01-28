@@ -13,7 +13,7 @@ default-run = "htop-rs"
 
 [dependencies]
 # Pure Rust ncurses implementation - no C dependencies
-ncurses = { git = "https://github.com/runlevel5/ncurses-pure-rs.git", package = "ncurses-pure", features = ["wide", "mouse"] }
+ncurses = { git = "https://github.com/runlevel5/ncurses-pure-rs", package = "ncurses-pure", features = ["wide", "mouse"] }
 
 # Command line argument parsing
 clap = { version = "4.5", features = ["derive"] }
