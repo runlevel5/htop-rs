@@ -55,7 +55,7 @@ pub fn done() {
 pub fn get_uid_for_username(name: &str) -> Option<u32> {
     #[cfg(unix)]
     {
-        users::get_user_by_name(name).map(|u| u.uid())
+        uzers::get_user_by_name(name).map(|u| u.uid())
     }
     #[cfg(not(unix))]
     {

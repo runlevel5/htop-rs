@@ -179,11 +179,18 @@ mod tests {
             map
         });
 
-        // Wait for completion
-        std::thread::sleep(Duration::from_millis(150));
+        // Wait for completion with polling instead of fixed sleep
+        let mut results = None;
+        for _ in 0..50 {
+            std::thread::sleep(Duration::from_millis(10));
+            if let Some(r) = scanner.try_take_results() {
+                results = Some(r);
+                break;
+            }
+        }
 
         // Should only have results from first scan
-        let results = scanner.try_take_results().unwrap();
+        let results = results.expect("scan should have completed");
         assert!(results.contains_key(&1));
         assert!(!results.contains_key(&2));
     }
