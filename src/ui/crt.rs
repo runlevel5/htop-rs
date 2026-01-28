@@ -1922,6 +1922,19 @@ impl Crt {
         let _ = self.screen.stdscr_mut().clear();
     }
 
+    /// Clear a rectangular area of the screen (fill with spaces)
+    /// This is more efficient than clearing the whole screen when only a portion needs to be cleared
+    pub fn clear_area(&mut self, x: i32, y: i32, width: i32, height: i32) {
+        let win = self.screen.stdscr_mut();
+        let _ = win.attrset(A_NORMAL);
+        for row in y..(y + height) {
+            let _ = win.mv(row, x);
+            for _ in 0..width {
+                let _ = win.addch(' ' as u32);
+            }
+        }
+    }
+
     /// Refresh the screen
     pub fn refresh(&mut self) {
         let _ = self.screen.refresh();
