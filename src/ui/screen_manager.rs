@@ -668,6 +668,9 @@ impl ScreenManager {
             machine.scan_flags = ScanFlags::from_fields(&self.settings.current_screen().fields);
         }
 
+        // Set check_deleted_libs from highlight_deleted_exe setting
+        machine.check_deleted_libs = self.settings.highlight_deleted_exe;
+
         // Initial scan BEFORE layout so we know actual CPU count for meter heights
         platform::scan(machine);
         let cmd_params = self.build_command_str_params(crt);
@@ -740,6 +743,9 @@ impl ScreenManager {
                     machine.scan_flags =
                         ScanFlags::from_fields(&self.settings.current_screen().fields);
                 }
+
+                // Update check_deleted_libs from highlight_deleted_exe setting
+                machine.check_deleted_libs = self.settings.highlight_deleted_exe;
 
                 // Only allow sorting when sort_timeout has elapsed (like C htop)
                 // This defers sorting during rapid user interaction
