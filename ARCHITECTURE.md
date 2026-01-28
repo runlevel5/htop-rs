@@ -562,6 +562,222 @@ pub fn scan(machine: &mut Machine) {
 
 ---
 
+## Cross-Platform Background Scanner Architecture
+
+htop-rs implements an asynchronous background scanner for expensive per-process data collection. This architecture significantly improves UI responsiveness by moving slow operations off the main thread. The framework is generic and works on both Linux and macOS.
+
+### The Problem
+
+Collecting process data involves system calls that vary in cost. Some are fast, others are slow:
+
+**Linux** - Reading from `/proc`:
+
+| Operation | Time (577 processes) | Per-process |
+|-----------|---------------------|-------------|
+| `stat()` | ~11ms | ~19µs |
+| `uid()` (fstat) | ~0.5ms | ~0.8µs |
+| `cmdline()` | ~5ms | ~8µs |
+| `statm()` | ~6ms | ~11µs |
+| `cgroups()` | ~7ms | ~11µs |
+| `oom_score` | ~6ms | ~11µs |
+| `smaps_rollup` | ~7ms | ~77µs |
+| `maps` (deleted libs) | ~21ms | ~40µs |
+
+**macOS** - Using `proc_pidinfo()`:
+
+| Operation | Time (~300 processes) | Per-process |
+|-----------|----------------------|-------------|
+| `PROC_PIDTBSDINFO` | ~5ms | ~17µs |
+| `PROC_PIDVNODEPATHINFO` (cwd) | ~50ms | ~170µs |
+
+With all columns enabled, a full scan can take **~80ms on Linux** or **~55ms on macOS** - causing noticeable UI lag.
+
+### The Solution: Background Scanner
+
+htop-rs splits the scan into two phases:
+
+1. **Fast synchronous scan**: Basic data needed for every frame
+   - **Linux**: `/proc/[pid]/stat`, `uid()`, `/proc/[pid]/cmdline`, `/proc/[pid]/exe`
+   - **macOS**: `proc_pidinfo(PROC_PIDTBSDINFO)`, basic task info
+
+2. **Parallel background scan** (rayon): Expensive data collected asynchronously
+   - **Linux**: `statm`, `cgroup`, `oom_score`, `smaps_rollup`, `autogroup`, `secattr`, `maps`
+   - **macOS**: `proc_pidinfo(PROC_PIDVNODEPATHINFO)` for current working directory
+
+### Architecture Diagram
+
+```
+Frame N:
+┌─────────────────────────────────────────────────────────────┐
+│ Main Thread                                                 │
+│ ┌─────────────────┐    ┌──────────────────────────────────┐ │
+│ │ 1. Merge bg     │───▶│ 2. Fast scan                     │ │
+│ │    results      │    │    (platform-specific)           │ │
+│ └─────────────────┘    └──────────────────────────────────┘ │
+│         ▲                            │                      │
+│         │                            ▼                      │
+│         │              ┌──────────────────────────────────┐ │
+│         │              │ 3. Start background scan         │ │
+│         │              │    (spawn with rayon)            │ │
+│         │              └──────────────────────────────────┘ │
+│         │                            │                      │
+│         │                            ▼                      │
+│         │              ┌──────────────────────────────────┐ │
+│         │              │ 4. Display (with previous        │ │
+│         │              │    expensive data)               │ │
+│         │              └──────────────────────────────────┘ │
+└─────────│───────────────────────────────────────────────────┘
+          │
+          │ Background Thread (rayon work-stealing pool)
+          │ ┌──────────────────────────────────────────────┐
+          └─│ Parallel expensive reads                     │
+            │ Linux: statm, cgroups, oom, smaps, etc.      │
+            │ macOS: proc_pidinfo(PROC_PIDVNODEPATHINFO)   │
+            └──────────────────────────────────────────────┘
+                              │
+                              ▼ (results ready for Frame N+1)
+```
+
+### Implementation Details
+
+**Files involved:**
+
+| File | Purpose |
+|------|---------|
+| `src/platform/bg_scanner.rs` | Generic `BackgroundScanner<T>` framework |
+| `src/platform/linux_bg_scanner.rs` | Linux-specific data types and collection |
+| `src/platform/darwin_bg_scanner.rs` | macOS-specific data types and collection |
+| `src/platform/linux.rs` | Linux scan integration |
+| `src/platform/darwin.rs` | macOS scan integration |
+| `src/core/machine.rs` | Holds platform-specific `bg_scanner` field |
+
+**Generic Scanner Framework:**
+
+```rust
+// src/platform/bg_scanner.rs
+
+/// Generic background scanner that collects data of type T for each PID
+pub struct BackgroundScanner<T: Send + Clone + 'static> {
+    handle: Option<JoinHandle<HashMap<i32, T>>>,
+    results: Arc<Mutex<Option<HashMap<i32, T>>>>,
+}
+
+impl<T: Send + Clone + 'static> BackgroundScanner<T> {
+    pub fn new() -> Self;
+    pub fn is_running(&self) -> bool;
+    pub fn start_scan<F>(&mut self, collect_fn: F)
+    where
+        F: FnOnce() -> HashMap<i32, T> + Send + 'static;
+    pub fn try_take_results(&mut self) -> Option<HashMap<i32, T>>;
+}
+```
+
+**Platform-specific data types:**
+
+```rust
+// src/platform/linux_bg_scanner.rs
+pub struct LinuxExpensiveData {
+    pub m_share: Option<i64>,
+    pub m_text: Option<i64>,
+    pub m_data: Option<i64>,
+    pub cgroup: Option<String>,
+    pub cgroup_short: Option<String>,
+    pub container_short: Option<String>,
+    pub oom_score: Option<i32>,
+    pub m_pss: Option<i64>,
+    pub m_swap: Option<i64>,
+    pub m_psswp: Option<i64>,
+    pub autogroup_id: Option<i64>,
+    pub autogroup_nice: Option<i32>,
+    pub secattr: Option<String>,
+    pub uses_deleted_lib: Option<bool>,
+}
+pub type LinuxBackgroundScanner = BackgroundScanner<LinuxExpensiveData>;
+
+// src/platform/darwin_bg_scanner.rs
+pub struct DarwinExpensiveData {
+    pub cwd: Option<String>,  // Current working directory
+}
+pub type DarwinBackgroundScanner = BackgroundScanner<DarwinExpensiveData>;
+```
+
+**Scan flow (both platforms follow the same pattern):**
+
+```rust
+pub fn scan_processes(machine: &mut Machine) {
+    // 1. Merge completed background results from previous frame
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        if let Some(bg_results) = scanner.try_take_results() {
+            for (pid, data) in bg_results.iter() {
+                if let Some(process) = machine.processes.get_mut(*pid) {
+                    merge_expensive_data(process, data);
+                }
+            }
+        }
+    }
+
+    // 2. Fast synchronous scan (platform-specific)
+    for proc in all_processes() {
+        // ... read basic data ...
+    }
+
+    // 3. Start background scan for expensive data
+    let pids: Vec<i32> = machine.processes.iter()
+        .filter(|p| !p.is_userland_thread)
+        .map(|p| p.pid)
+        .collect();
+
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        start_bg_scan(scanner, pids, ...);  // Platform-specific helper
+    }
+}
+```
+
+**Parallel collection with rayon (Linux example):**
+
+```rust
+fn collect_expensive_data(pids: &[i32], flags: ScanFlags, ...) -> LinuxExpensiveDataMap {
+    pids.par_iter()  // Rayon parallel iterator
+        .filter_map(|&pid| {
+            let data = collect_for_pid(pid, flags, ...);
+            if data.has_data() {
+                Some((pid, data))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+```
+
+### Performance Results
+
+**Linux:**
+
+| Scenario | Before | After | Improvement |
+|----------|--------|-------|-------------|
+| Default columns (STATM) | ~41ms | ~17ms | **2.4x faster** |
+| All expensive columns | ~80ms | ~17ms + ~4ms async | **4x faster perceived** |
+| Background scan (rayon) | 30ms sequential | 4ms parallel | **8x faster** |
+
+**macOS:**
+
+| Scenario | Before | After | Improvement |
+|----------|--------|-------|-------------|
+| With CWD column | ~55ms | ~5ms + async | **~10x faster perceived** |
+
+### Design Trade-offs
+
+**One frame delay:** Expensive data arrives one frame late. At typical 1-2 second update intervals, this is imperceptible to users. The benefit of responsive UI outweighs the minimal data staleness.
+
+**Memory overhead:** The background scanner stores a copy of expensive data for all processes. This is typically <1MB for 1000 processes.
+
+**Thread pool:** Uses rayon's work-stealing thread pool, which is efficient and automatically adapts to available CPU cores.
+
+**Generic framework:** The `BackgroundScanner<T>` generic allows each platform to define its own data type while sharing the thread management logic.
+
+---
+
 ## Terminal Layer (ncurses-rs)
 
 htop-rs uses [ncurses-rs](https://github.com/runlevel5/ncurses-pure-rs), a pure Rust implementation of the ncurses API. This eliminates the dependency on system ncurses libraries.

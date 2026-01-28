@@ -527,4 +527,194 @@ fn main() {
         (worst_case_total - default_total).as_secs_f64() * 1000.0,
         worst_case_total.as_secs_f64() / default_total.as_secs_f64()
     );
+
+    // =========================================================================
+    // PARALLEL vs SEQUENTIAL BENCHMARK
+    // =========================================================================
+    println!("\n=========================================================");
+    println!("PARALLEL vs SEQUENTIAL BENCHMARK");
+    println!("=========================================================\n");
+
+    // Collect PIDs first
+    let pids: Vec<i32> = procfs::process::all_processes()
+        .unwrap()
+        .filter_map(|p| p.ok())
+        .filter_map(|p| p.stat().ok().map(|s| s.pid))
+        .collect();
+
+    println!("Testing with {} processes...\n", pids.len());
+
+    // Sequential: read stat+cmdline for all processes
+    let seq_start = Instant::now();
+    let mut seq_results = Vec::with_capacity(pids.len());
+    for &pid in &pids {
+        if let Ok(proc) = procfs::process::Process::new(pid) {
+            let stat = proc.stat().ok();
+            let cmdline = proc.cmdline().ok();
+            seq_results.push((pid, stat.is_some(), cmdline.is_some()));
+        }
+    }
+    let seq_time = seq_start.elapsed();
+    println!(
+        "Sequential (stat+cmdline): {:>8.2}ms  ({} processes)",
+        seq_time.as_secs_f64() * 1000.0,
+        seq_results.len()
+    );
+
+    // Test with different thread counts
+    let max_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+
+    for num_threads in [2, 4, 8, 16, max_threads]
+        .iter()
+        .filter(|&&n| n <= max_threads)
+    {
+        let num_threads = *num_threads;
+
+        let par_start = Instant::now();
+        let chunk_size = (pids.len() + num_threads - 1) / num_threads;
+        let chunks: Vec<_> = pids.chunks(chunk_size).collect();
+
+        let handles: Vec<_> = chunks
+            .into_iter()
+            .map(|chunk| {
+                let chunk = chunk.to_vec();
+                std::thread::spawn(move || {
+                    let mut results = Vec::with_capacity(chunk.len());
+                    for pid in chunk {
+                        if let Ok(proc) = procfs::process::Process::new(pid) {
+                            let stat = proc.stat().ok();
+                            let cmdline = proc.cmdline().ok();
+                            results.push((pid, stat.is_some(), cmdline.is_some()));
+                        }
+                    }
+                    results
+                })
+            })
+            .collect();
+
+        let par_results: Vec<_> = handles
+            .into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect();
+        let par_time = par_start.elapsed();
+
+        let speedup = seq_time.as_secs_f64() / par_time.as_secs_f64();
+        println!(
+            "Parallel {:>2} threads:        {:>8.2}ms  ({:.2}x speedup)",
+            num_threads,
+            par_time.as_secs_f64() * 1000.0,
+            speedup
+        );
+    }
+    println!("─────────────────────────────────────────────────────────");
+
+    // =========================================================================
+    // PARALLEL EXPENSIVE OPERATIONS ONLY
+    // =========================================================================
+    println!("\n=========================================================");
+    println!("PARALLEL EXPENSIVE OPERATIONS (statm+cgroups+oom+smaps)");
+    println!("=========================================================\n");
+
+    // Sequential expensive operations
+    let exp_seq_start = Instant::now();
+    for &pid in &pids {
+        if let Ok(proc) = procfs::process::Process::new(pid) {
+            let _ = proc.statm();
+            let _ = proc.cgroups();
+            let _ = std::fs::read_to_string(format!("/proc/{}/oom_score", pid));
+            let _ = std::fs::read_to_string(format!("/proc/{}/smaps_rollup", pid));
+        }
+    }
+    let exp_seq_time = exp_seq_start.elapsed();
+    println!(
+        "Sequential expensive ops:  {:>8.2}ms  ({} processes)",
+        exp_seq_time.as_secs_f64() * 1000.0,
+        pids.len()
+    );
+
+    // Parallel expensive operations with different thread counts
+    for num_threads in [2, 4, 8].iter() {
+        let num_threads = *num_threads;
+
+        let exp_par_start = Instant::now();
+        let chunk_size = (pids.len() + num_threads - 1) / num_threads;
+        let chunks: Vec<_> = pids.chunks(chunk_size).collect();
+
+        let handles: Vec<_> = chunks
+            .into_iter()
+            .map(|chunk| {
+                let chunk = chunk.to_vec();
+                std::thread::spawn(move || {
+                    for pid in chunk {
+                        if let Ok(proc) = procfs::process::Process::new(pid) {
+                            let _ = proc.statm();
+                            let _ = proc.cgroups();
+                            let _ = std::fs::read_to_string(format!("/proc/{}/oom_score", pid));
+                            let _ = std::fs::read_to_string(format!("/proc/{}/smaps_rollup", pid));
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            let _ = h.join();
+        }
+        let exp_par_time = exp_par_start.elapsed();
+
+        let speedup = exp_seq_time.as_secs_f64() / exp_par_time.as_secs_f64();
+        println!(
+            "Parallel {:>2} threads:        {:>8.2}ms  ({:.2}x speedup)",
+            num_threads,
+            exp_par_time.as_secs_f64() * 1000.0,
+            speedup
+        );
+    }
+    println!("─────────────────────────────────────────────────────────");
+
+    // =========================================================================
+    // RAYON PARALLEL TEST
+    // =========================================================================
+    println!("\n=========================================================");
+    println!("RAYON PARALLEL EXPENSIVE OPERATIONS");
+    println!("=========================================================\n");
+
+    use rayon::prelude::*;
+
+    // Warm up rayon thread pool
+    let _: Vec<_> = (0..100).into_par_iter().map(|x| x * 2).collect();
+
+    // Test with rayon
+    let rayon_start = Instant::now();
+    let _results: Vec<_> = pids
+        .par_iter()
+        .filter_map(|&pid| {
+            if let Ok(proc) = procfs::process::Process::new(pid) {
+                let statm = proc.statm().ok();
+                let cgroups = proc.cgroups().ok();
+                let oom = std::fs::read_to_string(format!("/proc/{}/oom_score", pid)).ok();
+                let smaps = std::fs::read_to_string(format!("/proc/{}/smaps_rollup", pid)).ok();
+                Some((
+                    pid,
+                    statm.is_some(),
+                    cgroups.is_some(),
+                    oom.is_some(),
+                    smaps.is_some(),
+                ))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let rayon_time = rayon_start.elapsed();
+
+    let rayon_speedup = exp_seq_time.as_secs_f64() / rayon_time.as_secs_f64();
+    println!(
+        "Rayon (work-stealing):     {:>8.2}ms  ({:.2}x speedup vs sequential)",
+        rayon_time.as_secs_f64() * 1000.0,
+        rayon_speedup
+    );
+    println!("─────────────────────────────────────────────────────────");
 }

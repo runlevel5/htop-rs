@@ -1,11 +1,21 @@
 //! Battery Meter
 //!
 //! Displays battery percentage and charging status.
+//!
+//! Battery information is cached and only refreshed every few seconds since
+//! battery state changes slowly and reading it can be expensive (especially
+//! on macOS where it spawns an external process).
+
+use std::time::{Duration, Instant};
 
 use super::{draw_bar, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
+
+/// How often to actually refresh battery info (in seconds)
+/// Battery state changes slowly, so no need to check every update cycle
+const BATTERY_REFRESH_INTERVAL_SECS: u64 = 10;
 
 /// Battery status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -17,17 +27,39 @@ pub enum ACPresence {
 }
 
 /// Battery Meter - displays battery percentage and AC status
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BatteryMeter {
     mode: MeterMode,
     percent: f64,
     ac_presence: ACPresence,
     available: bool,
+    /// Last time we actually fetched battery info
+    last_update: Option<Instant>,
+}
+
+impl Default for BatteryMeter {
+    fn default() -> Self {
+        Self {
+            mode: MeterMode::Bar,
+            percent: 0.0,
+            ac_presence: ACPresence::Unknown,
+            available: false,
+            last_update: None,
+        }
+    }
 }
 
 impl BatteryMeter {
     pub fn new() -> Self {
         BatteryMeter::default()
+    }
+
+    /// Check if we should refresh battery info based on time elapsed
+    fn should_refresh(&self) -> bool {
+        match self.last_update {
+            None => true, // Never updated, should refresh
+            Some(last) => last.elapsed() >= Duration::from_secs(BATTERY_REFRESH_INTERVAL_SECS),
+        }
     }
 
     /// Get battery information (platform-specific)
@@ -160,6 +192,12 @@ impl Meter for BatteryMeter {
     }
 
     fn update(&mut self, _machine: &Machine) {
+        // Only refresh battery info periodically since it's expensive
+        // (especially on macOS where we spawn pmset) and battery state changes slowly
+        if !self.should_refresh() {
+            return;
+        }
+
         if let Some((percent, ac_presence)) = Self::get_battery_info() {
             self.percent = percent;
             self.ac_presence = ac_presence;
@@ -169,6 +207,8 @@ impl Meter for BatteryMeter {
             self.ac_presence = ACPresence::Unknown;
             self.available = false;
         }
+
+        self.last_update = Some(Instant::now());
     }
 
     fn draw(
@@ -279,6 +319,7 @@ mod tests {
         assert_eq!(meter.percent, 0.0);
         assert_eq!(meter.ac_presence, ACPresence::Unknown);
         assert!(!meter.available);
+        assert!(meter.last_update.is_none());
     }
 
     #[test]
@@ -286,6 +327,24 @@ mod tests {
         let meter = BatteryMeter::default();
         assert_eq!(meter.mode, MeterMode::Bar);
         assert!(!meter.available);
+        assert!(meter.last_update.is_none());
+    }
+
+    // ==================== Caching Tests ====================
+
+    #[test]
+    fn test_battery_meter_should_refresh_initially() {
+        let meter = BatteryMeter::new();
+        // Should refresh when never updated
+        assert!(meter.should_refresh());
+    }
+
+    #[test]
+    fn test_battery_meter_should_not_refresh_immediately_after_update() {
+        let mut meter = BatteryMeter::new();
+        meter.last_update = Some(Instant::now());
+        // Should not refresh immediately after an update
+        assert!(!meter.should_refresh());
     }
 
     // ==================== ACPresence Tests ====================

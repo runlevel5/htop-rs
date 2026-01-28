@@ -263,6 +263,14 @@ pub struct Machine {
 
     // Dynamic field widths for columns
     pub field_widths: FieldWidths,
+
+    // Background scanner for expensive /proc reads (Linux only)
+    #[cfg(target_os = "linux")]
+    pub bg_scanner: Option<crate::platform::linux_bg_scanner::LinuxBackgroundScanner>,
+
+    // Background scanner for expensive syscalls (macOS only)
+    #[cfg(target_os = "macos")]
+    pub bg_scanner: Option<crate::platform::darwin_bg_scanner::DarwinBackgroundScanner>,
 }
 
 impl Machine {
@@ -337,6 +345,10 @@ impl Machine {
             threads_discovered: false,
             initial_scan_done: false,
             field_widths: FieldWidths::new(),
+            #[cfg(target_os = "linux")]
+            bg_scanner: None,
+            #[cfg(target_os = "macos")]
+            bg_scanner: None,
         }
     }
 

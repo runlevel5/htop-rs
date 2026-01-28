@@ -15,6 +15,10 @@ use std::time::Duration;
 use crate::core::{CpuData, Machine};
 use crate::core::{Process, ProcessState};
 
+use super::darwin_bg_scanner::{
+    start_darwin_bg_scan, DarwinBackgroundScanner, DarwinExpensiveData,
+};
+
 // sysctl MIB constants
 const CTL_KERN: c_int = 1;
 const CTL_HW: c_int = 6;
@@ -822,6 +826,13 @@ fn get_process_cwd(pid: i32) -> Option<String> {
     None
 }
 
+/// Merge expensive data from background scanner into a process
+fn merge_expensive_data(process: &mut Process, data: &DarwinExpensiveData) {
+    if let Some(ref v) = data.cwd {
+        process.cwd = Some(v.clone());
+    }
+}
+
 /// Scan all processes
 pub fn scan_processes(machine: &mut Machine) {
     scan_processes_with_settings(machine, false);
@@ -829,6 +840,34 @@ pub fn scan_processes(machine: &mut Machine) {
 
 /// Scan all processes with settings control
 pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names: bool) {
+    // Timing instrumentation (enabled via HTOP_DEBUG_TIMING=1 env var)
+    let debug_timing = std::env::var("HTOP_DEBUG_TIMING")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let scan_start = if debug_timing {
+        Some(std::time::Instant::now())
+    } else {
+        None
+    };
+
+    // Merge any completed background scan results into processes
+    // This applies data from the previous frame's background scan
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        if let Some(bg_results) = scanner.try_take_results() {
+            if debug_timing {
+                eprintln!(
+                    "[SCAN-DARWIN] Merging {} background results",
+                    bg_results.len()
+                );
+            }
+            for (pid, data) in bg_results.iter() {
+                if let Some(process) = machine.processes.get_mut(*pid) {
+                    merge_expensive_data(process, data);
+                }
+            }
+        }
+    }
+
     // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
     // This allows widths to shrink back when there are no longer processes with wide values
     machine.field_widths.reset_auto_widths();
@@ -1077,8 +1116,8 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             }
         }
 
-        // Get current working directory (matching C htop DarwinProcess_updateCwd)
-        process.cwd = get_process_cwd(pid);
+        // CWD is now fetched by background scanner - don't fetch synchronously
+        // The merged results from the previous scan cycle will be applied
 
         // Task info
         if task_size > 0 {
@@ -1164,6 +1203,36 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
     machine
         .field_widths
         .update_percent_cpu_width(max_percent_cpu);
+
+    // Start background scan for expensive data (cwd)
+    // Collect PIDs of all processes for parallel processing
+    let bg_pids: Vec<i32> = machine
+        .processes
+        .processes
+        .iter()
+        .filter(|p| p.updated)
+        .map(|p| p.pid)
+        .collect();
+
+    // Initialize background scanner if needed
+    if machine.bg_scanner.is_none() {
+        machine.bg_scanner = Some(DarwinBackgroundScanner::new());
+    }
+
+    // Start background scan
+    if let Some(ref mut scanner) = machine.bg_scanner {
+        start_darwin_bg_scan(scanner, bg_pids);
+    }
+
+    // Output timing if debug enabled
+    if let Some(start) = scan_start {
+        let elapsed = start.elapsed();
+        eprintln!(
+            "[SCAN-DARWIN] {:>8.2}ms ({} processes)",
+            elapsed.as_secs_f64() * 1000.0,
+            machine.processes.len()
+        );
+    }
 }
 
 /// Scan file descriptor statistics using sysctl
