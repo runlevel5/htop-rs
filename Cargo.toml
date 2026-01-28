@@ -1,6 +1,6 @@
 [package]
 name = "htop-rs"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.93.0"
 authors = ["Trung Lê"]
@@ -26,7 +26,7 @@ thiserror = "2.0"
 chrono = "0.4"
 
 # User/group information
-users = "0.11"
+uzers = "0.12"
 
 # Lazy static for global state
 lazy_static = "1.5"

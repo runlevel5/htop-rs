@@ -142,7 +142,7 @@ impl UsersTable {
             // Try to look up the username
             #[cfg(unix)]
             {
-                if let Some(user) = users::get_user_by_uid(uid) {
+                if let Some(user) = uzers::get_user_by_uid(uid) {
                     return user.name().to_string_lossy().to_string();
                 }
             }
