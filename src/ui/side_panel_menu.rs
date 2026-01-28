@@ -69,6 +69,10 @@ pub fn run_side_panel_menu(
 
     let result = run_panel_event_loop(crt, machine, ctx, panel);
 
+    // Clear the side panel area before restoring main panel
+    // This prevents artifacts and avoids the need for a full screen clear
+    crt.clear_area(0, panel_y, panel_width, panel_height + 1); // +1 for function bar area
+
     // Restore main panel position
     ctx.main_panel.move_to(orig_main_x, panel_y);
     ctx.main_panel.resize(orig_main_w, panel_height);
