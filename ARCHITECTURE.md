@@ -778,6 +778,211 @@ fn collect_expensive_data(pids: &[i32], flags: ScanFlags, ...) -> LinuxExpensive
 
 ---
 
+## Meter Background Scanner Architecture
+
+Similar to the process background scanner, htop-rs also uses a background scanner for expensive meter data. Some meters need to perform slow I/O operations (spawning subprocesses, reading from slow filesystems), and this scanner ensures they don't block the UI.
+
+### The Problem
+
+Most meters just copy data from the `Machine` struct (nanoseconds), but some meters need expensive operations:
+
+| Meter | Operation | Time |
+|-------|-----------|------|
+| BatteryMeter (macOS) | Spawn `pmset -g batt` | ~50-100ms |
+| BatteryMeter (Linux) | Read `/sys/class/power_supply/*/...` | ~1-5ms |
+| GPU Meter (future) | Spawn `nvidia-smi` | ~50-200ms |
+
+Running these synchronously would block the UI on every update cycle.
+
+### The Solution: Meter Background Scanner
+
+The meter background scanner follows the same pattern as the process scanner:
+
+1. **Merge** completed background results into meters
+2. **Update** meters with fast data from Machine (parallel via rayon)
+3. **Start** background scan for meters that need expensive data
+
+```
+Frame N (t=0):
+┌─────────────────────────────────────────────────────────────┐
+│ Main Thread                                                 │
+│                                                             │
+│ 1. try_take_results() → None (nothing ready yet)            │
+│                                                             │
+│ 2. Fast meter updates (parallel, ~microseconds)             │
+│    - MemoryMeter: copies from Machine ✓                     │
+│    - CPUMeter: copies from Machine ✓                        │
+│    - BatteryMeter: no-op (waits for bg data)                │
+│                                                             │
+│ 3. Start background scan for Battery                        │
+│    └──────────────────────────────────────────────────────┐ │
+│                                                           │ │
+│ 4. DRAW SCREEN IMMEDIATELY (doesn't wait!)                │ │
+│    - Memory: current data ✓                               │ │
+│    - CPU: current data ✓                                  │ │
+│    - Battery: stale/empty data (one frame behind)         │ │
+└───────────────────────────────────────────────────────────│─┘
+                                                            │
+                    Background Thread (rayon)               │
+                    ┌───────────────────────────────────────┘
+                    │ pmset -g batt ... (slow, ~50-100ms)
+                    └───────────────────────────────────────┐
+                                                            │
+Frame N+1 (t=1.5s):                                         │
+┌───────────────────────────────────────────────────────────│─┐
+│ Main Thread                                               ▼ │
+│                                                             │
+│ 1. try_take_results() → Some(Battery data) ← MERGE!         │
+│    - BatteryMeter receives real data                        │
+│                                                             │
+│ 2. Fast meter updates                                       │
+│                                                             │
+│ 3. Start new background scan                                │
+│                                                             │
+│ 4. DRAW SCREEN                                              │
+│    - Battery: NOW shows real data ✓                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key point:** The main thread NEVER waits for the background thread. Fast meters update and display immediately. Slow meters show their data one frame late (~1.5 seconds at default refresh rate), but they never block the UI.
+
+### Implementation Details
+
+**Files involved:**
+
+| File | Purpose |
+|------|---------|
+| `src/meters/meter_bg_scanner.rs` | Background scanner and data collection |
+| `src/meters/mod.rs` | Meter trait with `expensive_data_id()` and `merge_expensive_data()` |
+| `src/ui/header.rs` | Integration: merge → update → start cycle |
+
+**Meter trait extensions:**
+
+```rust
+pub trait Meter: std::fmt::Debug + Send {
+    // ... existing methods ...
+
+    /// Return the expensive data ID this meter needs (if any)
+    fn expensive_data_id(&self) -> Option<MeterDataId> {
+        None  // Default: no expensive data needed
+    }
+
+    /// Receive data from background scanner
+    fn merge_expensive_data(&mut self, _data: &MeterExpensiveData) {}
+}
+```
+
+**How BatteryMeter opts in:**
+
+```rust
+impl Meter for BatteryMeter {
+    fn expensive_data_id(&self) -> Option<MeterDataId> {
+        Some(MeterDataId::Battery)
+    }
+
+    fn merge_expensive_data(&mut self, data: &MeterExpensiveData) {
+        match data {
+            MeterExpensiveData::Battery { percent, ac_presence, available } => {
+                self.percent = *percent;
+                self.ac_presence = *ac_presence;
+                self.available = *available;
+            }
+        }
+    }
+
+    fn update(&mut self, _machine: &Machine) {
+        // No-op: data comes from background scanner
+    }
+}
+```
+
+**Header integration:**
+
+```rust
+pub fn update(&mut self, machine: &Machine) {
+    // 1. Merge completed background results
+    if let Some(bg_results) = self.bg_scanner.try_take_results() {
+        for meter in all_meters {
+            if let Some(id) = meter.expensive_data_id() {
+                if let Some(data) = bg_results.get(&id) {
+                    meter.merge_expensive_data(data);
+                }
+            }
+        }
+    }
+
+    // 2. Fast updates (parallel)
+    meters.par_iter_mut().for_each(|m| m.update(machine));
+
+    // 3. Start background scan for expensive meters
+    let requested: Vec<MeterDataId> = meters
+        .iter()
+        .filter_map(|m| m.expensive_data_id())
+        .collect();
+    self.bg_scanner.start_scan(requested);
+}
+```
+
+### Adding New Expensive Meters
+
+To add a new meter with expensive data (e.g., GPU meter):
+
+1. **Add ID to `MeterDataId` enum:**
+   ```rust
+   pub enum MeterDataId {
+       Battery,
+       Gpu,  // Add new ID
+   }
+   ```
+
+2. **Add data variant to `MeterExpensiveData`:**
+   ```rust
+   pub enum MeterExpensiveData {
+       Battery { percent: f64, ac_presence: ACPresence, available: bool },
+       Gpu { usage: f64, memory: f64, temperature: f64 },  // Add new variant
+   }
+   ```
+
+3. **Add collection function:**
+   ```rust
+   fn collect_for_meter(id: MeterDataId) -> Option<MeterExpensiveData> {
+       match id {
+           MeterDataId::Battery => collect_battery_data(),
+           MeterDataId::Gpu => collect_gpu_data(),  // Add new collection
+       }
+   }
+
+   fn collect_gpu_data() -> Option<MeterExpensiveData> {
+       // Spawn nvidia-smi, parse output, etc.
+   }
+   ```
+
+4. **Implement trait methods in the meter:**
+   ```rust
+   impl Meter for GpuMeter {
+       fn expensive_data_id(&self) -> Option<MeterDataId> {
+           Some(MeterDataId::Gpu)
+       }
+
+       fn merge_expensive_data(&mut self, data: &MeterExpensiveData) {
+           if let MeterExpensiveData::Gpu { usage, memory, temperature } = data {
+               self.usage = *usage;
+               // ...
+           }
+       }
+   }
+   ```
+
+### Design Trade-offs
+
+**One frame delay:** Same as process scanner - expensive meter data arrives one frame late. At typical 1-2 second update intervals, this is imperceptible.
+
+**Deduplication:** Multiple meters of the same type (e.g., two Battery meters) share one background fetch. The scanner only collects each `MeterDataId` once per cycle.
+
+**Non-blocking:** The `try_take_results()` call is non-blocking. If background data isn't ready, the meter displays stale data rather than blocking the UI.
+
+---
+
 ## Terminal Layer (ncurses-rs)
 
 htop-rs uses [ncurses-rs](https://github.com/runlevel5/ncurses-pure-rs), a pure Rust implementation of the ncurses API. This eliminates the dependency on system ncurses libraries.
