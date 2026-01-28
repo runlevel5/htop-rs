@@ -549,11 +549,17 @@ pub fn scan_processes(machine: &mut Machine) {
         }
 
         // Check for deleted libraries by scanning /proc/PID/maps
-        // Only check if exe is not deleted (if exe is deleted, no need to check libs)
-        // and only for non-kernel, non-userland threads
+        // Only check if:
+        // - check_deleted_libs is enabled (highlight_deleted_exe setting)
+        // - exe is not deleted (if exe is deleted, no need to check libs)
+        // - not a kernel thread or userland thread
         // Throttle check to every ~2 seconds per process (like C htop) to avoid performance hit
         const DELETED_LIB_CHECK_INTERVAL_MS: u64 = 2000;
-        if !process.exe_deleted && !process.is_kernel_thread && !process.is_userland_thread {
+        if machine.check_deleted_libs
+            && !process.exe_deleted
+            && !process.is_kernel_thread
+            && !process.is_userland_thread
+        {
             let time_since_last_check = machine
                 .realtime_ms
                 .saturating_sub(process.last_deleted_lib_check_ms);

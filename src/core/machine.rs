@@ -246,6 +246,10 @@ pub struct Machine {
     pub show_cpu_frequency: bool,
     pub hide_userland_threads: bool,
 
+    /// Whether to check for deleted libraries (highlight_deleted_exe setting)
+    /// When false, skips expensive /proc/PID/maps scanning
+    pub check_deleted_libs: bool,
+
     // Scan flags for conditional /proc reads (computed from current screen's fields)
     #[cfg(target_os = "linux")]
     pub scan_flags: ScanFlags,
@@ -327,6 +331,7 @@ impl Machine {
             update_process_names: false,
             show_cpu_frequency: false,
             hide_userland_threads: false,
+            check_deleted_libs: true, // Default to true, matches highlight_deleted_exe default
             #[cfg(target_os = "linux")]
             scan_flags: ScanFlags::empty(),
             threads_discovered: false,
