@@ -213,6 +213,12 @@ pub fn scan_cpu(machine: &mut Machine) {
     if let Ok(mut guard) = PREV_CPU_TIMES.lock() {
         *guard = Some(kernel_stats.cpu_time.clone());
     }
+
+    // Set running tasks from /proc/stat procs_running (like C htop does)
+    // This is more accurate than counting processes with state 'R'
+    if let Some(procs_running) = kernel_stats.procs_running {
+        machine.running_tasks = procs_running;
+    }
 }
 
 /// Update CPU data from procfs CpuTime
@@ -442,6 +448,12 @@ pub fn scan_processes(machine: &mut Machine) {
     // Reset auto-width fields at start of scan (matches C htop Row_resetFieldWidths)
     // This allows widths to shrink back when there are no longer processes with wide values
     machine.field_widths.reset_auto_widths();
+
+    // Reset task counts at start of scan (like Darwin does)
+    // Note: running_tasks is set from /proc/stat procs_running in scan_cpu()
+    machine.total_tasks = 0;
+    machine.userland_threads = 0;
+    machine.kernel_threads = 0;
 
     let all_procs = match procfs::process::all_processes() {
         Ok(procs) => procs,
@@ -674,6 +686,13 @@ pub fn scan_processes(machine: &mut Machine) {
 
         process.updated = true;
 
+        // Count task statistics (matching C htop behavior)
+        // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
+        machine.total_tasks += 1;
+        if process.is_kernel_thread {
+            machine.kernel_threads += 1;
+        }
+
         // Store main process info for thread inheritance
         let main_uid = process.uid;
         let main_user = process.user.clone();
@@ -822,6 +841,12 @@ pub fn scan_processes(machine: &mut Machine) {
                     }
 
                     thread.updated = true;
+
+                    // Count userland thread statistics
+                    // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
+                    machine.total_tasks += 1;
+                    machine.userland_threads += 1;
+
                     machine.processes.add(thread, machine.monotonic_ms);
                 }
             }
