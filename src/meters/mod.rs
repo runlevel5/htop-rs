@@ -2042,6 +2042,115 @@ mod tests {
     }
 
     // =========================================================================
+    // GRAPH_DOTS_UTF8 tests
+    // =========================================================================
+
+    #[test]
+    fn test_graph_dots_utf8_array_length() {
+        // Array should have exactly 25 elements (5x5 grid for left_dots * 5 + right_dots)
+        assert_eq!(GRAPH_DOTS_UTF8.len(), 25);
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_empty_is_space() {
+        // Index 0 (left=0, right=0) should be a space
+        assert_eq!(GRAPH_DOTS_UTF8[0], " ");
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_full_is_full_block() {
+        // Index 24 (left=4, right=4) should be full braille block
+        assert_eq!(GRAPH_DOTS_UTF8[24], "⣿");
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_index_calculation() {
+        // Test the index formula: left_dots * 5 + right_dots
+        // Each value 0-4 represents number of dots lit in that column
+
+        // left=0, right=1 -> index 1
+        assert_eq!(GRAPH_DOTS_UTF8[0 * 5 + 1], "⢀");
+
+        // left=1, right=0 -> index 5
+        assert_eq!(GRAPH_DOTS_UTF8[1 * 5 + 0], "⡀");
+
+        // left=2, right=2 -> index 12
+        assert_eq!(GRAPH_DOTS_UTF8[2 * 5 + 2], "⣤");
+
+        // left=4, right=0 -> index 20
+        assert_eq!(GRAPH_DOTS_UTF8[4 * 5 + 0], "⡇");
+
+        // left=0, right=4 -> index 4
+        assert_eq!(GRAPH_DOTS_UTF8[0 * 5 + 4], "⢸");
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_all_valid_indices() {
+        // Verify all valid index combinations (0-4 for each) return valid strings
+        for left_dots in 0..=4 {
+            for right_dots in 0..=4 {
+                let idx = left_dots * 5 + right_dots;
+                let result = GRAPH_DOTS_UTF8.get(idx);
+                assert!(
+                    result.is_some(),
+                    "Index {} (left={}, right={}) should be valid",
+                    idx,
+                    left_dots,
+                    right_dots
+                );
+                assert!(
+                    !result.unwrap().is_empty() || idx == 0,
+                    "Character at index {} should not be empty (except space at 0)",
+                    idx
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_out_of_bounds_safe() {
+        // Using get() should return None for out-of-bounds indices
+        assert!(GRAPH_DOTS_UTF8.get(25).is_none());
+        assert!(GRAPH_DOTS_UTF8.get(100).is_none());
+
+        // With unwrap_or, should return fallback
+        assert_eq!(GRAPH_DOTS_UTF8.get(25).unwrap_or(&" "), &" ");
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_symmetry() {
+        // Test some symmetric patterns
+        // left=1, right=1 should show dots in both columns
+        assert_eq!(GRAPH_DOTS_UTF8[1 * 5 + 1], "⣀");
+
+        // left=3, right=3 should show 3 dots in each column
+        assert_eq!(GRAPH_DOTS_UTF8[3 * 5 + 3], "⣶");
+    }
+
+    #[test]
+    fn test_graph_dots_utf8_row_patterns() {
+        // Test first row (left=0, varying right)
+        assert_eq!(GRAPH_DOTS_UTF8[0], " ");
+        assert_eq!(GRAPH_DOTS_UTF8[1], "⢀");
+        assert_eq!(GRAPH_DOTS_UTF8[2], "⢠");
+        assert_eq!(GRAPH_DOTS_UTF8[3], "⢰");
+        assert_eq!(GRAPH_DOTS_UTF8[4], "⢸");
+
+        // Test last row (left=4, varying right)
+        assert_eq!(GRAPH_DOTS_UTF8[20], "⡇");
+        assert_eq!(GRAPH_DOTS_UTF8[21], "⣇");
+        assert_eq!(GRAPH_DOTS_UTF8[22], "⣧");
+        assert_eq!(GRAPH_DOTS_UTF8[23], "⣷");
+        assert_eq!(GRAPH_DOTS_UTF8[24], "⣿");
+    }
+
+    #[test]
+    fn test_pixperrow_utf8_constant() {
+        // Each braille character has 4 vertical dots per column
+        assert_eq!(PIXPERROW_UTF8, 4);
+    }
+
+    // =========================================================================
     // GraphData tests
     // =========================================================================
 
