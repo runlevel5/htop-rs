@@ -215,14 +215,7 @@ impl StackedGraphData {
             }
 
             // Clamp each segment to 0.0-1.0
-            let clamped = [
-                segments[0].clamp(0.0, 1.0),
-                segments[1].clamp(0.0, 1.0),
-                segments[2].clamp(0.0, 1.0),
-                segments[3].clamp(0.0, 1.0),
-                segments[4].clamp(0.0, 1.0),
-            ];
-            self.values.push(clamped);
+            self.values.push(segments.map(|v| v.clamp(0.0, 1.0)));
             true
         } else {
             false
@@ -273,17 +266,8 @@ impl CpuStackedGraphData {
             }
 
             // Normalize from percentage (0-100) to 0.0-1.0 and clamp
-            let normalized = [
-                (segments[0] / 100.0).clamp(0.0, 1.0),
-                (segments[1] / 100.0).clamp(0.0, 1.0),
-                (segments[2] / 100.0).clamp(0.0, 1.0),
-                (segments[3] / 100.0).clamp(0.0, 1.0),
-                (segments[4] / 100.0).clamp(0.0, 1.0),
-                (segments[5] / 100.0).clamp(0.0, 1.0),
-                (segments[6] / 100.0).clamp(0.0, 1.0),
-                (segments[7] / 100.0).clamp(0.0, 1.0),
-            ];
-            self.values.push(normalized);
+            self.values
+                .push(segments.map(|v| (v / 100.0).clamp(0.0, 1.0)));
             true
         } else {
             false
@@ -334,8 +318,7 @@ impl SwapStackedGraphData {
             }
 
             // Clamp each segment to 0.0-1.0
-            let clamped = [segments[0].clamp(0.0, 1.0), segments[1].clamp(0.0, 1.0)];
-            self.values.push(clamped);
+            self.values.push(segments.map(|v| v.clamp(0.0, 1.0)));
             true
         } else {
             false
@@ -389,12 +372,7 @@ impl LoadStackedGraphData {
             }
 
             // Store raw values (will be normalized at draw time for self-scaling)
-            let clamped = [
-                segments[0].max(0.0),
-                segments[1].max(0.0),
-                segments[2].max(0.0),
-            ];
-            self.values.push(clamped);
+            self.values.push(segments.map(|v| v.max(0.0)));
             true
         } else {
             false
@@ -458,13 +436,7 @@ impl TasksStackedGraphData {
             }
 
             // Store raw values (will be normalized at draw time for self-scaling)
-            let clamped = [
-                segments[0].max(0.0),
-                segments[1].max(0.0),
-                segments[2].max(0.0),
-                segments[3].max(0.0),
-            ];
-            self.values.push(clamped);
+            self.values.push(segments.map(|v| v.max(0.0)));
             true
         } else {
             false
