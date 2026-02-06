@@ -1123,7 +1123,8 @@ impl Crt {
         self.colors[ColorElement::CheckBox as usize] = color_pair(COLOR_BLUE, COLOR_WHITE);
         self.colors[ColorElement::CheckMark as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
         self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_BLACK, COLOR_WHITE);
-        self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
+        self.colors[ColorElement::Hostname as usize] =
+            color_pair(COLOR_BLACK, COLOR_WHITE) | A_BOLD;
         self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
         self.colors[ColorElement::CpuNiceText as usize] = color_pair(COLOR_CYAN, COLOR_WHITE);
         self.colors[ColorElement::CpuNormal as usize] = color_pair(COLOR_GREEN, COLOR_WHITE);
@@ -1519,7 +1520,8 @@ impl Crt {
         self.colors[ColorElement::CheckMark as usize] =
             color_pair(COLOR_GREEN, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::CheckText as usize] = color_pair(COLOR_CYAN, COLOR_BLACK);
-        self.colors[ColorElement::Hostname as usize] = color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
+        self.colors[ColorElement::Hostname as usize] =
+            color_pair(COLOR_WHITE, COLOR_BLACK) | A_BOLD;
         self.colors[ColorElement::CpuNice as usize] = color_pair(COLOR_BLUE, COLOR_BLACK);
         self.colors[ColorElement::CpuNiceText as usize] =
             color_pair(COLOR_BLUE, COLOR_BLACK) | A_BOLD;
