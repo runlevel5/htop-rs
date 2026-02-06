@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_bar, draw_graph, draw_led, GraphData, Meter, MeterMode};
+use super::{draw_bar_with_text, draw_graph, draw_led, BarSegment, GraphData, Meter, MeterMode};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -21,7 +21,7 @@ enum RateStatus {
 /// Network IO Meter
 ///
 /// Displays network receive/transmit rates and packet counts.
-/// In text mode, shows "rx: XiB/s tx: YiB/s (rx_pps/tx_pps pps)".
+/// In text mode, shows "rx: XiB/s tx: YiB/s rx_pps/tx_pps pkt/s".
 #[derive(Debug)]
 pub struct NetworkIOMeter {
     mode: MeterMode,
@@ -85,7 +85,7 @@ impl Meter for NetworkIOMeter {
     }
 
     fn caption(&self) -> &str {
-        "Net"
+        "Network"
     }
 
     fn update(&mut self, machine: &Machine) {
@@ -123,71 +123,48 @@ impl Meter for NetworkIOMeter {
     ) {
         match self.mode {
             MeterMode::Bar => {
-                // Extract all colors BEFORE with_window to avoid borrow conflicts
-                let caption_attr = crt.color(ColorElement::MeterText);
-                let reset_attr = crt.color(ColorElement::ResetColor);
-                let value_attr = crt.color(ColorElement::MeterValue);
+                // C htop style: single bar with text inside
+                // Format: "Net[|||||      rx: XiB/s tx: YiB/s rx_pps/tx_pps pkt/s]"
+
+                // Handle non-data states
+                let text = if self.status != RateStatus::Data {
+                    match self.status {
+                        RateStatus::Init => "init".to_string(),
+                        RateStatus::Stale => "stale".to_string(),
+                        RateStatus::NoData => "no data".to_string(),
+                        RateStatus::Data => unreachable!(),
+                    }
+                } else {
+                    // Format: "rx: <rate>iB/s tx: <rate>iB/s <rx_pps>/<tx_pps> pkt/s"
+                    let rx_str = Self::human_unit(self.receive_rate);
+                    let tx_str = Self::human_unit(self.transmit_rate);
+                    format!(
+                        "rx:{}iB/s tx:{}iB/s {}/{} pkt/s",
+                        rx_str, tx_str, self.receive_packets, self.transmit_packets
+                    )
+                };
+
+                // Bar segments: receive rate + transmit rate (stacked)
+                // Normalize rates for display - use a fixed max of 1Gbps
+                const MAX_RATE: f64 = 125_000_000.0; // 1 Gbps = 125 MB/s
+                let rx_norm = (self.receive_rate / MAX_RATE).min(1.0);
+                let tx_norm = (self.transmit_rate / MAX_RATE).min(1.0);
+
                 let rx_attr = crt.color(ColorElement::MeterValueIORead);
                 let tx_attr = crt.color(ColorElement::MeterValueIOWrite);
 
-                // Pre-compute values
-                let status = self.status;
-                let receive_rate = self.receive_rate;
-                let transmit_rate = self.transmit_rate;
+                let segments = [
+                    BarSegment {
+                        value: rx_norm,
+                        attr: rx_attr,
+                    },
+                    BarSegment {
+                        value: tx_norm,
+                        attr: tx_attr,
+                    },
+                ];
 
-                crt.with_window(|win| {
-                    // Draw caption "Net" (exactly 3 chars)
-                    let _ = win.mv(y, x);
-                    let _ = win.attrset(caption_attr);
-                    let _ = win.addstr("Net");
-
-                    // Bar area starts after caption
-                    let bar_x = x + 3;
-                    let bar_width = width - 3;
-
-                    if bar_width < 4 {
-                        let _ = win.attrset(reset_attr);
-                        return;
-                    }
-
-                    // Handle non-data states
-                    if status != RateStatus::Data {
-                        let text = match status {
-                            RateStatus::Init => "init",
-                            RateStatus::Stale => "stale",
-                            RateStatus::NoData => "no data",
-                            RateStatus::Data => unreachable!(),
-                        };
-                        let _ = win.attrset(value_attr);
-                        let _ = win.mvaddnstr(y, bar_x, text, bar_width);
-                        let _ = win.attrset(reset_attr);
-                    }
-                });
-
-                if status == RateStatus::Data {
-                    // Split into two half-width bars like DiskIO
-                    let bar_x = x + 3;
-                    let bar_width = width - 3;
-                    let col_width = bar_width / 2;
-                    let diff = bar_width % 2;
-
-                    // Normalize rates for display - use a fixed max of 1Gbps per direction
-                    const MAX_RATE: f64 = 125_000_000.0; // 1 Gbps = 125 MB/s
-                    let rx_norm = (receive_rate / MAX_RATE).min(1.0);
-                    let tx_norm = (transmit_rate / MAX_RATE).min(1.0);
-
-                    // Draw receive bar
-                    let rx_values = [(rx_norm, rx_attr as i32)];
-                    draw_bar(crt, bar_x, y, col_width, &rx_values, 1.0);
-
-                    // Draw transmit bar
-                    let tx_values = [(tx_norm, tx_attr as i32)];
-                    draw_bar(crt, bar_x + col_width + diff, y, col_width, &tx_values, 1.0);
-                }
-
-                crt.with_window(|win| {
-                    let _ = win.attrset(reset_attr);
-                });
+                draw_bar_with_text(crt, x, y, width, "Net", &segments, 1.0, &text);
             }
             MeterMode::Text => {
                 // Extract all colors BEFORE with_window to avoid borrow conflicts
@@ -207,6 +184,12 @@ impl Meter for NetworkIOMeter {
                 let tx_packets_str = format!("{}", self.transmit_packets);
 
                 crt.with_window(|win| {
+                    let _ = win.mv(y, x);
+
+                    // Caption prefix
+                    let _ = win.attrset(text_attr);
+                    let _ = win.addstr("Network: ");
+
                     // Handle non-data states
                     if status != RateStatus::Data {
                         let (text, attr) = match status {
@@ -215,16 +198,13 @@ impl Meter for NetworkIOMeter {
                             RateStatus::NoData => ("no data", error_attr),
                             RateStatus::Data => unreachable!(),
                         };
-                        let _ = win.mv(y, x);
                         let _ = win.attrset(attr);
                         let _ = win.addstr(text);
                         let _ = win.attrset(reset_attr);
                         return;
                     }
 
-                    let _ = win.mv(y, x);
-
-                    // "rx: XiB/s tx: YiB/s (rx_pps/tx_pps pps)"
+                    // "rx: XiB/s tx: YiB/s rx_pps/tx_pps pkt/s"
                     let _ = win.attrset(text_attr);
                     let _ = win.addstr("rx: ");
 
@@ -241,7 +221,7 @@ impl Meter for NetworkIOMeter {
 
                     // Packet counts
                     let _ = win.attrset(text_attr);
-                    let _ = win.addstr(" (");
+                    let _ = win.addstr(" ");
 
                     let _ = win.attrset(rx_attr);
                     let _ = win.addstr(&rx_packets_str);
@@ -253,7 +233,7 @@ impl Meter for NetworkIOMeter {
                     let _ = win.addstr(&tx_packets_str);
 
                     let _ = win.attrset(text_attr);
-                    let _ = win.addstr(" pps)");
+                    let _ = win.addstr(" pkt/s");
 
                     let _ = win.attrset(reset_attr);
                 });
@@ -270,7 +250,7 @@ impl Meter for NetworkIOMeter {
                 }
 
                 let graph_data = self.graph_data.borrow();
-                draw_graph(crt, x, y, width, self.height(), &graph_data, "Net");
+                draw_graph(crt, x, y, width, self.height(), &graph_data, "Network");
             }
             MeterMode::Led => {
                 // Format rate values for LED display
@@ -281,14 +261,14 @@ impl Meter for NetworkIOMeter {
                         RateStatus::NoData => "N/A",
                         RateStatus::Data => unreachable!(),
                     };
-                    draw_led(crt, x, y, width, "Net ", text);
+                    draw_led(crt, x, y, width, "Network: ", text);
                 } else {
                     let text = format!(
                         "rx:{}iB/s tx:{}iB/s",
                         Self::human_unit(self.receive_rate),
                         Self::human_unit(self.transmit_rate)
                     );
-                    draw_led(crt, x, y, width, "Net ", &text);
+                    draw_led(crt, x, y, width, "Network: ", &text);
                 }
             }
             MeterMode::StackedGraph => {
@@ -435,7 +415,7 @@ mod tests {
     #[test]
     fn test_networkio_meter_caption() {
         let meter = NetworkIOMeter::new();
-        assert_eq!(meter.caption(), "Net");
+        assert_eq!(meter.caption(), "Network");
     }
 
     #[test]

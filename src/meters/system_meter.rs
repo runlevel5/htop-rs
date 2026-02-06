@@ -1,7 +1,7 @@
 //! System Meter
 //!
-//! Displays system information including kernel version, architecture, and OS name.
-//! Format similar to C htop: "Linux 6.18.5-200.fc43.ppc64le [ppc64le] @ Fedora Linux 43"
+//! Displays system information including kernel version and OS name.
+//! Format similar to C htop: "Linux 6.18.5-200.fc43.ppc64le @ Fedora Linux 43 (Workstation Edition)"
 
 use super::{Meter, MeterMode};
 use crate::core::{Machine, Settings};
@@ -40,16 +40,28 @@ impl SystemMeter {
 
         let mut parts = Vec::new();
 
-        // Add architecture if available
-        if let Some(arch) = info.architecture() {
-            parts.push(format!("[{}]", arch));
+        parts.push("@".to_string());
+
+        // OS type (e.g., "Fedora Linux")
+        let os_type = info.os_type().to_string();
+        parts.push(os_type);
+
+        // Version - only show major version, not full x.y.z
+        let version = info.version();
+        let version_str = version.to_string();
+        // Extract major version (e.g., "43" from "43.0.0")
+        let major_version = version_str.split('.').next().unwrap_or(&version_str);
+        if !major_version.is_empty() && major_version != "Unknown" {
+            parts.push(major_version.to_string());
         }
 
-        // OS type and version (e.g., "Fedora Linux 43")
-        let os_string = info.to_string();
-        if !os_string.is_empty() && os_string != "Unknown" {
-            parts.push("@".to_string());
-            parts.push(os_string);
+        // Add edition if available (e.g., "Workstation Edition")
+        // Note: os_info crate may not parse edition from /etc/os-release
+        // C htop reads VARIANT or VARIANT_ID from /etc/os-release directly
+        if let Some(edition) = info.edition() {
+            if !edition.is_empty() {
+                parts.push(format!("({})", edition));
+            }
         }
 
         parts.join(" ")
@@ -98,7 +110,7 @@ impl Meter for SystemMeter {
             let _ = win.addstr("System: ");
 
             let _ = win.attrset(value_attr);
-            // Format: "Linux 6.18.5-200.fc43.ppc64le [ppc64le] @ Fedora Linux 43"
+            // Format: "Linux 6.18.5-200.fc43.ppc64le @ Fedora Linux 43 (Workstation Edition)"
             // kernel_version already includes "Linux " or "Darwin " prefix
             let _ = win.addstr(&machine.kernel_version);
             let _ = win.addstr(" ");
@@ -183,14 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn test_os_info_contains_architecture() {
-        let meter = SystemMeter::new();
-        // os_info should contain architecture in brackets
-        assert!(meter.os_info.contains('[') && meter.os_info.contains(']'));
-    }
-
-    #[test]
-    fn test_os_info_contains_distro() {
+    fn test_os_info_format() {
         let meter = SystemMeter::new();
         // os_info should contain @ separator and distro name
         assert!(meter.os_info.contains('@'));
