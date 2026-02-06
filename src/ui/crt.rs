@@ -290,8 +290,11 @@ pub const KEY_SF3: i32 = KEY_F15;
 // ASCII Key Constants (more readable than hex literals)
 // =============================================================================
 // Control characters
+pub const KEY_CTRL_A: i32 = 0x01; // Ctrl+A (home)
+pub const KEY_CTRL_B: i32 = 0x02; // Ctrl+B (left)
 pub const KEY_CTRL_BS: i32 = 0x08; // Ctrl+Backspace (some terminals)
-pub const KEY_CTRL_E: i32 = 0x05; // Ctrl+E
+pub const KEY_CTRL_E: i32 = 0x05; // Ctrl+E (end)
+pub const KEY_CTRL_F: i32 = 0x06; // Ctrl+F (right)
 pub const KEY_TAB: i32 = 0x09; // Tab
 pub const KEY_LINEFEED: i32 = 0x0A; // Line feed (Enter on some terminals)
 pub const KEY_CTRL_L: i32 = 0x0C; // Ctrl+L (refresh screen)
