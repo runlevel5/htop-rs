@@ -89,7 +89,7 @@ impl Meter for DiskIOMeter {
     }
 
     fn caption(&self) -> &str {
-        "Dsk"
+        "Disk IO"
     }
 
     fn update(&mut self, machine: &Machine) {
@@ -139,7 +139,7 @@ impl Meter for DiskIOMeter {
         match self.mode {
             MeterMode::Bar => {
                 // C htop style: single bar with text inside
-                // Format: "Dsk[|||||      r: 0KiB/s w: 0KiB/s 0.0%]"
+                // Format: "Disk IO[|||||      r: 0KiB/s w: 0KiB/s 0.0%]"
 
                 // Handle non-data states
                 let text = if self.status != RateStatus::Data {
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn test_diskio_meter_caption() {
         let meter = DiskIOMeter::new();
-        assert_eq!(meter.caption(), "Dsk");
+        assert_eq!(meter.caption(), "Disk IO");
     }
 
     #[test]
