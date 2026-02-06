@@ -174,6 +174,20 @@ impl RichString {
         width: usize,
         pad_attr: Option<attr_t>,
     ) {
+        self.write_at_width_with_pad_attr_offset(crt, y, x, width, pad_attr, 0)
+    }
+
+    /// Write the string with an offset (for horizontal scrolling), truncation/padding, and optional padding attribute
+    /// Matches C htop's RichString_printoffnVal(str, y, x, offset, width)
+    pub fn write_at_width_with_pad_attr_offset(
+        &self,
+        crt: &mut Crt,
+        y: i32,
+        x: i32,
+        width: usize,
+        pad_attr: Option<attr_t>,
+        offset: usize,
+    ) {
         crt.mv(y, x);
 
         // Use attrset instead of attron for proper color handling
@@ -181,7 +195,8 @@ impl RichString {
         crt.attrset(current_attr);
 
         let mut written = 0;
-        for rc in &self.chars {
+        // Skip first 'offset' characters
+        for rc in self.chars.iter().skip(offset) {
             if written >= width {
                 break;
             }
@@ -222,11 +237,26 @@ impl RichString {
         width: usize,
         attr: attr_t,
     ) {
+        self.write_at_width_with_attr_offset(crt, y, x, width, attr, 0)
+    }
+
+    /// Write the string with an offset (for horizontal scrolling) and override attribute
+    /// Matches C htop's RichString_printoffnVal with RichString_setAttr
+    pub fn write_at_width_with_attr_offset(
+        &self,
+        crt: &mut Crt,
+        y: i32,
+        x: i32,
+        width: usize,
+        attr: attr_t,
+        offset: usize,
+    ) {
         crt.mv(y, x);
         crt.attrset(attr);
 
         let mut written = 0;
-        for rc in &self.chars {
+        // Skip first 'offset' characters
+        for rc in self.chars.iter().skip(offset) {
             if written >= width {
                 break;
             }

@@ -4,10 +4,10 @@
 #![allow(clippy::too_many_arguments)] // UI drawing functions naturally have many parameters
 
 use super::crt::{
-    ColorElement, A_NORMAL, KEY_BACKSLASH, KEY_BACKSPACE, KEY_CTRL_BS, KEY_CTRL_N, KEY_CTRL_P,
-    KEY_CTRL_U, KEY_DEL_MAC, KEY_DOWN, KEY_END, KEY_ESC, KEY_F10, KEY_F15, KEY_F3, KEY_F4,
-    KEY_HOME, KEY_LC_Q, KEY_NPAGE, KEY_PPAGE, KEY_PRINTABLE_END, KEY_PRINTABLE_START, KEY_Q,
-    KEY_SLASH, KEY_UP,
+    ColorElement, A_NORMAL, KEY_BACKSLASH, KEY_BACKSPACE, KEY_CTRL_A, KEY_CTRL_B, KEY_CTRL_BS,
+    KEY_CTRL_E, KEY_CTRL_F, KEY_CTRL_N, KEY_CTRL_P, KEY_CTRL_U, KEY_DEL_MAC, KEY_DOWN, KEY_END,
+    KEY_ESC, KEY_F10, KEY_F15, KEY_F3, KEY_F4, KEY_HOME, KEY_LC_Q, KEY_LEFT, KEY_NPAGE, KEY_PPAGE,
+    KEY_PRINTABLE_END, KEY_PRINTABLE_START, KEY_Q, KEY_RIGHT, KEY_SLASH, KEY_UP,
 };
 use super::function_bar::FunctionBar;
 use super::panel::HandlerResult;
@@ -454,14 +454,24 @@ impl MainPanel {
             }
         }
 
-        // Use filter color for padding if Command column filter is active
+        // Use filter color for padding if Command column filter is active,
+        // otherwise use header color to maintain background when scrolled
         // This ensures the entire Command column area (which extends to screen edge) is yellow
         let pad_attr = if command_filter_active {
-            Some(filter_attr)
+            filter_attr
         } else {
-            None
+            header_attr
         };
-        str.write_at_width_with_pad_attr(crt, y, self.x, self.w as usize, pad_attr);
+        // Apply horizontal scroll offset (matches C htop Panel_draw line 247-249)
+        let offset = self.scroll_h.max(0) as usize;
+        str.write_at_width_with_pad_attr_offset(
+            crt,
+            y,
+            self.x,
+            self.w as usize,
+            Some(pad_attr),
+            offset,
+        );
     }
 
     /// Build header string for display (used when drawing header separately)
@@ -588,26 +598,35 @@ impl MainPanel {
 
         // Apply row-level highlighting (matches C htop Row_display priority order)
         // Priority order (lowest to highest): normal -> shadow -> highlight (new/tomb) -> tagged -> selected
+        // Apply horizontal scroll offset (matches C htop Panel_draw line 287, 298, 320, 328)
+        let offset = self.scroll_h.max(0) as usize;
         if selected {
             // For selected rows, use the override attribute method
             // This matches C htop's behavior where RichString_setAttr overrides all per-char colors
-            str.write_at_width_with_attr(crt, y, self.x, self.w as usize, selection_attr);
+            str.write_at_width_with_attr_offset(
+                crt,
+                y,
+                self.x,
+                self.w as usize,
+                selection_attr,
+                offset,
+            );
         } else if process.tagged {
             // For tagged rows, apply PROCESS_TAG color to entire row
             let tag_attr = crt.color(ColorElement::ProcessTag);
-            str.write_at_width_with_attr(crt, y, self.x, self.w as usize, tag_attr);
+            str.write_at_width_with_attr_offset(crt, y, self.x, self.w as usize, tag_attr, offset);
         } else if let Some(attr) = highlight_attr {
             // For new/tomb processes, apply highlight color to entire row
-            str.write_at_width_with_attr(crt, y, self.x, self.w as usize, attr);
+            str.write_at_width_with_attr_offset(crt, y, self.x, self.w as usize, attr, offset);
         } else if is_shadowed {
             // For shadowed rows (other users' processes), apply PROCESS_SHADOW to entire row
             // This matches C htop's RichString_setAttr(out, CRT_colors[PROCESS_SHADOW])
             let shadow_attr = crt.color(ColorElement::ProcessShadow);
             str.set_all_attr(shadow_attr);
-            str.write_at_width(crt, y, self.x, self.w as usize);
+            str.write_at_width_with_pad_attr_offset(crt, y, self.x, self.w as usize, None, offset);
         } else {
             // For non-selected rows, use the RichString with per-field colors
-            str.write_at_width(crt, y, self.x, self.w as usize);
+            str.write_at_width_with_pad_attr_offset(crt, y, self.x, self.w as usize, None, offset);
         }
     }
 
@@ -1782,6 +1801,39 @@ impl MainPanel {
                 // Matches C htop actionIncFilter - always opens filter mode
                 self.inc_search
                     .start(IncType::Filter, self.filter.as_deref());
+                HandlerResult::Handled
+            }
+            KEY_LEFT | KEY_CTRL_B => {
+                // Left or Ctrl+B - scroll left
+                // Matches C htop Panel_onKey KEY_LEFT/KEY_CTRL('B')
+                if self.scroll_h > 0 {
+                    // Get scroll amount from Crt (matches C htop's CRT_scrollHAmount)
+                    self.scroll_h = (self.scroll_h - 5).max(0);
+                    self.needs_redraw = true;
+                }
+                HandlerResult::Handled
+            }
+            KEY_RIGHT | KEY_CTRL_F => {
+                // Right or Ctrl+F - scroll right
+                // Matches C htop Panel_onKey KEY_RIGHT/KEY_CTRL('F')
+                self.scroll_h += 5;
+                self.needs_redraw = true;
+                HandlerResult::Handled
+            }
+            KEY_CTRL_A | 0x5E => {
+                // Ctrl+A or ^ - scroll to beginning
+                // Matches C htop Panel_onKey KEY_CTRL('A')/'^'
+                self.scroll_h = 0;
+                self.needs_redraw = true;
+                HandlerResult::Handled
+            }
+            KEY_CTRL_E | 0x24 => {
+                // Ctrl+E or $ - scroll to end (approximately)
+                // Matches C htop Panel_onKey KEY_CTRL('E')/'$'
+                // In C htop this uses selectedLen, but we'll use a large value
+                // The actual clamping happens during rendering
+                self.scroll_h = 1000; // Large value, will be clamped during draw
+                self.needs_redraw = true;
                 HandlerResult::Handled
             }
             // Note: F5 (tree view toggle) is handled by ScreenManager
