@@ -3855,11 +3855,18 @@ impl SetupScreen {
 
             // Skip processing if no key (halfdelay timeout)
             if key == -1 {
+                // Check if terminal was resized (SIGWINCH received)
+                if crate::check_terminal_resized() {
+                    crt.handle_resize();
+                    self.layout(crt, header_height, settings.screen_tabs);
+                    crt.clear();
+                    needs_redraw = true;
+                }
                 continue;
             }
 
-            // Handle resize
-            if key == KEY_RESIZE {
+            // Handle resize (also check here in case SIGWINCH arrived with a keypress)
+            if key == KEY_RESIZE || crate::check_terminal_resized() {
                 crt.handle_resize();
                 self.layout(crt, header_height, settings.screen_tabs);
                 crt.clear();

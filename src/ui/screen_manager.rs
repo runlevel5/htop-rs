@@ -642,7 +642,7 @@ impl ScreenManager {
 
     /// Handle resize
     fn handle_resize(&mut self, crt: &mut Crt) {
-        crt.update_size();
+        crt.handle_resize();
         crt.clear();
         self.layout(crt);
         // Force full redraw after resize
@@ -814,6 +814,17 @@ impl ScreenManager {
             // Wait for input (halfdelay mode - returns after timeout or key press)
             let mut key = crt.read_key();
 
+            // Check if terminal was resized (SIGWINCH received).
+            // Only handle immediately when no key was pressed (signal interrupted getch).
+            // If a key/mouse event was received, defer resize until after processing it
+            // to avoid disrupting ncurses mouse state or invalidating click coordinates.
+            let resize_pending = crate::check_terminal_resized();
+            if resize_pending && key.is_none() {
+                self.handle_resize(crt);
+                redraw = true;
+                continue;
+            }
+
             // Handle mouse events
             if let Some(k) = key {
                 if k == KEY_MOUSE {
@@ -899,6 +910,11 @@ impl ScreenManager {
 
                 // Key was pressed - redraw on next iteration
                 redraw = true;
+
+                // Handle deferred resize after key/mouse event has been fully processed
+                if resize_pending {
+                    self.handle_resize(crt);
+                }
             } else {
                 // No key pressed (halfdelay timeout) - decrement sort timeout
                 if self.sort_timeout > 0 {

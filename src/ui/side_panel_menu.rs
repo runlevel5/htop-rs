@@ -105,6 +105,17 @@ fn run_panel_event_loop(
         // Handle input
         let mut key = crt.getch();
 
+        // Check if terminal was resized (SIGWINCH received)
+        if crate::check_terminal_resized() {
+            crt.handle_resize();
+            let panel_height = crt.height() - panel.y - 1;
+            panel.resize(panel.w, panel_height);
+            ctx.main_panel.resize(crt.width() - panel.w, panel_height);
+            ctx.main_panel.needs_redraw = true;
+            crt.clear();
+            continue;
+        }
+
         // Handle mouse events
         if key == KEY_MOUSE {
             let func_bar = &panel.function_bar;

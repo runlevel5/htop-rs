@@ -132,6 +132,13 @@ pub fn run_info_screen<F>(
         let mut ch = crt.getch();
         needs_redraw = true; // Assume we need redraw
 
+        // Check if terminal was resized (SIGWINCH received)
+        if crate::check_terminal_resized() {
+            crt.handle_resize();
+            crt.clear();
+            continue;
+        }
+
         // Handle mouse events
         ch = search_filter::process_mouse_event(crt, &sf_state, ch);
 
