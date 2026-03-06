@@ -2,7 +2,7 @@
 name = "htop-rs"
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.93.0"
+rust-version = "1.94.0"
 authors = ["Trung Lê"]
 description = "A Rust port of htop - an interactive process viewer"
 license = "GPL-2.0-or-later"
@@ -27,9 +27,6 @@ chrono = "0.4"
 
 # User/group information
 uzers = "0.12"
-
-# Lazy static for global state
-lazy_static = "1.5"
 
 # Bitflags for scan flags
 bitflags = "2.10"
