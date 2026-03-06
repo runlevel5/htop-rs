@@ -18,6 +18,16 @@ use crate::ui::{Crt, Header, MainPanel, ScreenManager};
 /// Static flag for clean shutdown
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
+/// Static flag set by SIGWINCH handler when terminal is resized.
+/// Event loops check and clear this flag to trigger resize handling.
+pub(crate) static TERMINAL_RESIZED: AtomicBool = AtomicBool::new(false);
+
+/// Check if the terminal was resized (SIGWINCH received) and clear the flag.
+/// Returns true if a resize occurred since the last check.
+pub(crate) fn check_terminal_resized() -> bool {
+    TERMINAL_RESIZED.swap(false, Ordering::SeqCst)
+}
+
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const COPYRIGHT: &str = "(C) 2026 Trung Le.";
 const LICENSE_SPDX: &str = env!("CARGO_PKG_LICENSE");
@@ -143,6 +153,17 @@ struct Args {
 fn setup_signal_handlers() {
     // Set up Ctrl+C handler
     ctrlc_handler();
+
+    // Set up SIGWINCH handler for terminal resize detection.
+    // ncurses-pure-rs doesn't install its own SIGWINCH handler (unlike real ncurses),
+    // so we catch it ourselves and set a flag that event loops check.
+    unsafe {
+        libc::signal(libc::SIGWINCH, handle_sigwinch as *const () as libc::sighandler_t);
+    }
+}
+
+extern "C" fn handle_sigwinch(_: libc::c_int) {
+    TERMINAL_RESIZED.store(true, Ordering::SeqCst);
 }
 
 fn ctrlc_handler() {

@@ -2136,6 +2136,13 @@ impl Crt {
     /// Handle terminal resize
     pub fn handle_resize(&mut self) {
         let _ = self.screen.update_term_size();
+        // Restore keypad mode on the new stdscr window.
+        // update_term_size() calls resize_term() which recreates stdscr,
+        // and the new window defaults to keypad=false. Without keypad mode,
+        // escape sequences (including mouse SGR sequences) are not parsed,
+        // causing raw bytes like 'M' (0x4D) from "\x1b[<0;x;yM" to be
+        // returned as KEY_M instead of KEY_MOUSE.
+        self.screen.keypad(true);
         self.update_size();
     }
 

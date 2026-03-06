@@ -384,6 +384,13 @@ pub fn show_lsof(crt: &mut Crt, pid: i32, command: &str) {
         let mut ch = crt.getch();
         needs_redraw = true; // Assume we need redraw, unless proven otherwise
 
+        // Check if terminal was resized (SIGWINCH received)
+        if crate::check_terminal_resized() {
+            crt.handle_resize();
+            crt.clear();
+            continue;
+        }
+
         // Handle mouse events
         ch = process_mouse_event(crt, &sf_state, ch);
 
@@ -1055,11 +1062,22 @@ pub fn show_strace(crt: &mut Crt, pid: i32, command: &str) {
         let mut ch = match crt.read_key_nonblocking() {
             Some(k) => k,
             None => {
+                // Check if terminal was resized (SIGWINCH received)
+                if crate::check_terminal_resized() {
+                    crt.handle_resize();
+                    crt.clear();
+                }
                 // No input available, small sleep to avoid busy-waiting
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 continue;
             }
         };
+
+        // Also check resize when we did get a key (signal could arrive between reads)
+        if crate::check_terminal_resized() {
+            crt.handle_resize();
+            crt.clear();
+        }
 
         // Handle mouse events
         if ch == KEY_MOUSE {
@@ -1388,6 +1406,15 @@ pub fn show_command_screen(crt: &mut Crt, pid: i32, command: &str) {
         // Handle input
         crt.set_blocking(true);
         let mut ch = crt.getch();
+
+        // Check if terminal was resized (SIGWINCH received)
+        if crate::check_terminal_resized() {
+            crt.handle_resize();
+            // Re-wrap command at new width
+            lines = wrap_command(command, crt.width() as usize);
+            crt.clear();
+            continue;
+        }
 
         // Handle mouse events
         ch = process_mouse_event(crt, &sf_state, ch);
