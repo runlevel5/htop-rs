@@ -990,7 +990,10 @@ impl ScreenManager {
             KEY_F6 => {
                 // Sort by
                 self.show_sort_menu(crt, machine);
-                return HandlerResult::Redraw;
+                // Side panel clears its own area, so we only need a normal redraw
+                self.header_needs_redraw = true;
+                self.main_panel.needs_redraw = true;
+                return HandlerResult::Handled;
             }
             KEY_F7 | KEY_RBRACKET => {
                 // F7 or ']' - higher priority (nice -)
@@ -1019,7 +1022,10 @@ impl ScreenManager {
                 if !self.settings.readonly {
                     self.show_kill_menu(crt, machine);
                 }
-                return HandlerResult::Redraw;
+                // Side panel clears its own area, so we only need a normal redraw
+                self.header_needs_redraw = true;
+                self.main_panel.needs_redraw = true;
+                return HandlerResult::Handled;
             }
             KEY_WHEELUP => {
                 // Scroll up by scroll wheel amount (matches C htop PANEL_SCROLL)
@@ -1091,7 +1097,10 @@ impl ScreenManager {
             KEY_DOT | KEY_GT => {
                 // '.' or '>' - select sort column (same as F6)
                 self.show_sort_menu(crt, machine);
-                return HandlerResult::Redraw;
+                // Side panel clears its own area, so we only need a normal redraw
+                self.header_needs_redraw = true;
+                self.main_panel.needs_redraw = true;
+                return HandlerResult::Handled;
             }
             KEY_C | KEY_S => {
                 // 'C' or 'S' - setup (same as F2)
@@ -1301,7 +1310,10 @@ impl ScreenManager {
             KEY_LC_U => {
                 // 'u' - show processes of a single user
                 self.show_user_menu(crt, machine);
-                return HandlerResult::Redraw;
+                // Side panel clears its own area, so we only need a normal redraw
+                self.header_needs_redraw = true;
+                self.main_panel.needs_redraw = true;
+                return HandlerResult::Handled;
             }
             KEY_LC_W => {
                 // 'w' - show command screen (wrap process command in multiple lines)
