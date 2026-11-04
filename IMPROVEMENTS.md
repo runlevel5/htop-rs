@@ -32,6 +32,30 @@ See [ARCHITECTURE.md](ARCHITECTURE.md#linux-background-scanner-architecture) for
 - **C htop behavior**: All `/proc` reads happen synchronously on the main thread, blocking UI updates
 - **htop-rs behavior**: Expensive reads happen in parallel on background threads, keeping UI responsive
 
+### Process Table Scan on a Worker Thread
+
+The process table scan never runs on the UI thread. A dedicated `table-scan` thread owns the scanning state and hands the UI a fresh copy of the process list each refresh; the UI swaps it in, carries over tags and collapsed tree nodes by PID, sorts and redraws in about a millisecond. Keys are handled while the scan runs, so navigation never stutters on a refresh tick.
+
+| Machine (key repeat at 30/s across refresh ticks) | C htop | htop-rs |
+|---|---|---|
+| 32-core ppc64le, ~1700 `/proc` entries, worst key-to-draw latency | 69 ms | 1.7 ms |
+| Same, I/O screen | 94 ms | 2.3 ms |
+| Longest stall around a tick | 100 to 125 ms | none |
+
+On Linux the scan itself also reads `/proc` for every process in parallel on the rayon pool, with a sequential phase applying the results, which halves the per-entry cost. On macOS one `KERN_PROC_ALL` sysctl per scan replaces one `KERN_PROC_PID` call per process.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#table-scanner-thread) for the data flow.
+
+- **C htop behavior**: The table scan runs on the main thread and blocks input for its duration
+- **htop-rs behavior**: Input latency is independent of process count
+
+### Input Waits in `poll`, Not a Sleep Loop
+
+The terminal layer (`ncurses-pure`) waits for input in a single `poll` call for exactly the time until the next refresh, instead of probing every millisecond. An idle htop-rs wakes a handful of times per refresh rather than a thousand times a second, and a terminal resize interrupts the wait and redraws immediately instead of at the next frame. Colour support is read from the terminal's terminfo entry, so a terminal whose name is not in any built-in table, over ssh with no `COLORTERM`, still gets its real colour count.
+
+- **C htop behavior**: Relies on ncurses, which also blocks in the kernel; comparable idle cost
+- **htop-rs behavior**: Same idle profile without a C dependency, and resize is handled mid-wait
+
 ## User Interface
 
 ### Dimmed F7 "Nice -" When Unavailable
@@ -122,6 +146,24 @@ This provides a richer visualization than the standard Graph mode, which only sh
 
 - **C htop behavior**: Does not have a StackedGraph mode; Graph mode shows only a single-color historical graph
 - **htop-rs behavior**: Offers both Graph (single value) and StackedGraph (multi-component) modes
+
+### Semantic Colour Palette
+
+Each colour scheme is one `Palette` of semantic roles (label, value, shadow, status, magnitude, panel chrome, bar segment series) in `src/ui/palette.rs`, and every colour element is derived from those roles. The same kind of information therefore has one look within a scheme by construction: all de-emphasised text is one grey, all primary values one colour, every error indication one colour. Unit tests enforce the invariants for every scheme.
+
+Bars follow one rule everywhere: segment colours apply to the fill characters only. Text over a bar is drawn in the bar-text colour up to the fill and in the shadow colour beyond it, so a value reads the same whichever segment happens to sit underneath it, on every platform.
+
+Components are also theme-agnostic for glyphs: they ask `Crt::bar_char()` and `Crt::theme_help_text()` for theme-appropriate bar characters and help text instead of checking which scheme is active.
+
+- **C htop behavior**: Colours are assigned element by element per scheme, and bar text takes the colour of whatever segment lies under it, so the same value can look dimmed on one machine and highlighted on another
+- **htop-rs behavior**: One role has one look per scheme, and bar text is consistent regardless of the segments beneath it
+
+### Setup Screen: Selection Visible in Every Panel
+
+Every panel in the Setup screen shows its selected row, in the unfocused colour when the panel does not have focus and in the focus colour when it does, so you can see where you will land before moving focus.
+
+- **C htop behavior**: Same (htop-rs previously hid the selection in several panels until focused; now consistent)
+- **htop-rs behavior**: All panels on Screens, Meters, Display options, Header layout and Colors behave alike
 
 ## Platform-Specific Improvements
 
