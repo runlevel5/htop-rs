@@ -21,6 +21,20 @@ Goals:
 Non-goals:
 - Adding features that diverge from htop's design philosophy
 
+## Installing
+
+### Homebrew (macOS and Linux)
+
+The repository is its own Homebrew tap:
+
+```sh
+brew tap runlevel5/htop-rs https://github.com/runlevel5/htop-rs
+brew install htop-rs
+```
+
+This builds the latest release from source. To build the current `main`
+branch instead, use `brew install --HEAD htop-rs`.
+
 ## Building
 
 ```bash
@@ -29,7 +43,7 @@ cargo build --release
 
 ### Dependencies
 
-- Rust 1.93+
+- Rust 1.99.1+
 
 No external libraries required - htop-rs uses a pure Rust terminal implementation.
 
