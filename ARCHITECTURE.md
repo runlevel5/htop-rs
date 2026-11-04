@@ -542,17 +542,25 @@ pub fn scan(machine: &mut Machine) {
 }
 
 fn scan_processes(machine: &mut Machine) {
-    for entry in fs::read_dir("/proc")? {
-        if let Ok(pid) = entry.file_name().parse::<i32>() {
-            scan_process(machine, pid);
-        }
+    // Phase 1: read /proc/[pid]/* for every process in parallel on the
+    // rayon pool. Each worker produces a ProcessSample (stat, uid, names
+    // when needed, optional cwd/io, and the thread stats).
+    let samples: Vec<ProcessSample> = all_processes()
+        .par_bridge()
+        .filter_map(|proc| sample_process(&proc, &machine.processes, &plan))
+        .collect();
+
+    // Phase 2: apply the samples to the process list sequentially
+    for sample in samples {
+        apply(machine, sample);
     }
 }
-
-fn scan_process(machine: &mut Machine, pid: i32) {
-    // Read /proc/[pid]/stat, status, cmdline, etc.
-}
 ```
+
+The reads dominate the scan, so they use every core; the bookkeeping that
+mutates `Machine` stays single-threaded. `par_bridge` pulls processes from the
+`/proc` iterator as workers free up, so only a few directory descriptors are
+open at a time regardless of the process count.
 
 **macOS implementation** (`src/platform/darwin.rs`):
 ```rust

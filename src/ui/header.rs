@@ -2,8 +2,6 @@
 
 #![allow(dead_code)]
 
-use rayon::prelude::*;
-
 use super::Crt;
 use super::crt::{A_NORMAL, ColorElement};
 use crate::core::{HeaderLayout, Machine, Settings};
@@ -151,12 +149,15 @@ impl Header {
             }
         }
 
-        // 2. Update all meters with fast data from Machine (parallel)
-        self.columns.par_iter_mut().for_each(|column| {
-            column.par_iter_mut().for_each(|meter| {
+        // 2. Update all meters from the already-scanned Machine data. This is a
+        // few microseconds of in-memory work, so it runs inline: handing it to
+        // the rayon pool made it queue behind the background process scan
+        // that the table scan has just started there.
+        for column in &mut self.columns {
+            for meter in column {
                 meter.update(machine);
-            });
-        });
+            }
+        }
 
         // 3. Collect IDs of meters that need expensive data and start background scan
         let mut requested: Vec<MeterDataId> = Vec::new();

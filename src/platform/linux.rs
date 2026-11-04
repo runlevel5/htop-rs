@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::core::{CpuData, Machine, Process, ProcessState, ScanFlags};
+use crate::core::{CpuData, Machine, Process, ProcessList, ProcessState, ScanFlags};
+use rayon::prelude::*;
 
 use super::linux_bg_scanner::{
     LinuxBackgroundScanner, LinuxExpensiveData, LinuxScanParams, start_linux_bg_scan,
@@ -329,28 +330,6 @@ pub fn scan_memory(machine: &mut Machine) {
     machine.cached_swap = meminfo.swap_cached / 1024;
 }
 
-/// Check if a PID is a kernel thread (PID 2 is kthreadd, kernel threads have ppid=2)
-fn is_kernel_thread_pid(pid: i32) -> bool {
-    if pid == 2 {
-        return true;
-    }
-    // Check ppid - kernel threads have kthreadd (PID 2) as parent
-    if let Ok(content) = std::fs::read_to_string(format!("/proc/{}/stat", pid)) {
-        // Parse ppid from stat (4th field after comm which is in parentheses)
-        if let Some(end_paren) = content.rfind(')') {
-            let after_comm = &content[end_paren + 1..];
-            let fields: Vec<&str> = after_comm.split_whitespace().collect();
-            // fields[1] is ppid (index 0 is state)
-            if fields.len() > 1
-                && let Ok(ppid) = fields[1].parse::<i32>()
-            {
-                return ppid == 2;
-            }
-        }
-    }
-    false
-}
-
 /// Merge expensive data from background scanner into a process
 fn merge_expensive_data(process: &mut Process, data: &LinuxExpensiveData) {
     if let Some(v) = data.m_share {
@@ -408,6 +387,135 @@ const BG_SCAN_FLAGS: ScanFlags = ScanFlags::from_bits_truncate(
 );
 
 /// Scan all processes
+/// Which optional reads the sampling phase should perform
+struct SamplePlan {
+    flags: ScanFlags,
+    update_process_names: bool,
+    scan_threads: bool,
+}
+
+/// Command line and executable path of a process, read only when needed
+struct NameSample {
+    /// Joined command line and the length of its first argument
+    cmdline: Option<(String, usize)>,
+    /// Executable path with any " (deleted)" suffix removed, and whether it had one
+    exe: Option<(String, bool)>,
+}
+
+/// Everything read from /proc for one thread of a process
+struct ThreadSample {
+    tid: i32,
+    stat: procfs::process::Stat,
+    io_priority: Option<i32>,
+}
+
+/// Everything read from /proc for one process.
+///
+/// Samples are gathered in parallel and then applied to the process list
+/// sequentially, so the reads, which dominate the scan, use every core while
+/// the bookkeeping stays single-threaded and simple.
+struct ProcessSample {
+    stat: procfs::process::Stat,
+    uid: Option<u32>,
+    names: Option<NameSample>,
+    cwd: Option<String>,
+    io: Option<procfs::process::Io>,
+    io_priority: Option<i32>,
+    threads: Vec<ThreadSample>,
+}
+
+/// Read the command line and executable path of a process
+fn read_names(proc: &procfs::process::Process) -> NameSample {
+    let cmdline = proc
+        .cmdline()
+        .ok()
+        .filter(|c| !c.is_empty())
+        .map(|cmdline| {
+            // basename_end is the length of the first argument
+            let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
+            (cmdline.join(" "), basename_end)
+        });
+    // Linux marks deleted executables with a " (deleted)" suffix in /proc/PID/exe
+    let exe = proc.exe().ok().map(|exe| {
+        let exe_str = exe.to_string_lossy();
+        match exe_str.strip_suffix(" (deleted)") {
+            Some(clean) => (clean.to_string(), true),
+            None => (exe_str.to_string(), false),
+        }
+    });
+    NameSample { cmdline, exe }
+}
+
+/// Read everything the scan needs for one process. Returns None when the
+/// process vanished before it could be read.
+fn sample_process(
+    proc: &procfs::process::Process,
+    known: &ProcessList,
+    plan: &SamplePlan,
+) -> Option<ProcessSample> {
+    let stat = proc.stat().ok()?;
+    let pid = stat.pid;
+    let is_new = !known.contains(pid);
+    let is_zombie = convert_process_state(stat.state) == ProcessState::Zombie;
+
+    // Names are only re-read when requested; zombies have no command line anyway
+    let names = if is_new || (plan.update_process_names && !is_zombie) {
+        Some(read_names(proc))
+    } else {
+        None
+    };
+    let cwd = if plan.flags.contains(ScanFlags::CWD) {
+        proc.cwd().ok().map(|c| c.to_string_lossy().to_string())
+    } else {
+        None
+    };
+    let io = if plan.flags.contains(ScanFlags::IO) {
+        proc.io().ok()
+    } else {
+        None
+    };
+    let io_priority = plan
+        .flags
+        .contains(ScanFlags::IO_PRIORITY)
+        .then(|| get_io_priority(pid));
+
+    // Kernel threads (children of kthreadd, PID 2) have no userland tasks
+    let is_kernel_thread = stat.ppid == 2 || pid == 2;
+    let threads = if plan.scan_threads && !is_kernel_thread {
+        proc.tasks()
+            .map(|tasks| {
+                tasks
+                    .filter_map(Result::ok)
+                    .filter(|task| task.tid != pid)
+                    .filter_map(|task| {
+                        Some(ThreadSample {
+                            tid: task.tid,
+                            stat: task.stat().ok()?,
+                            io_priority: plan
+                                .flags
+                                .contains(ScanFlags::IO_PRIORITY)
+                                .then(|| get_io_priority(task.tid)),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    Some(ProcessSample {
+        stat,
+        // fstat() on the already-open directory, far cheaper than /proc/PID/status
+        uid: proc.uid().ok(),
+        names,
+        cwd,
+        io,
+        io_priority,
+        threads,
+    })
+}
+
 pub fn scan_processes(machine: &mut Machine) {
     // Timing instrumentation (enabled via HTOP_DEBUG_TIMING=1 env var)
     let debug_timing = std::env::var("HTOP_DEBUG_TIMING")
@@ -451,11 +559,6 @@ pub fn scan_processes(machine: &mut Machine) {
     let mut userland_threads: u32 = 0;
     let mut kernel_threads: u32 = 0;
 
-    let all_procs = match procfs::process::all_processes() {
-        Ok(procs) => procs,
-        Err(_) => return,
-    };
-
     // Get system values needed for calculations
     let ticks_per_second = procfs::ticks_per_second() as f64;
     let time_delta = machine.time_delta_ms() as f64 / 1000.0;
@@ -470,10 +573,32 @@ pub fn scan_processes(machine: &mut Machine) {
 
     let monotonic_ms = machine.monotonic_ms;
     let active_cpus = machine.active_cpus;
-    let update_process_names = machine.update_process_names;
     let hide_userland_threads = machine.hide_userland_threads;
-    let threads_discovered = machine.threads_discovered;
 
+    // Phase 1: read /proc for every process in parallel. Threads are always
+    // scanned at least once so they exist in the list when the user shows
+    // them; after that, hidden threads are skipped.
+    let plan = SamplePlan {
+        flags,
+        update_process_names: machine.update_process_names,
+        scan_threads: !hide_userland_threads || !machine.threads_discovered,
+    };
+    let samples: Vec<ProcessSample> = match procfs::process::all_processes() {
+        Ok(all_procs) => {
+            let known: &ProcessList = &machine.processes;
+            // par_bridge pulls processes from the iterator as workers free up,
+            // so only a few /proc directory descriptors are open at a time
+            all_procs
+                .par_bridge()
+                .filter_map(Result::ok)
+                .filter_map(|proc| sample_process(&proc, known, &plan))
+                .collect()
+        }
+        Err(_) => return,
+    };
+    let sample_phase_done = scan_start.map(|_| std::time::Instant::now());
+
+    // Phase 2: apply the samples to the process list, sequentially.
     // Borrow the process list and the username cache separately so each
     // process can be updated in place while its owner is resolved.
     let Machine {
@@ -482,17 +607,8 @@ pub fn scan_processes(machine: &mut Machine) {
         ..
     } = &mut *machine;
 
-    for proc_result in all_procs {
-        let proc = match proc_result {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        let stat = match proc.stat() {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
+    for sample in samples {
+        let stat = sample.stat;
         let pid = stat.pid;
 
         // Update the existing entry in place, or start a fresh one
@@ -547,45 +663,19 @@ pub fn scan_processes(machine: &mut Machine) {
         process.m_virt = (stat.vsize / 1024) as i64;
         process.m_resident = (stat.rss as i64) * page_size;
 
-        // Extract comm from stat before dropping (move instead of clone to avoid allocation)
-        let stat_comm = stat.comm;
-
         // Calculate memory percentage
         if total_mem_kb > 0.0 {
             process.percent_mem = ((process.m_resident as f64 / total_mem_kb) * 100.0) as f32;
         }
 
-        // Only update process name/command if it's new or update_process_names is enabled
-        // (matches C htop Settings.updateProcessNames behavior)
-        // Don't re-read for zombie processes since their cmdline is empty
-        let should_update_names =
-            is_new || (update_process_names && process.state != ProcessState::Zombie);
-
-        if should_update_names {
-            // Get command name from stat (move instead of clone - saves ~16 bytes allocation per process)
-            process.comm = Some(stat_comm);
-
-            // Try to get full cmdline
-            if let Ok(cmdline) = proc.cmdline()
-                && !cmdline.is_empty()
-            {
-                let joined = cmdline.join(" ");
-                // basename_end is the length of the first argument
-                let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
+        // Names were read when the process is new or update_process_names is on
+        if let Some(names) = sample.names {
+            // Command name from stat (moved, not cloned)
+            process.comm = Some(stat.comm);
+            if let Some((joined, basename_end)) = names.cmdline {
                 process.update_cmdline(joined, basename_end);
             }
-
-            // Try to get exe path and check if deleted
-            // Linux marks deleted executables with " (deleted)" suffix in /proc/PID/exe
-            if let Ok(exe) = proc.exe() {
-                let exe_str = exe.to_string_lossy();
-                let (clean_path, deleted) = if exe_str.ends_with(" (deleted)") {
-                    // Remove the " (deleted)" suffix from the path
-                    (exe_str.trim_end_matches(" (deleted)").to_string(), true)
-                } else {
-                    (exe_str.to_string(), false)
-                };
-
+            if let Some((clean_path, deleted)) = names.exe {
                 // Compute exe_basename_offset (position of basename in exe path)
                 process.exe_basename_offset = clean_path.rfind('/').map(|p| p + 1).unwrap_or(0);
                 process.exe = Some(clean_path);
@@ -593,21 +683,17 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
 
-        // Try to get cwd - only read when CWD column is displayed
-        if flags.contains(ScanFlags::CWD)
-            && let Ok(cwd) = proc.cwd()
-        {
-            process.cwd = Some(cwd.to_string_lossy().to_string());
+        // cwd is only read when the CWD column is displayed
+        if let Some(cwd) = sample.cwd {
+            process.cwd = Some(cwd);
         }
 
-        // Get UID using fast fstat() instead of parsing /proc/PID/status (51x faster!)
-        // proc.uid() uses fstat() on the already-open directory FD
-        if let Ok(uid) = proc.uid() {
+        if let Some(uid) = sample.uid {
             process.uid = uid;
             process.update_user(users_table);
         }
 
-        // NOTE: Memory details from statm (STATM flag) are now handled by background scanner
+        // NOTE: Memory details from statm (STATM flag) are handled by the background scanner
         // This includes: m_share, m_text, m_data
 
         // Check for kernel thread (ppid == 2 is kthreadd)
@@ -615,15 +701,11 @@ pub fn scan_processes(machine: &mut Machine) {
 
         // For main processes (enumerated from /proc/), TGID always equals PID
         // Threads are only found in /proc/PID/task/, not at the top /proc/ level
-        // This eliminates the need to read /proc/PID/status just for TGID
         process.tgid = pid;
         process.is_userland_thread = false;
 
-        // IO statistics - only read when IO columns are displayed
-        // (requires root or same user)
-        if flags.contains(ScanFlags::IO)
-            && let Ok(io) = proc.io()
-        {
+        // IO statistics are only read when IO columns are displayed
+        if let Some(io) = sample.io {
             let prev_read = process.io_read_bytes;
             let prev_write = process.io_write_bytes;
 
@@ -641,32 +723,13 @@ pub fn scan_processes(machine: &mut Machine) {
             }
         }
 
-        // NOTE: Deleted library check is now handled by background scanner
-        // The check scans /proc/PID/maps which is expensive
+        // NOTE: deleted libraries, OOM score, cgroup, smaps and autogroup data are
+        // handled by the background scanner because they are expensive to read
 
-        // NOTE: OOM score is now handled by background scanner
-        // Reading /proc/PID/oom_score for each process adds latency
-
-        // IO Priority - only read when IO_PRIORITY column is displayed
-        // (syscall per process - kept synchronous as it's fast)
-        if flags.contains(ScanFlags::IO_PRIORITY) {
-            process.io_priority = get_io_priority(pid);
+        // IO priority is only read when the IO_PRIORITY column is displayed
+        if let Some(io_priority) = sample.io_priority {
+            process.io_priority = io_priority;
         }
-
-        // NOTE: CGroup reading is now handled by background scanner
-        // Reading /proc/PID/cgroup for each process adds latency
-
-        // NOTE: Smaps data (PSS, Swap, SwapPss) is now handled by background scanner
-        // These were previously disabled due to causing 100% CPU
-
-        // NOTE: Autogroup data is now handled by background scanner
-        // This was previously disabled due to causing CPU spike
-
-        // Library size from maps - DISABLED: too expensive, causes 100% CPU
-        // TODO: Only read when M_LIB column is displayed
-        // if !process.is_kernel_thread && !process.is_userland_thread {
-        //     read_maps_for_lib_size(&mut process, pid, page_size);
-        // }
 
         // Track max values for dynamic column widths
         if pid > max_pid {
@@ -681,7 +744,7 @@ pub fn scan_processes(machine: &mut Machine) {
 
         process.updated = true;
 
-        // Count task statistics (matching C htop behavior)
+        // Count task statistics
         // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
         total_tasks += 1;
         if process.is_kernel_thread {
@@ -704,125 +767,97 @@ pub fn scan_processes(machine: &mut Machine) {
         let main_cgroup_short = process.cgroup_short.clone();
         let main_container_short = process.container_short.clone();
 
-        // Scan threads (tasks) for this process
-        // Skip if:
-        // - This is a kernel thread (kernel threads don't have userland tasks)
-        // - hide_userland_threads is enabled AND we've already discovered threads once
-        //   (optimization: skip expensive task directory scan for hidden threads)
-        //
-        // We always scan threads at least once (threads_discovered=false) to populate
-        // the list, even if hide_userland_threads is true. This ensures threads exist
-        // in the list when the user toggles to show them.
-        let should_scan_threads =
-            (!hide_userland_threads || !threads_discovered) && !is_kernel_thread_pid(pid);
-        if should_scan_threads && let Ok(tasks) = proc.tasks() {
-            for task_result in tasks {
-                let task = match task_result {
-                    Ok(t) => t,
-                    Err(_) => continue,
-                };
+        for thread_sample in sample.threads {
+            let tid = thread_sample.tid;
+            let task_stat = thread_sample.stat;
 
-                // Skip the main thread (tid == pid)
-                let tid = task.tid;
-                if tid == pid {
-                    continue;
-                }
+            // Update the existing thread entry in place, or start a fresh one
+            let (thread, thread_is_new) = processes.get_or_insert(tid, monotonic_ms);
+            let thread_prev_time = thread.time;
 
-                // Get task stat
-                let task_stat = match task.stat() {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
+            // Basic info from task stat
+            thread.pid = tid;
+            thread.ppid = pid; // Thread's parent is the main process
+            thread.tgid = pid; // Thread group ID is the main process PID
+            thread.pgrp = task_stat.pgrp;
+            thread.session = task_stat.session;
+            thread.tty_nr = main_tty_nr;
+            inherit(&mut thread.tty_name, &main_tty_name);
+            thread.tpgid = task_stat.tpgid;
+            thread.priority = task_stat.priority;
+            thread.nice = task_stat.nice;
+            thread.nlwp = 1; // Threads show as 1
+            thread.processor = task_stat.processor.unwrap_or(-1);
+            thread.minflt = task_stat.minflt;
+            thread.majflt = task_stat.majflt;
 
-                // Update the existing thread entry in place, or start a fresh one
-                let (thread, thread_is_new) = processes.get_or_insert(tid, monotonic_ms);
-                let thread_prev_time = thread.time;
+            // Process state
+            thread.state = convert_process_state(task_stat.state);
 
-                // Basic info from task stat
-                thread.pid = tid;
-                thread.ppid = pid; // Thread's parent is the main process
-                thread.tgid = pid; // Thread group ID is the main process PID
-                thread.pgrp = task_stat.pgrp;
-                thread.session = task_stat.session;
-                thread.tty_nr = main_tty_nr;
-                inherit(&mut thread.tty_name, &main_tty_name);
-                thread.tpgid = task_stat.tpgid;
-                thread.priority = task_stat.priority;
-                thread.nice = task_stat.nice;
-                thread.nlwp = 1; // Threads show as 1
-                thread.processor = task_stat.processor.unwrap_or(-1);
-                thread.minflt = task_stat.minflt;
-                thread.majflt = task_stat.majflt;
+            // CPU time
+            let thread_utime = task_stat.utime;
+            let thread_stime = task_stat.stime;
+            let thread_total_ticks = thread_utime + thread_stime;
+            thread.time = ((thread_total_ticks as f64 / ticks_per_second) * 100.0) as u64;
+            thread.utime = ((thread_utime as f64 / ticks_per_second) * 100.0) as u64;
+            thread.stime = ((thread_stime as f64 / ticks_per_second) * 100.0) as u64;
 
-                // Process state
-                thread.state = convert_process_state(task_stat.state);
-
-                // CPU time
-                let thread_utime = task_stat.utime;
-                let thread_stime = task_stat.stime;
-                let thread_total_ticks = thread_utime + thread_stime;
-                thread.time = ((thread_total_ticks as f64 / ticks_per_second) * 100.0) as u64;
-                thread.utime = ((thread_utime as f64 / ticks_per_second) * 100.0) as u64;
-                thread.stime = ((thread_stime as f64 / ticks_per_second) * 100.0) as u64;
-
-                // Calculate CPU percentage
-                if !thread_is_new && time_delta > 0.0 && thread.time > thread_prev_time {
-                    let time_diff = (thread.time - thread_prev_time) as f64;
-                    thread.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
-                    thread.percent_cpu = thread.percent_cpu.min(100.0 * active_cpus as f32);
-                }
-
-                // Start time
-                thread.starttime_ctime =
-                    boot_time + (task_stat.starttime as i64 / ticks_per_second as i64);
-
-                // Memory (shared with main process, but we read from task stat for consistency)
-                thread.m_virt = (task_stat.vsize / 1024) as i64;
-                thread.m_resident = (task_stat.rss as i64) * page_size;
-                if total_mem_kb > 0.0 {
-                    thread.percent_mem = ((thread.m_resident as f64 / total_mem_kb) * 100.0) as f32;
-                }
-
-                // Extract thread's own comm (move instead of clone to avoid allocation)
-                let thread_comm = task_stat.comm;
-
-                // Inherit shared data from main process
-                thread.uid = main_uid;
-                inherit(&mut thread.user, &main_user);
-                thread.comm = Some(thread_comm); // Thread has its own comm (moved, not cloned)
-                inherit(&mut thread.cmdline, &main_cmdline);
-                thread.cmdline_basename_start = main_cmdline_basename_start;
-                thread.cmdline_basename_end = main_cmdline_basename_end;
-                inherit(&mut thread.exe, &main_exe);
-                thread.exe_basename_offset = main_exe_basename_offset;
-                thread.exe_deleted = main_exe_deleted;
-                inherit(&mut thread.cwd, &main_cwd);
-                inherit(&mut thread.cgroup, &main_cgroup);
-                inherit(&mut thread.cgroup_short, &main_cgroup_short);
-                inherit(&mut thread.container_short, &main_container_short);
-
-                // Mark as userland thread
-                thread.is_userland_thread = true;
-                thread.is_kernel_thread = false;
-
-                // IO Priority (thread-specific)
-                thread.io_priority = get_io_priority(tid);
-
-                // Track max values
-                if tid > max_pid {
-                    max_pid = tid;
-                }
-                if thread.percent_cpu > max_percent_cpu {
-                    max_percent_cpu = thread.percent_cpu;
-                }
-
-                thread.updated = true;
-
-                // Count userland thread statistics
-                // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
-                total_tasks += 1;
-                userland_threads += 1;
+            // Calculate CPU percentage
+            if !thread_is_new && time_delta > 0.0 && thread.time > thread_prev_time {
+                let time_diff = (thread.time - thread_prev_time) as f64;
+                thread.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
+                thread.percent_cpu = thread.percent_cpu.min(100.0 * active_cpus as f32);
             }
+
+            // Start time
+            thread.starttime_ctime =
+                boot_time + (task_stat.starttime as i64 / ticks_per_second as i64);
+
+            // Memory (shared with main process, but we read from task stat for consistency)
+            thread.m_virt = (task_stat.vsize / 1024) as i64;
+            thread.m_resident = (task_stat.rss as i64) * page_size;
+            if total_mem_kb > 0.0 {
+                thread.percent_mem = ((thread.m_resident as f64 / total_mem_kb) * 100.0) as f32;
+            }
+
+            // Inherit shared data from main process; the thread keeps its own comm
+            thread.uid = main_uid;
+            inherit(&mut thread.user, &main_user);
+            thread.comm = Some(task_stat.comm);
+            inherit(&mut thread.cmdline, &main_cmdline);
+            thread.cmdline_basename_start = main_cmdline_basename_start;
+            thread.cmdline_basename_end = main_cmdline_basename_end;
+            inherit(&mut thread.exe, &main_exe);
+            thread.exe_basename_offset = main_exe_basename_offset;
+            thread.exe_deleted = main_exe_deleted;
+            inherit(&mut thread.cwd, &main_cwd);
+            inherit(&mut thread.cgroup, &main_cgroup);
+            inherit(&mut thread.cgroup_short, &main_cgroup_short);
+            inherit(&mut thread.container_short, &main_container_short);
+
+            // Mark as userland thread
+            thread.is_userland_thread = true;
+            thread.is_kernel_thread = false;
+
+            // IO priority is only read when the IO_PRIORITY column is displayed
+            if let Some(io_priority) = thread_sample.io_priority {
+                thread.io_priority = io_priority;
+            }
+
+            // Track max values
+            if tid > max_pid {
+                max_pid = tid;
+            }
+            if thread.percent_cpu > max_percent_cpu {
+                max_percent_cpu = thread.percent_cpu;
+            }
+
+            thread.updated = true;
+
+            // Count userland thread statistics
+            // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
+            total_tasks += 1;
+            userland_threads += 1;
         }
     }
 
@@ -889,9 +924,13 @@ pub fn scan_processes(machine: &mut Machine) {
     // Output timing if debug enabled
     if let Some(start) = scan_start {
         let elapsed = start.elapsed();
+        let sample_ms = sample_phase_done
+            .map(|t| (t - start).as_secs_f64() * 1000.0)
+            .unwrap_or(0.0);
         eprintln!(
-            "[SCAN] {:>8.2}ms ({} processes, flags={:?})",
+            "[SCAN] {:>8.2}ms (read {:.2}ms in parallel, {} processes, flags={:?})",
             elapsed.as_secs_f64() * 1000.0,
+            sample_ms,
             machine.processes.len(),
             flags
         );

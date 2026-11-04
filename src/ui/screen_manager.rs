@@ -753,6 +753,16 @@ impl ScreenManager {
 
             if timed_out || self.rescan_requested {
                 self.rescan_requested = false;
+                let debug_timing = std::env::var_os("HTOP_DEBUG_TIMING").is_some();
+                let tick_start = Instant::now();
+                let mut phase_times: Vec<(&str, Duration)> = Vec::new();
+                let mut phase_start = Instant::now();
+                let mut phase = |name: &'static str, times: &mut Vec<(&str, Duration)>| {
+                    if debug_timing {
+                        times.push((name, phase_start.elapsed()));
+                        phase_start = Instant::now();
+                    }
+                };
 
                 // Update settings in machine before scan
                 machine.update_process_names = self.settings.update_process_names;
@@ -772,6 +782,7 @@ impl ScreenManager {
                 // Always sample system metrics so the header meters keep refreshing,
                 // even while paused. Only the process table scan and sorting are skipped.
                 platform::scan_system(machine);
+                phase("system", &mut phase_times);
 
                 if !self.paused {
                     // Only allow sorting when sort_timeout has elapsed (like C htop)
@@ -782,6 +793,7 @@ impl ScreenManager {
 
                     // Scan the process table
                     platform::scan_tables(machine);
+                    phase("tables", &mut phase_times);
                     let cmd_params = self.build_command_str_params(crt);
                     machine.update_processes(
                         Some(&cmd_params),
@@ -789,11 +801,13 @@ impl ScreenManager {
                         self.settings.highlight_changes,
                         self.settings.highlight_delay_secs,
                     );
+                    phase("update", &mut phase_times);
 
                     // Build tree if in tree view mode
                     if self.settings.tree_view {
                         let (sort_key, ascending) = self.get_tree_sort_settings();
                         machine.processes.build_tree(sort_key, ascending);
+                        phase("tree", &mut phase_times);
                     }
 
                     // Data changed - invalidate the cached display list so it gets rebuilt
@@ -811,8 +825,20 @@ impl ScreenManager {
                 // redraw to show updated meters, even while paused
                 self.header.update(machine);
                 self.header_needs_redraw = true;
+                phase("header", &mut phase_times);
 
                 self.last_update = Instant::now();
+                if debug_timing {
+                    let summary: Vec<String> = phase_times
+                        .iter()
+                        .map(|(name, d)| format!("{name}={:.1}ms", d.as_secs_f64() * 1000.0))
+                        .collect();
+                    eprintln!(
+                        "[TICK] {:.1}ms total: {}",
+                        tick_start.elapsed().as_secs_f64() * 1000.0,
+                        summary.join(" ")
+                    );
+                }
 
                 // Decrement iteration count if set
                 if machine.iterations_remaining > 0 {
@@ -826,7 +852,15 @@ impl ScreenManager {
             // Only draw when needed (matches C htop behavior)
             // This avoids unnecessary redraws during halfdelay timeout
             if redraw {
+                let draw_start = Instant::now();
+                let full = self.main_panel.needs_redraw;
                 self.draw(crt, machine);
+                if full && std::env::var_os("HTOP_DEBUG_TIMING").is_some() {
+                    eprintln!(
+                        "[DRAW] full redraw {:.1}ms",
+                        draw_start.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
                 // Mark initial scan as done after first draw (for highlight_changes feature)
                 // This prevents all processes from being highlighted as "new" on startup
                 // Also mark ALL processes as was_shown to prevent filtered processes from
