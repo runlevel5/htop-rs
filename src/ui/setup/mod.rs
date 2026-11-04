@@ -705,7 +705,6 @@ impl SetupScreen {
         let display_height = (h - 1) as usize;
         let content_scroll = self.content_scroll;
         let content_index = self.content_index;
-        let focus = self.focus;
 
         // Prepare display strings for items (screen name is already baked into display_options[0])
         let mut items_to_draw: Vec<(usize, RichString, bool)> = Vec::new();
@@ -713,7 +712,8 @@ impl SetupScreen {
             let item_index = content_scroll as usize + i;
             if item_index < self.display_options.len() {
                 let item = &self.display_options[item_index];
-                let is_selected = item_index == content_index && focus == 1;
+                // Shown even when the categories panel has focus, in the unfocused colour
+                let is_selected = item_index == content_index;
                 let display_str = item.display(settings, crt);
                 items_to_draw.push((i, display_str, is_selected));
             }
@@ -791,7 +791,6 @@ impl SetupScreen {
 
         let current_scheme = settings.color_scheme as usize;
         let content_index = self.content_index;
-        let focus = self.focus;
 
         crt.attrset(reset_color);
         for row in 0..h {
@@ -815,7 +814,8 @@ impl SetupScreen {
             }
 
             crt.mv(y + 1 + i as i32, x);
-            let is_selected = i == content_index && focus == 1;
+            // Shown even when the categories panel has focus, in the unfocused colour
+            let is_selected = i == content_index;
             let is_checked = i == current_scheme;
 
             if is_selected {
@@ -875,10 +875,13 @@ impl SetupScreen {
         let display_height = (h - 1) as usize; // Minus header row
 
         let text_attr = crt.color(ColorElement::Process);
-        let selected_attr = crt.color(ColorElement::PanelSelectionFocus);
+        let selected_attr = if self.focus == 1 {
+            crt.color(ColorElement::PanelSelectionFocus)
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
         let check_attr = crt.color(ColorElement::CheckBox);
 
-        let focus = self.focus;
         let content_index = self.content_index;
 
         crt.attrset(reset_color);
@@ -904,7 +907,8 @@ impl SetupScreen {
             }
 
             let screen_y = y + 1 + i as i32;
-            let is_selected = focus == 1 && i == content_index;
+            // Shown even when the categories panel has focus, in the unfocused colour
+            let is_selected = i == content_index;
             let is_checked = layout == current_layout;
 
             crt.mv(screen_y, x);
@@ -1044,13 +1048,14 @@ impl SetupScreen {
         let mut meter_texts: Vec<(usize, String, bool)> = Vec::new();
         if let Some(meters) = meters {
             for (i, meter) in meters.iter().enumerate().take(display_height) {
-                let is_selected = has_focus && i == selection;
+                // Shown in every panel, in the unfocused colour when the panel has no focus
+                let is_selected = i == selection;
 
                 // Get display name with mode
                 let display = meter_display_name(&meter.name, meter.mode);
 
                 // Add moving indicator (↕) if this item is being moved
-                let display_text = if is_selected && meters_moving {
+                let display_text = if is_selected && has_focus && meters_moving {
                     // Use UTF-8 up-down arrow like C htop
                     let prefix = "↕ ";
                     let max_len = (w - 1) as usize;
@@ -1141,7 +1146,8 @@ impl SetupScreen {
             let item_index = meters_available_scroll as usize + i;
             if item_index < available_meters.len() {
                 let meter_info = available_meters[item_index];
-                let is_selected = has_focus && item_index == meters_available_selection;
+                // Shown in every panel, in the unfocused colour when the panel has no focus
+                let is_selected = item_index == meters_available_selection;
 
                 // Show description in available meters panel (like C htop)
                 let display_text: String = meter_info
@@ -1501,7 +1507,9 @@ impl SetupScreen {
             let item_index = available_columns_scroll as usize + i;
             if item_index < available_fields.len() {
                 let field = available_fields[item_index];
-                let is_selected = has_focus && item_index == available_columns_selection;
+                // Shown in every panel, in the unfocused colour when the panel has no focus,
+                // like the screens list and the active columns beside it
+                let is_selected = item_index == available_columns_selection;
 
                 // Show name with description
                 let display = format!("{} - {}", field.name(), field.description());
