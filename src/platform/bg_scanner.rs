@@ -33,93 +33,67 @@
 //! 3. A merge function to apply results to processes
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
 
-/// Generic background scanner that collects data of type T for each PID
+/// Runs one collection at a time on the rayon pool and hands the result back
+/// to the main thread on a later tick.
 #[derive(Debug)]
-pub struct BackgroundScanner<T: Send + Clone + 'static> {
-    /// Handle to the background thread (if running)
-    handle: Option<JoinHandle<HashMap<i32, T>>>,
-    /// Results from last completed scan (shared for checking without joining)
+pub struct BackgroundScanner<T: Send + 'static> {
+    /// True while a collection is in flight
+    running: Arc<AtomicBool>,
+    /// Completed results waiting to be taken by the main thread
     results: Arc<Mutex<Option<HashMap<i32, T>>>>,
 }
 
-impl<T: Send + Clone + 'static> BackgroundScanner<T> {
-    /// Create a new background scanner
+impl<T: Send + 'static> BackgroundScanner<T> {
     pub fn new() -> Self {
         Self {
-            handle: None,
+            running: Arc::new(AtomicBool::new(false)),
             results: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Check if a background scan is currently running
+    /// Whether a scan is currently in progress
     pub fn is_running(&self) -> bool {
-        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+        self.running.load(Ordering::Acquire)
     }
 
-    /// Start a background scan using the provided collection function
+    /// Start a scan on the rayon pool unless one is already running.
     ///
-    /// The `collect_fn` should use rayon to parallelize data collection.
-    /// Only starts if no scan is currently running.
-    ///
-    /// # Arguments
-    /// * `collect_fn` - A function that collects expensive data for all PIDs
+    /// Any results that were completed but never taken are discarded first,
+    /// so callers should take results before starting the next scan.
+    /// The `collect_fn` may itself use rayon's parallel iterators.
     pub fn start_scan<F>(&mut self, collect_fn: F)
     where
         F: FnOnce() -> HashMap<i32, T> + Send + 'static,
     {
-        // Don't start if already running
         if self.is_running() {
             return;
         }
 
-        // Take any completed results first
         self.try_take_results();
 
+        self.running.store(true, Ordering::Release);
+        let running = Arc::clone(&self.running);
         let results = Arc::clone(&self.results);
 
-        self.handle = Some(thread::spawn(move || {
+        rayon::spawn(move || {
             let data = collect_fn();
-
-            // Store results for later retrieval
             if let Ok(mut guard) = results.lock() {
-                *guard = Some(data.clone());
+                *guard = Some(data);
             }
-
-            data
-        }));
+            running.store(false, Ordering::Release);
+        });
     }
 
-    /// Try to take completed results (non-blocking)
-    /// Returns None if no results ready or scan still running
+    /// Take the results of the last completed scan, if any
     pub fn try_take_results(&mut self) -> Option<HashMap<i32, T>> {
-        // First check if thread has finished
-        if let Some(handle) = self.handle.take() {
-            if handle.is_finished() {
-                // Thread finished, get results directly from join
-                // Also clear the shared results since we're returning from join
-                if let Ok(mut guard) = self.results.lock() {
-                    *guard = None;
-                }
-                return handle.join().ok();
-            } else {
-                // Still running, put handle back
-                self.handle = Some(handle);
-            }
-        }
-
-        // Also check shared results (in case we missed the handle)
-        if let Ok(mut guard) = self.results.lock() {
-            return guard.take();
-        }
-
-        None
+        self.results.lock().ok()?.take()
     }
 }
 
-impl<T: Send + Clone + 'static> Default for BackgroundScanner<T> {
+impl<T: Send + 'static> Default for BackgroundScanner<T> {
     fn default() -> Self {
         Self::new()
     }
