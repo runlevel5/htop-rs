@@ -1119,7 +1119,7 @@ impl ScreenManager {
         // If search/filter mode is active, pass keys to main panel FIRST
         // This prevents global shortcuts from intercepting typed characters
         if self.main_panel.inc_search.active {
-            let result = self.main_panel.on_key(key, machine);
+            let result = self.main_panel.on_key(key, machine, &self.settings);
             if result != HandlerResult::Ignored {
                 return result;
             }
@@ -1215,7 +1215,7 @@ impl ScreenManager {
                     machine.processes.toggle_tag(pid);
                 }
                 // Move selection down after tagging
-                self.main_panel.on_key(KEY_DOWN, machine);
+                self.main_panel.on_key(KEY_DOWN, machine, &self.settings);
                 return HandlerResult::Handled;
             }
             KEY_HASH => {
@@ -1507,7 +1507,8 @@ impl ScreenManager {
             }
             KEY_0..=KEY_9 => {
                 // '0'-'9' - incremental PID search
-                self.main_panel.start_pid_search(key as u8 as char, machine);
+                self.main_panel
+                    .start_pid_search(key as u8 as char, machine, &self.settings);
                 return HandlerResult::Handled;
             }
             _ => {}
@@ -1515,7 +1516,7 @@ impl ScreenManager {
 
         // Pass to main panel (if not already handled above for inc_search)
 
-        self.main_panel.on_key(key, machine)
+        self.main_panel.on_key(key, machine, &self.settings)
     }
 
     /// Switch to a different screen tab
