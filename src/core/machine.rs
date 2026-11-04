@@ -161,6 +161,8 @@ pub struct Machine {
     pub monotonic_ms: u64,
     pub prev_monotonic_ms: u64,
     pub last_scan: Instant,
+    /// Fixed origin for the cumulative monotonic_ms clock
+    pub monotonic_origin: Instant,
 
     // Iteration control
     pub iterations_remaining: i64,
@@ -283,6 +285,7 @@ impl Machine {
             monotonic_ms: 0,
             prev_monotonic_ms: 0,
             last_scan: Instant::now(),
+            monotonic_origin: Instant::now(),
             iterations_remaining: -1,
             total_mem: 0,
             used_mem: 0,
@@ -378,19 +381,29 @@ impl Machine {
 
     /// Perform a full system scan
     pub fn scan(&mut self) {
-        // Update timing
-        self.prev_monotonic_ms = self.monotonic_ms;
+        // Update the wall-clock timestamp before a system-metric scan.
+        // Rate meters (disk/network IO) use realtime_ms for their calculations.
         self.realtime = SystemTime::now();
         self.realtime_ms = self
             .realtime
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        self.monotonic_ms = self.last_scan.elapsed().as_millis() as u64;
-        self.last_scan = Instant::now();
 
         // Platform-specific scanning is done in the platform module
         // This just updates timestamps
+    }
+
+    /// Update the monotonic timestamps before a process table scan.
+    ///
+    /// Per-process CPU percentages, IO rates and highlight timing are derived
+    /// from the interval between two table scans, so this clock must only
+    /// advance when the process table is actually scanned - not when only the
+    /// system metrics are sampled (e.g. while paused).
+    pub fn scan_tables_prepare(&mut self) {
+        self.prev_monotonic_ms = self.monotonic_ms;
+        self.monotonic_ms = (self.monotonic_origin.elapsed().as_millis() as u64).max(1);
+        self.last_scan = Instant::now();
     }
 
     /// Update the process list after scanning
@@ -482,5 +495,44 @@ impl Machine {
 impl Default for Machine {
     fn default() -> Self {
         Machine::new(None)
+    }
+}
+
+#[cfg(test)]
+mod scan_timing_tests {
+    use super::Machine;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    #[test]
+    fn table_scan_clock_is_cumulative() {
+        let mut m = Machine::default();
+        m.scan_tables_prepare();
+        let first = m.monotonic_ms;
+        sleep(Duration::from_millis(30));
+        m.scan_tables_prepare();
+        sleep(Duration::from_millis(30));
+        m.scan_tables_prepare();
+
+        assert!(m.monotonic_ms > m.prev_monotonic_ms);
+        assert!(m.prev_monotonic_ms > first);
+        // Interval between the last two table scans, not a difference of intervals
+        assert!(m.time_delta_ms() >= 30, "delta was {}", m.time_delta_ms());
+    }
+
+    #[test]
+    fn system_scan_does_not_advance_table_clock() {
+        let mut m = Machine::default();
+        m.scan_tables_prepare();
+        sleep(Duration::from_millis(10));
+        m.scan_tables_prepare();
+        let (mono, prev) = (m.monotonic_ms, m.prev_monotonic_ms);
+
+        sleep(Duration::from_millis(10));
+        m.scan();
+
+        assert_eq!(m.monotonic_ms, mono);
+        assert_eq!(m.prev_monotonic_ms, prev);
+        assert!(m.realtime_ms > 0);
     }
 }

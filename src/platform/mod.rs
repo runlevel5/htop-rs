@@ -166,8 +166,11 @@ pub fn get_system_info(machine: &mut Machine) {
     }
 }
 
-/// Perform a full system scan
-pub fn scan(machine: &mut Machine) {
+/// Scan system-wide metrics used by the header meters.
+///
+/// This runs on every refresh cycle, even while process updates are paused,
+/// so the meters keep refreshing independently of the process table.
+pub fn scan_system(machine: &mut Machine) {
     // Update timing first - disk/network IO meters need realtime_ms for rate calculations
     machine.scan();
 
@@ -177,8 +180,22 @@ pub fn scan(machine: &mut Machine) {
     scan_disk_io(machine);
     scan_network_io(machine);
     scan_file_descriptors(machine);
-    scan_processes(machine);
     get_system_info(machine);
-    // Note: update_processes() is now called by the UI layer after scan()
+}
+
+/// Scan the process table.
+///
+/// Must be called after `scan_system` so CPU count and memory totals are current.
+/// Skipped while paused.
+pub fn scan_tables(machine: &mut Machine) {
+    machine.scan_tables_prepare();
+    scan_processes(machine);
+    // Note: update_processes() is called by the UI layer after this
     // so it can pass CommandStrParams for building merged command strings
+}
+
+/// Perform a full scan of both system metrics and the process table
+pub fn scan(machine: &mut Machine) {
+    scan_system(machine);
+    scan_tables(machine);
 }
