@@ -643,6 +643,25 @@ impl ScreenManager {
         crt.refresh();
     }
 
+    /// Block in the next input read until the next update is due, so the loop
+    /// only wakes for input or for a refresh. The wait is rounded up to the
+    /// next tenth of a second so the read never returns just before an update
+    /// and costs a whole extra cycle. Debug builds wake every 0.1 s so the
+    /// countdown in the function bar keeps ticking.
+    fn apply_input_delay(&self, crt: &mut Crt) {
+        #[cfg(debug_assertions)]
+        {
+            crt.set_delay(1);
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            let delay_ms = u64::from(self.settings.delay) * 100;
+            let elapsed_ms = self.last_update.elapsed().as_millis() as u64;
+            let remaining_tenths = delay_ms.saturating_sub(elapsed_ms).div_ceil(100);
+            crt.set_delay(remaining_tenths.clamp(1, 255) as u32);
+        }
+    }
+
     /// Force a full rescan on the next loop iteration.
     /// Also clears the sort timeout so the result is sorted immediately.
     fn request_rescan(&mut self) {
@@ -696,10 +715,6 @@ impl ScreenManager {
         // Now calculate layout with correct meter heights
         self.layout(crt);
 
-        // Use a fixed 0.1s (1 tenth) halfdelay for responsive counter updates
-        // The actual update interval is controlled by self.settings.delay and self.last_update
-        crt.set_delay(1);
-
         // Initialize tree view state and update function bar labels
         self.main_panel.tree_view = self.settings.tree_view;
         self.update_function_bar_labels();
@@ -728,11 +743,6 @@ impl ScreenManager {
         loop {
             // Check if we should exit
             if !running.load(Ordering::SeqCst) {
-                break;
-            }
-
-            // Check iteration limit
-            if machine.iterations_remaining == 0 {
                 break;
             }
 
@@ -829,7 +839,14 @@ impl ScreenManager {
                 }
             }
 
-            // Wait for input (halfdelay mode - returns after timeout or key press)
+            // Exit as soon as the last requested frame has been drawn,
+            // without waiting out another input delay
+            if machine.iterations_remaining == 0 {
+                break;
+            }
+
+            // Wait for input until the next update is due
+            self.apply_input_delay(crt);
             let mut key = crt.read_key();
 
             // Check if terminal was resized (SIGWINCH received).

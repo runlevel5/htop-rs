@@ -1691,9 +1691,7 @@ impl MainPanel {
     /// Check if a process matches the current filter
     fn matches_filter(&self, process: &Process) -> bool {
         if let Some(ref filter) = self.filter {
-            let cmd = process.get_command().to_lowercase();
-            let filter_lower = filter.to_lowercase();
-            cmd.contains(&filter_lower)
+            contains_ignore_ascii_case(process.get_command(), filter)
         } else {
             true
         }
@@ -1938,7 +1936,6 @@ impl MainPanel {
             return;
         }
 
-        let search_lower = self.inc_search.text.to_lowercase();
         let processes: Vec<&Process> = machine
             .processes
             .iter()
@@ -1966,8 +1963,10 @@ impl MainPanel {
                 return;
             }
 
-            let cmd = processes[i as usize].get_command().to_lowercase();
-            if cmd.contains(&search_lower) {
+            if contains_ignore_ascii_case(
+                processes[i as usize].get_command(),
+                &self.inc_search.text,
+            ) {
                 self.selected = i;
                 self.ensure_visible(size);
                 self.inc_search.found = true;
@@ -1989,8 +1988,6 @@ impl MainPanel {
             return;
         }
 
-        let search_lower = self.inc_search.text.to_lowercase();
-
         // Search from current position
         let processes: Vec<&Process> = machine
             .processes
@@ -1999,8 +1996,7 @@ impl MainPanel {
             .collect();
 
         for (i, process) in processes.iter().enumerate() {
-            let cmd = process.get_command().to_lowercase();
-            if cmd.contains(&search_lower) {
+            if contains_ignore_ascii_case(process.get_command(), &self.inc_search.text) {
                 self.selected = i as i32;
                 self.ensure_visible(processes.len() as i32);
                 self.inc_search.found = true;
@@ -2209,9 +2205,7 @@ impl MainPanel {
     /// Helper for filtering with explicit filter
     fn matches_filter_with(&self, process: &Process, filter: &Option<String>) -> bool {
         if let Some(f) = filter {
-            let cmd = process.get_command().to_lowercase();
-            let filter_lower = f.to_lowercase();
-            cmd.contains(&filter_lower)
+            contains_ignore_ascii_case(process.get_command(), f)
         } else {
             true
         }
@@ -2223,8 +2217,44 @@ impl MainPanel {
     }
 }
 
+/// Case-insensitive substring search without allocating.
+///
+/// Only ASCII letters are folded, which is what the C implementation's
+/// `strcasestr` does; non-ASCII characters must match exactly.
+fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
 impl Default for MainPanel {
     fn default() -> Self {
         MainPanel::new()
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::contains_ignore_ascii_case;
+
+    #[test]
+    fn matches_regardless_of_ascii_case() {
+        assert!(contains_ignore_ascii_case(
+            "/usr/bin/Python3 -m http",
+            "python"
+        ));
+        assert!(contains_ignore_ascii_case("/usr/bin/python3", "PYTHON3"));
+        assert!(contains_ignore_ascii_case("anything", ""));
+    }
+
+    #[test]
+    fn rejects_non_matches_and_handles_short_haystacks() {
+        assert!(!contains_ignore_ascii_case("/usr/bin/python3", "ruby"));
+        assert!(!contains_ignore_ascii_case("py", "python"));
+        assert!(!contains_ignore_ascii_case("", "x"));
     }
 }

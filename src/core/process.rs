@@ -1290,7 +1290,9 @@ pub struct CmdlineHighlight {
 /// Merged command string with highlight information
 #[derive(Debug, Clone, Default)]
 pub struct MergedCommand {
-    pub last_update: u64,
+    /// Fingerprint of the inputs `str_value` was last built from, so the
+    /// string is only rebuilt when the command line, paths or settings change
+    pub input_hash: u64,
     pub str_value: Option<String>,
     pub highlights: Vec<CmdlineHighlight>,
 }
@@ -1799,6 +1801,27 @@ impl Process {
         }
     }
 
+    /// Fingerprint of everything `make_command_str` reads
+    fn command_str_input_hash(&self, params: &CommandStrParams, tree_separator: &str) -> u64 {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        self.cmdline.hash(&mut hasher);
+        self.comm.hash(&mut hasher);
+        self.exe.hash(&mut hasher);
+        self.cmdline_basename_start.hash(&mut hasher);
+        self.cmdline_basename_end.hash(&mut hasher);
+        self.exe_basename_offset.hash(&mut hasher);
+        (self.state == ProcessState::Zombie).hash(&mut hasher);
+        self.is_userland_thread.hash(&mut hasher);
+        self.is_kernel_thread.hash(&mut hasher);
+        self.uses_deleted_lib.hash(&mut hasher);
+        self.exe_deleted.hash(&mut hasher);
+        params.hash(&mut hasher);
+        tree_separator.hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// Build the merged command string and highlights
     /// This matches C htop's Process_makeCommandStr() function
     ///
@@ -1814,6 +1837,15 @@ impl Process {
         if self.state == ProcessState::Zombie && self.merged_command.str_value.is_none() {
             return;
         }
+
+        // The merged string depends only on these inputs, which rarely change
+        // between scans, so skip the rebuild (and its allocations) when they
+        // are the same as last time.
+        let input_hash = self.command_str_input_hash(params, tree_separator);
+        if self.merged_command.str_value.is_some() && self.merged_command.input_hash == input_hash {
+            return;
+        }
+        self.merged_command.input_hash = input_hash;
 
         // Select thread-specific colors if this is a thread (matches C htop behavior)
         let base_attr = if self.is_thread() {
@@ -2438,7 +2470,7 @@ const TASK_COMM_LEN: usize = 16;
 
 /// Parameters for building the command string
 /// This avoids circular dependencies with Settings
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct CommandStrParams {
     pub show_merged_command: bool,
     pub show_program_path: bool,
@@ -2603,33 +2635,20 @@ impl ProcessList {
         }
     }
 
-    /// Sort processes by a field using insertion sort
-    /// Insertion sort is O(n) for nearly-sorted data (common case between scans)
+    /// Sort processes by a field.
+    ///
+    /// The standard sort is stable and adaptive, so a list that is already
+    /// nearly in order between scans costs little, and the comparison key is
+    /// evaluated through `compare_by_field` just as before.
     pub fn sort_by(&mut self, field: ProcessField, ascending: bool) {
-        let len = self.processes.len();
-        if len <= 1 {
+        if self.processes.len() <= 1 {
             return;
         }
 
-        // Insertion sort - O(n) for nearly-sorted data, O(n²) worst case
-        for i in 1..len {
-            let mut j = i;
-            while j > 0 {
-                let cmp = self.processes[j - 1].compare_by_field(&self.processes[j], field);
-                let should_swap = if ascending {
-                    cmp == std::cmp::Ordering::Greater
-                } else {
-                    cmp == std::cmp::Ordering::Less
-                };
-
-                if should_swap {
-                    self.processes.swap(j - 1, j);
-                    j -= 1;
-                } else {
-                    break;
-                }
-            }
-        }
+        self.processes.sort_by(|a, b| {
+            let cmp = a.compare_by_field(b, field);
+            if ascending { cmp } else { cmp.reverse() }
+        });
         self.reindex();
     }
 
@@ -2974,6 +2993,82 @@ impl ProcessList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ==================== Command string caching tests ====================
+
+    fn command_params() -> CommandStrParams {
+        CommandStrParams {
+            show_merged_command: true,
+            show_program_path: true,
+            find_comm_in_cmdline: true,
+            strip_exe_from_cmdline: true,
+            show_thread_names: false,
+            shadow_dist_path_prefix: false,
+            base_attr: 1,
+            comm_attr: 2,
+            thread_base_attr: 3,
+            thread_comm_attr: 4,
+            del_exe_attr: 5,
+            del_lib_attr: 6,
+            separator_attr: 7,
+            shadow_attr: 8,
+        }
+    }
+
+    #[test]
+    fn test_make_command_str_skips_rebuild_when_inputs_unchanged() {
+        let mut p = Process::new(10);
+        p.comm = Some("bash".to_string());
+        p.update_cmdline("/bin/bash -l".to_string(), 0);
+        let params = command_params();
+
+        p.make_command_str(&params, "|");
+        let first = p.merged_command.str_value.clone();
+        let hash = p.merged_command.input_hash;
+        assert!(first.is_some());
+
+        // Poke the cached string so a rebuild would be visible
+        p.merged_command.str_value = Some("cached".to_string());
+        p.make_command_str(&params, "|");
+        assert_eq!(p.merged_command.str_value.as_deref(), Some("cached"));
+        assert_eq!(p.merged_command.input_hash, hash);
+    }
+
+    #[test]
+    fn test_make_command_str_rebuilds_when_inputs_change() {
+        let mut p = Process::new(10);
+        p.comm = Some("bash".to_string());
+        p.update_cmdline("/bin/bash -l".to_string(), 0);
+        let params = command_params();
+        p.make_command_str(&params, "|");
+        let first = p.merged_command.str_value.clone();
+
+        p.update_cmdline("/bin/zsh -i".to_string(), 0);
+        p.make_command_str(&params, "|");
+        assert_ne!(p.merged_command.str_value, first);
+
+        // A settings change also triggers a rebuild
+        let before = p.merged_command.input_hash;
+        let mut changed = command_params();
+        changed.show_program_path = false;
+        p.make_command_str(&changed, "|");
+        assert_ne!(p.merged_command.input_hash, before);
+    }
+
+    #[test]
+    fn test_sort_by_is_stable_and_orders_by_field() {
+        let mut pl = ProcessList::new();
+        for (pid, cpu) in [(1, 5.0), (2, 1.0), (3, 5.0), (4, 9.0)] {
+            let mut p = Process::new(pid);
+            p.percent_cpu = cpu;
+            pl.add(p, 0);
+        }
+        pl.sort_by(ProcessField::PercentCpu, false);
+        let pids: Vec<i32> = pl.iter().map(|p| p.pid).collect();
+        // Equal CPU values keep their insertion order
+        assert_eq!(pids, vec![4, 1, 3, 2]);
+        assert_eq!(pl.index_of(2), Some(3));
+    }
 
     // ==================== ProcessList index tests ====================
 

@@ -40,8 +40,8 @@
 
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
 
 use super::battery_meter::ACPresence;
 
@@ -70,80 +70,55 @@ pub type MeterDataMap = HashMap<MeterDataId, MeterExpensiveData>;
 /// Background scanner for meter data
 #[derive(Debug)]
 pub struct MeterBackgroundScanner {
-    /// Handle to the background thread (if running)
-    handle: Option<JoinHandle<MeterDataMap>>,
-    /// Results from last completed scan
+    /// True while a collection is in flight
+    running: Arc<AtomicBool>,
+    /// Completed results waiting to be taken by the main thread
     results: Arc<Mutex<Option<MeterDataMap>>>,
 }
 
 impl MeterBackgroundScanner {
-    /// Create a new meter background scanner
     pub fn new() -> Self {
         Self {
-            handle: None,
+            running: Arc::new(AtomicBool::new(false)),
             results: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Check if a background scan is currently running
+    /// Whether a scan is currently in progress
     pub fn is_running(&self) -> bool {
-        self.handle.as_ref().is_some_and(|h| !h.is_finished())
+        self.running.load(Ordering::Acquire)
     }
 
-    /// Start a background scan for the requested meter data
-    ///
-    /// # Arguments
-    /// * `requested` - Set of meter data IDs to collect
+    /// Start collecting the requested meter data on the rayon pool unless a
+    /// scan is already running. Untaken results from the previous scan are
+    /// discarded first.
     pub fn start_scan(&mut self, requested: Vec<MeterDataId>) {
-        // Don't start if already running
         if self.is_running() {
             return;
         }
 
-        // Take any completed results first
         self.try_take_results();
 
         if requested.is_empty() {
             return;
         }
 
+        self.running.store(true, Ordering::Release);
+        let running = Arc::clone(&self.running);
         let results = Arc::clone(&self.results);
 
-        self.handle = Some(thread::spawn(move || {
+        rayon::spawn(move || {
             let data = collect_meter_data(&requested);
-
-            // Store results for later retrieval
             if let Ok(mut guard) = results.lock() {
-                *guard = Some(data.clone());
+                *guard = Some(data);
             }
-
-            data
-        }));
+            running.store(false, Ordering::Release);
+        });
     }
 
-    /// Try to take completed results (non-blocking)
-    /// Returns None if no results ready or scan still running
+    /// Take the results of the last completed scan, if any
     pub fn try_take_results(&mut self) -> Option<MeterDataMap> {
-        // First check if thread has finished
-        if let Some(handle) = self.handle.take() {
-            if handle.is_finished() {
-                // Thread finished, get results directly from join
-                if let Ok(mut guard) = self.results.lock() {
-                    *guard = None;
-                }
-                return handle.join().ok();
-            } else {
-                // Still running, put handle back
-                self.handle = Some(handle);
-            }
-        }
-
-        // Also check shared results (in case we missed the handle)
-        if let Ok(mut guard) = self.results.lock() {
-            return guard.take();
-        }
-
-        None
+        self.results.lock().ok()?.take()
     }
 }
 
