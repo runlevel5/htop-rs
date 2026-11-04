@@ -158,54 +158,61 @@ impl Default for KinfoProc {
     }
 }
 
-/// Get process priority from kinfo_proc via sysctl
-/// This matches C htop which uses kp_proc.p_priority
-fn get_process_priority(pid: i32) -> Option<u8> {
-    let mut mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid];
-    let mut kinfo: KinfoProc = Default::default();
-    let mut size = mem::size_of::<KinfoProc>();
+/// Fetch the kernel's process table in a single sysctl call.
+///
+/// This replaces one `KERN_PROC_PID` sysctl per process per scan. It also covers
+/// PID 0 (kernel_task) and processes that `proc_pidinfo` refuses to describe
+/// when not running as root.
+fn list_kinfo_procs() -> Vec<KinfoProc> {
+    let mut mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0];
+    let entry_size = mem::size_of::<KinfoProc>();
 
-    let ret = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            4,
-            &mut kinfo as *mut _ as *mut c_void,
-            &mut size,
-            ptr::null_mut(),
-            0,
-        )
-    };
+    // The table can grow between the size query and the fetch, so allow some
+    // headroom and retry a few times if the kernel reports it no longer fits.
+    for _ in 0..4 {
+        let mut byte_len: size_t = 0;
+        let ret = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                4,
+                ptr::null_mut(),
+                &mut byte_len,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        if ret != 0 || byte_len == 0 {
+            return Vec::new();
+        }
 
-    if ret == 0 && size > 0 {
-        Some(kinfo.kp_proc.p_priority)
-    } else {
-        None
+        let capacity = byte_len / entry_size + 32;
+        let mut entries: Vec<KinfoProc> = Vec::with_capacity(capacity);
+        byte_len = capacity * entry_size;
+        let ret = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                4,
+                entries.as_mut_ptr() as *mut c_void,
+                &mut byte_len,
+                ptr::null_mut(),
+                0,
+            )
+        };
+        if ret == 0 {
+            // SAFETY: the kernel wrote byte_len bytes of whole KinfoProc entries
+            // into the buffer, which has room for `capacity` entries.
+            unsafe { entries.set_len(byte_len / entry_size) };
+            return entries;
+        }
     }
+
+    Vec::new()
 }
 
-/// Get process info from sysctl for PID 0 (kernel_task) or when proc_pidinfo fails
-/// Returns (comm, ppid, pgid, uid, nice, state, priority) if successful
-fn get_kinfo_proc(pid: i32) -> Option<KinfoProc> {
-    let mut mib: [c_int; 4] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid];
-    let mut kinfo: KinfoProc = Default::default();
-    let mut size = mem::size_of::<KinfoProc>();
-
-    let ret = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            4,
-            &mut kinfo as *mut _ as *mut c_void,
-            &mut size,
-            ptr::null_mut(),
-            0,
-        )
-    };
-
-    if ret == 0 && size > 0 {
-        Some(kinfo)
-    } else {
-        None
-    }
+/// Interpret a fixed-size, NUL-terminated C string field
+fn c_str_field(bytes: &[u8]) -> Option<&str> {
+    let end = bytes.iter().position(|&c| c == 0).unwrap_or(bytes.len());
+    std::str::from_utf8(&bytes[..end]).ok()
 }
 
 /// vnode_info_path structure from sys/proc_info.h
@@ -311,7 +318,6 @@ unsafe extern "C" {
 
 // libproc functions
 unsafe extern "C" {
-    fn proc_listallpids(buffer: *mut c_void, buffersize: c_int) -> c_int;
     fn proc_pidinfo(
         pid: c_int,
         flavor: c_int,
@@ -864,92 +870,71 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
     // This allows widths to shrink back when there are no longer processes with wide values
     machine.field_widths.reset_auto_widths();
 
-    // Get list of all PIDs
-    let mut pids: Vec<i32> = vec![0; 4096];
-    let count = unsafe {
-        proc_listallpids(
-            pids.as_mut_ptr() as *mut c_void,
-            (pids.len() * mem::size_of::<i32>()) as c_int,
-        )
-    };
-
-    if count <= 0 {
+    // One sysctl call describes every process, so no per-process sysctl is needed
+    let kinfos = list_kinfo_procs();
+    if kinfos.is_empty() {
         return;
     }
-
-    let pid_count = count as usize;
-    pids.truncate(pid_count);
 
     // Get current time for CPU% calculation
     let time_delta = machine.time_delta_ms() as f64 / 1000.0;
 
     // Get total memory for MEM% calculation
     let total_mem_kb = machine.total_mem as f64;
+    let monotonic_ms = machine.monotonic_ms;
+    let active_cpus = machine.active_cpus;
 
-    // Reset task counts (will be accumulated during scan)
-    // Match C htop: kernelThreads is always 0 on Darwin, userlandThreads is sum of pti_threadnum
-    machine.total_tasks = 0;
-    machine.running_tasks = 0;
-    machine.userland_threads = 0;
-    machine.kernel_threads = 0;
+    // Task counts accumulated during the scan.
+    // kernel_threads only counts kernel_task; userland_threads is the sum of pti_threadnum.
+    let mut total_tasks: u32 = 0;
+    let mut running_tasks: u32 = 0;
+    let mut userland_threads: u32 = 0;
+    let mut kernel_threads: u32 = 0;
 
     // Track max values for dynamic column widths
     let mut max_pid: i32 = 0;
     let mut max_uid: u32 = 0;
     let mut max_percent_cpu: f32 = 0.0;
 
-    // Process each PID
-    for &pid in &pids {
+    // Borrow the process list and the username cache separately so each
+    // process can be updated in place while its owner is resolved.
+    let Machine {
+        processes,
+        users_table,
+        ..
+    } = &mut *machine;
+
+    for kinfo in &kinfos {
+        let pid = kinfo.kp_proc.p_pid;
         if pid < 0 {
             continue;
         }
 
-        // For PID 0 (kernel_task), proc_pidinfo doesn't work, so we use sysctl
-        // TODO: Remove this workaround once libproc-rs handles kernel_task
-        // Tracking issue: https://github.com/andrewdavidmackenzie/libproc-rs/issues/169
+        // PID 0 (kernel_task) is invisible to proc_pidinfo; the kinfo entry has all we get
         if pid == 0 {
-            if let Some(kinfo) = get_kinfo_proc(0) {
-                let is_new = machine.processes.get(0).is_none();
-                let mut process = if is_new {
-                    Process::new(0)
-                } else {
-                    machine
-                        .processes
-                        .get(0)
-                        .cloned()
-                        .unwrap_or_else(|| Process::new(0))
-                };
-
-                process.pid = 0;
-                process.ppid = kinfo.kp_eproc.e_ppid;
-                process.pgrp = kinfo.kp_eproc.e_pgid;
-                process.uid = kinfo.kp_eproc.e_pcred_p_ruid;
-                process.nice = kinfo.kp_proc.p_nice as i64;
-                process.priority = kinfo.kp_proc.p_priority as i64;
-                process.state = ProcessState::Running; // kernel_task is always "running"
-                process.is_kernel_thread = true;
-                process.user = Some(machine.get_username(process.uid));
-
-                // Get comm from kinfo_proc.kp_proc.p_comm
-                let comm_bytes = &kinfo.kp_proc.p_comm;
-                if let Some(pos) = comm_bytes.iter().position(|&c| c == 0)
-                    && let Ok(comm) = std::str::from_utf8(&comm_bytes[..pos])
-                {
-                    process.comm = Some(comm.to_string());
-                }
-
-                // kernel_task has no cmdline, exe, or cwd
-                process.nlwp = 0;
-                process.m_virt = 0;
-                process.m_resident = 0;
-                process.percent_cpu = 0.0;
-                process.percent_mem = 0.0;
-
-                process.updated = true;
-                machine.processes.add(process, machine.monotonic_ms);
-                machine.total_tasks += 1;
-                machine.kernel_threads += 1;
+            let (process, _) = processes.get_or_insert(0, monotonic_ms);
+            process.ppid = kinfo.kp_eproc.e_ppid;
+            process.pgrp = kinfo.kp_eproc.e_pgid;
+            process.uid = kinfo.kp_eproc.e_pcred_p_ruid;
+            process.nice = kinfo.kp_proc.p_nice as i64;
+            process.priority = kinfo.kp_proc.p_priority as i64;
+            process.state = ProcessState::Running; // kernel_task is always "running"
+            process.is_kernel_thread = true;
+            process.update_user(users_table);
+            if let Some(comm) = c_str_field(&kinfo.kp_proc.p_comm) {
+                process.comm = Some(comm.to_string());
             }
+
+            // kernel_task has no cmdline, exe, or cwd
+            process.nlwp = 0;
+            process.m_virt = 0;
+            process.m_resident = 0;
+            process.percent_cpu = 0.0;
+            process.percent_mem = 0.0;
+
+            process.updated = true;
+            total_tasks += 1;
+            kernel_threads += 1;
             continue;
         }
 
@@ -965,19 +950,7 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 mem::size_of::<ProcBsdInfo>() as c_int,
             )
         };
-
-        // If proc_pidinfo fails, fall back to kinfo_proc (like C htop does)
-        // kinfo_proc always succeeds and contains basic info for all processes
-        let kinfo = if bsd_size <= 0 {
-            get_kinfo_proc(pid)
-        } else {
-            None
-        };
-
-        // Skip if we couldn't get info from either source
-        if bsd_size <= 0 && kinfo.is_none() {
-            continue;
-        }
+        let have_bsd_info = bsd_size > 0;
 
         // Get task info (optional - may fail for root processes)
         let mut task_info: ProcTaskInfo = Default::default();
@@ -991,27 +964,11 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             )
         };
 
-        // Create or update process
-        let is_new = machine.processes.get(pid).is_none();
-        let prev_time = if !is_new {
-            machine.processes.get(pid).map(|p| p.time).unwrap_or(0)
-        } else {
-            0
-        };
+        // Update the existing entry in place, or start a fresh one
+        let (process, is_new) = processes.get_or_insert(pid, monotonic_ms);
+        let prev_time = process.time;
 
-        let mut process = if is_new {
-            Process::new(pid)
-        } else {
-            machine
-                .processes
-                .get(pid)
-                .cloned()
-                .unwrap_or_else(|| Process::new(pid))
-        };
-
-        // Basic info from BSD or kinfo_proc fallback
-        process.pid = pid;
-        if bsd_size > 0 {
+        if have_bsd_info {
             // Use proc_pidinfo data (preferred, more detailed)
             process.ppid = bsd_info.pbi_ppid as i32;
             process.pgrp = bsd_info.pbi_pgid as i32;
@@ -1020,7 +977,6 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             process.starttime_ctime = bsd_info.pbi_start_tvsec as i64;
 
             // Determine process state using task info (pti_numrunning)
-            // This matches C htop behavior - see DarwinProcess.c line 387
             let pti_numrunning = if task_size > 0 {
                 task_info.pti_numrunning
             } else {
@@ -1030,22 +986,25 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
 
             // Check if process is running under Rosetta 2 translation (x86_64 on ARM)
             process.translated = (bsd_info.pbi_flags & P_TRANSLATED) != 0;
-        } else if let Some(ref ki) = kinfo {
-            // Fallback to kinfo_proc data (for root processes when not running as root)
-            process.ppid = ki.kp_eproc.e_ppid;
-            process.pgrp = ki.kp_eproc.e_pgid;
-            process.uid = ki.kp_eproc.e_pcred_p_ruid;
-            process.nice = ki.kp_proc.p_nice as i64;
+        } else {
+            // Fall back to the kernel's process table entry
+            // (for root processes when not running as root)
+            process.ppid = kinfo.kp_eproc.e_ppid;
+            process.pgrp = kinfo.kp_eproc.e_pgid;
+            process.uid = kinfo.kp_eproc.e_pcred_p_ruid;
+            process.nice = kinfo.kp_proc.p_nice as i64;
             process.starttime_ctime = 0; // Not available in kinfo_proc easily
-            process.state = kinfo_state_to_process_state(ki.kp_proc.p_stat);
+            process.state = kinfo_state_to_process_state(kinfo.kp_proc.p_stat);
             process.translated = false; // Not available in kinfo_proc
         }
 
+        // Scheduling priority comes from the kernel's process table
+        process.priority = kinfo.kp_proc.p_priority as i64;
+
         // Get username
-        process.user = Some(machine.get_username(process.uid));
+        process.update_user(users_table);
 
         // Only update process name/command if it's new or update_process_names is enabled
-        // (matches C htop Settings.updateProcessNames behavior)
         if is_new || update_process_names {
             // Get process name/command
             let mut name_buf = [0u8; MAXCOMLEN + 1];
@@ -1063,22 +1022,15 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 process.comm = Some(name.to_string_lossy().to_string());
             }
 
-            // Fallback to pbi_comm or kinfo p_comm
+            // Fall back to the command name from proc_pidinfo or the kernel table
             if process.comm.is_none() {
-                if bsd_size > 0 {
-                    // Use bsd_info.pbi_comm
-                    if let Some(pos) = bsd_info.pbi_comm.iter().position(|&c| c == 0)
-                        && let Ok(comm) = std::str::from_utf8(&bsd_info.pbi_comm[..pos])
-                    {
-                        process.comm = Some(comm.to_string());
-                    }
-                } else if let Some(ref ki) = kinfo {
-                    // Fallback to kinfo p_comm for root processes
-                    if let Some(pos) = ki.kp_proc.p_comm.iter().position(|&c| c == 0)
-                        && let Ok(comm) = std::str::from_utf8(&ki.kp_proc.p_comm[..pos])
-                    {
-                        process.comm = Some(comm.to_string());
-                    }
+                let fallback = if have_bsd_info {
+                    c_str_field(&bsd_info.pbi_comm)
+                } else {
+                    c_str_field(&kinfo.kp_proc.p_comm)
+                };
+                if let Some(comm) = fallback {
+                    process.comm = Some(comm.to_string());
                 }
             }
 
@@ -1096,20 +1048,19 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             }
 
             // Get full command line with arguments via KERN_PROCARGS2
-            // This matches C htop's DarwinProcess_setFromKInfoProc behavior
             if let Some((cmdline, basename_end)) = get_process_cmdline(pid) {
                 process.update_cmdline(cmdline, basename_end);
-            } else if let Some(ref exe) = process.exe {
+            } else if let Some(exe) = process.exe.clone() {
                 // Fallback to exe path if KERN_PROCARGS2 fails
-                process.update_cmdline(exe.clone(), 0);
-            } else if let Some(ref comm) = process.comm {
+                process.update_cmdline(exe, 0);
+            } else if let Some(comm) = process.comm.clone() {
                 // Fallback to comm
-                process.update_cmdline(comm.clone(), comm.len());
+                let len = comm.len();
+                process.update_cmdline(comm, len);
             }
         }
 
-        // CWD is now fetched by background scanner - don't fetch synchronously
-        // The merged results from the previous scan cycle will be applied
+        // CWD is fetched by the background scanner and merged on the next scan
 
         // Task info
         if task_size > 0 {
@@ -1124,20 +1075,10 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
             // Thread count
             process.nlwp = task_info.pti_threadnum as i64;
 
-            // Priority - get from kinfo_proc to match C htop
-            // C htop uses kp_proc.p_priority from KERN_PROC sysctl
-            if let Some(priority) = get_process_priority(pid) {
-                process.priority = priority as i64;
-            } else {
-                // Fallback to task info priority if kinfo_proc fails
-                process.priority = task_info.pti_priority as i64;
-            }
-
             // Page faults
             // pti_faults = total page faults
             // pti_pageins = actual page-ins from disk (major faults)
             // minflt = total faults - major faults (faults satisfied from memory)
-            // Note: C htop only sets majflt=pti_faults, but we can be more accurate
             let total_faults = task_info.pti_faults as u64;
             let pageins = task_info.pti_pageins as u64;
             process.majflt = pageins;
@@ -1149,7 +1090,7 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 // time_diff is in centiseconds, time_delta is in seconds
                 process.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
                 // Clamp to reasonable value
-                process.percent_cpu = process.percent_cpu.min(100.0 * machine.active_cpus as f32);
+                process.percent_cpu = process.percent_cpu.min(100.0 * active_cpus as f32);
             }
 
             // Calculate MEM%
@@ -1157,17 +1098,14 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 process.percent_mem = ((process.m_resident as f64 / total_mem_kb) * 100.0) as f32;
             }
 
-            // Accumulate task counts (matching C htop darwin/DarwinProcess.c)
-            // kernelThreads is always 0 on Darwin
-            // userlandThreads is sum of pti_threadnum across all processes
-            // totalTasks includes both the process AND its threads
-            machine.userland_threads += task_info.pti_threadnum as u32;
-            machine.total_tasks += task_info.pti_threadnum as u32; // Add threads to totalTasks
-            machine.running_tasks += task_info.pti_numrunning as u32;
+            // Accumulate task counts: totalTasks includes both the process and its threads
+            userland_threads += task_info.pti_threadnum as u32;
+            total_tasks += task_info.pti_threadnum as u32;
+            running_tasks += task_info.pti_numrunning as u32;
         }
 
-        // Count this process in total_tasks (matching DarwinProcessTable.c line 125)
-        machine.total_tasks += 1;
+        // Count this process in total_tasks
+        total_tasks += 1;
 
         // Check if kernel thread (PID 0 or ppid 0 with specific patterns)
         process.is_kernel_thread = pid == 0 || process.ppid == 0;
@@ -1184,8 +1122,12 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
         }
 
         process.updated = true;
-        machine.processes.add(process, machine.monotonic_ms);
     }
+
+    machine.total_tasks = total_tasks;
+    machine.running_tasks = running_tasks;
+    machine.userland_threads = userland_threads;
+    machine.kernel_threads = kernel_threads;
 
     // Update dynamic field widths based on scan results
     machine.max_pid = max_pid;

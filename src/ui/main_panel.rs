@@ -285,23 +285,9 @@ impl MainPanel {
         self.cached_display_indices.clear();
 
         if self.tree_view {
-            use std::collections::HashMap;
-
-            // Build PID→index map for O(1) lookups (avoids O(n²) linear search)
-            // Only needed in tree view mode for looking up PIDs from tree_display_order
-            let pid_to_idx: HashMap<i32, usize> = machine
-                .processes
-                .processes
-                .iter()
-                .enumerate()
-                .map(|(idx, p)| (p.pid, idx))
-                .collect();
-
             // In tree view, iterate tree_display_order directly (PIDs in tree order)
-            // We use the PID→index map to avoid the O(n²) lookup that iter_tree() does
             for &pid in &machine.processes.tree_display_order {
-                // O(1) lookup to get process index
-                if let Some(&idx) = pid_to_idx.get(&pid)
+                if let Some(idx) = machine.processes.index_of(pid)
                     && let Some(process) = machine.processes.processes.get(idx)
                 {
                     // Only include visible processes (show_children handling)
