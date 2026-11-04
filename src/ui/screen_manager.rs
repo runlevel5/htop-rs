@@ -21,7 +21,9 @@ use super::main_panel::MainPanel;
 use super::panel::HandlerResult;
 #[cfg(target_os = "linux")]
 use crate::core::ScanFlags;
-use crate::core::{CommandStrParams, Machine, ProcessField, Settings};
+use crate::core::{
+    CommandStrParams, Machine, ProcessField, ScanRequest, Settings, TableScanner, TableSnapshot,
+};
 use crate::platform;
 
 /// Check if the current process can decrease nice values (increase priority).
@@ -76,6 +78,10 @@ pub struct ScreenManager {
     paused: bool,
     /// Set by actions that need an immediate rescan on the next loop iteration
     rescan_requested: bool,
+    /// Scans the process table on its own thread so input is never blocked
+    table_scanner: TableScanner,
+    /// A refresh was due while a scan was still running; start one as soon as it finishes
+    scan_wanted: bool,
 
     /// Last update time
     last_update: Instant,
@@ -96,6 +102,9 @@ pub struct ScreenManager {
 /// Number of idle cycles before sorting is allowed after user interaction
 const SORT_TIMEOUT_RESET: u8 = 5;
 
+/// How often to wake while a table scan is running, so its result is applied promptly
+const SCAN_POLL_MS: u64 = 5;
+
 impl ScreenManager {
     /// Create a new screen manager
     pub fn new(header: Header, _machine: &mut Machine, settings: &Settings) -> Self {
@@ -107,6 +116,8 @@ impl ScreenManager {
             hide_meters: false,
             paused: false,
             rescan_requested: false,
+            table_scanner: TableScanner::spawn(),
+            scan_wanted: false,
             last_update: Instant::now(),
             function_bar_hidden: false,
             header_needs_redraw: true,
@@ -649,17 +660,91 @@ impl ScreenManager {
     /// and costs a whole extra cycle. Debug builds wake every 0.1 s so the
     /// countdown in the function bar keeps ticking.
     fn apply_input_delay(&self, crt: &mut Crt) {
+        // While a scan is running, wake often enough to apply its result promptly
+        if self.table_scanner.in_flight() {
+            crt.set_input_timeout_ms(SCAN_POLL_MS);
+            return;
+        }
         #[cfg(debug_assertions)]
         {
-            crt.set_delay(1);
+            crt.set_input_timeout_ms(100);
         }
         #[cfg(not(debug_assertions))]
         {
             let delay_ms = u64::from(self.settings.delay) * 100;
             let elapsed_ms = self.last_update.elapsed().as_millis() as u64;
-            let remaining_tenths = delay_ms.saturating_sub(elapsed_ms).div_ceil(100);
-            crt.set_delay(remaining_tenths.clamp(1, 255) as u32);
+            crt.set_input_timeout_ms(delay_ms.saturating_sub(elapsed_ms).max(1));
         }
+    }
+
+    /// Everything the scanner thread needs for the next table scan
+    fn build_scan_request(&self, crt: &Crt, machine: &Machine) -> ScanRequest {
+        ScanRequest {
+            #[cfg(target_os = "linux")]
+            scan_flags: ScanFlags::from_fields(&self.settings.current_screen().fields),
+            update_process_names: self.settings.update_process_names,
+            hide_userland_threads: self.settings.hide_userland_threads,
+            check_deleted_libs: self.settings.highlight_deleted_exe,
+            total_mem: machine.total_mem,
+            boot_time: machine.boot_time,
+            active_cpus: machine.active_cpus,
+            running_tasks: machine.running_tasks,
+            cmd_params: self.build_command_str_params(crt),
+            tree_separator: crt.tree_str.vert.to_string(),
+            highlight_changes: self.settings.highlight_changes,
+            highlight_delay_secs: self.settings.highlight_delay_secs,
+            shown_pids: machine
+                .processes
+                .iter()
+                .filter(|p| p.was_shown)
+                .map(|p| p.pid)
+                .collect(),
+        }
+    }
+
+    /// Swap in a finished table scan and redo the UI-side bookkeeping
+    fn apply_snapshot(&mut self, crt: &mut Crt, machine: &mut Machine, snapshot: TableSnapshot) {
+        let debug_timing = std::env::var_os("HTOP_DEBUG_TIMING").is_some();
+        let scan_time = snapshot.scan_time;
+        let apply_start = Instant::now();
+
+        machine.apply_table_snapshot(snapshot);
+
+        // Only allow sorting when sort_timeout has elapsed (like C htop)
+        // This defers sorting during rapid user interaction
+        if self.sort_timeout == 0 || self.settings.tree_view {
+            machine.needs_sort = true;
+        }
+        machine.sort_if_needed();
+
+        // Build tree if in tree view mode
+        if self.settings.tree_view {
+            let (sort_key, ascending) = self.get_tree_sort_settings();
+            machine.processes.build_tree(sort_key, ascending);
+        }
+
+        // Data changed - invalidate the cached display list so it gets rebuilt
+        self.main_panel.invalidate_display_list();
+
+        // Only force full process list redraw when user is NOT actively interacting
+        // This keeps navigation smooth while data updates in the background
+        // sort_timeout > 0 means user recently pressed a key
+        if self.sort_timeout == 0 {
+            self.main_panel.needs_redraw = true;
+        }
+
+        // The Tasks meter reads the new counts
+        self.header.update(machine);
+        self.header_needs_redraw = true;
+
+        if debug_timing {
+            eprintln!(
+                "[APPLY] {:.1}ms on the UI thread (scan took {:.1}ms on the worker)",
+                apply_start.elapsed().as_secs_f64() * 1000.0,
+                scan_time.as_secs_f64() * 1000.0
+            );
+        }
+        let _ = crt;
     }
 
     /// Force a full rescan on the next loop iteration.
@@ -700,15 +785,16 @@ impl ScreenManager {
         // Set check_deleted_libs from highlight_deleted_exe setting
         machine.check_deleted_libs = self.settings.highlight_deleted_exe;
 
-        // Initial scan BEFORE layout so we know actual CPU count for meter heights
-        platform::scan(machine);
-        let cmd_params = self.build_command_str_params(crt);
-        machine.update_processes(
-            Some(&cmd_params),
-            crt.tree_str.vert,
-            self.settings.highlight_changes,
-            self.settings.highlight_delay_secs,
-        );
+        // Initial scan BEFORE layout so we know actual CPU count for meter heights.
+        // The first table scan is waited for so the screen starts populated.
+        platform::scan_system(machine);
+        let request = self.build_scan_request(crt, machine);
+        self.table_scanner.request(request);
+        if let Some(snapshot) = self.table_scanner.wait() {
+            machine.apply_table_snapshot(snapshot);
+            machine.needs_sort = true;
+            machine.sort_if_needed();
+        }
         self.header.update(machine);
         self.last_update = Instant::now();
 
@@ -785,40 +871,14 @@ impl ScreenManager {
                 phase("system", &mut phase_times);
 
                 if !self.paused {
-                    // Only allow sorting when sort_timeout has elapsed (like C htop)
-                    // This defers sorting during rapid user interaction
-                    if self.sort_timeout == 0 || self.settings.tree_view {
-                        machine.needs_sort = true;
+                    // Hand the process table scan to the scanner thread. If the
+                    // previous scan is still running, start the next one as soon
+                    // as its result has been applied.
+                    let request = self.build_scan_request(crt, machine);
+                    if !self.table_scanner.request(request) {
+                        self.scan_wanted = true;
                     }
-
-                    // Scan the process table
-                    platform::scan_tables(machine);
-                    phase("tables", &mut phase_times);
-                    let cmd_params = self.build_command_str_params(crt);
-                    machine.update_processes(
-                        Some(&cmd_params),
-                        crt.tree_str.vert,
-                        self.settings.highlight_changes,
-                        self.settings.highlight_delay_secs,
-                    );
-                    phase("update", &mut phase_times);
-
-                    // Build tree if in tree view mode
-                    if self.settings.tree_view {
-                        let (sort_key, ascending) = self.get_tree_sort_settings();
-                        machine.processes.build_tree(sort_key, ascending);
-                        phase("tree", &mut phase_times);
-                    }
-
-                    // Data changed - invalidate the cached display list so it gets rebuilt
-                    self.main_panel.invalidate_display_list();
-
-                    // Only force full process list redraw when user is NOT actively interacting
-                    // This keeps navigation smooth while data updates in the background
-                    // sort_timeout > 0 means user recently pressed a key
-                    if self.sort_timeout == 0 {
-                        self.main_panel.needs_redraw = true;
-                    }
+                    phase("request", &mut phase_times);
                 }
 
                 // Update header meters with new data - the header always needs a
@@ -840,13 +900,30 @@ impl ScreenManager {
                     );
                 }
 
-                // Decrement iteration count if set
+                // Decrement iteration count if set. The last frame should show the
+                // scan it requested, so wait for that one.
                 if machine.iterations_remaining > 0 {
                     machine.iterations_remaining -= 1;
+                    if machine.iterations_remaining == 0
+                        && let Some(snapshot) = self.table_scanner.wait()
+                    {
+                        self.apply_snapshot(crt, machine, snapshot);
+                    }
                 }
 
                 // Data updated - need to redraw
                 redraw = true;
+            }
+
+            // Apply a finished table scan, then start the one that was waiting
+            if let Some(snapshot) = self.table_scanner.try_take() {
+                self.apply_snapshot(crt, machine, snapshot);
+                redraw = true;
+                if self.scan_wanted && !self.paused {
+                    self.scan_wanted = false;
+                    let request = self.build_scan_request(crt, machine);
+                    self.table_scanner.request(request);
+                }
             }
 
             // Only draw when needed (matches C htop behavior)
@@ -985,8 +1062,10 @@ impl ScreenManager {
                     self.handle_resize(crt);
                 }
             } else {
-                // No key pressed (halfdelay timeout) - decrement sort timeout
-                if self.sort_timeout > 0 {
+                // No key pressed: one idle refresh interval has passed, so the
+                // deferred sort gets closer. The short wakes used to pick up a
+                // running scan's result do not count.
+                if self.sort_timeout > 0 && !self.table_scanner.in_flight() {
                     self.sort_timeout -= 1;
                 }
                 // In debug builds, always redraw to update the countdown timer

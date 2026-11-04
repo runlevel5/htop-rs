@@ -573,6 +573,34 @@ pub fn scan(machine: &mut Machine) {
 
 ---
 
+## Table Scanner Thread
+
+The process table scan never runs on the UI thread. `core/table_scanner.rs`
+starts one `table-scan` thread that owns a private `Machine` holding the
+scanning state: the authoritative process list with its per-process history
+(previous CPU times, IO counters, new/tomb stamps), the username cache, the
+expensive-data background scanner and the scan clock.
+
+```text
+UI thread                                   table-scan thread
+---------                                   -----------------
+tick: scan_system (CPU, memory, ~1 ms)
+      build ScanRequest (settings, system
+      values, PIDs shown on screen)  ─────▶  scan_tables + cleanup/command
+      keep handling keys, drawing             strings on the private Machine
+      poll every 5 ms while in flight  ◀────  TableSnapshot: clone of the list,
+apply: swap the list in (O(1)),               counters, widths, scan clock
+       carry over tags / collapsed nodes /
+       shown flags by PID, sort, build tree,
+       redraw                   (~1 ms)
+```
+
+Input latency is therefore independent of process count: on a 32-core
+ppc64le box with 1700 `/proc` entries the UI thread spends under a millisecond
+per tick while the worker takes 30 to 45 ms. If a scan is still running when
+the next tick is due, the next request is sent as soon as the result has been
+applied. `-n` waits for the last requested scan so the final frame shows it.
+
 ## Cross-Platform Background Scanner Architecture
 
 htop-rs implements an asynchronous background scanner for expensive per-process data collection. This architecture significantly improves UI responsiveness by moving slow operations off the main thread. The framework is generic and works on both Linux and macOS.

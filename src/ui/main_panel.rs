@@ -964,18 +964,10 @@ impl MainPanel {
             }
             #[cfg(target_os = "linux")]
             ProcessField::IORate => {
-                // Total I/O rate (read + write combined)
-                let read_rate = if process.io_rate_read_bps.is_nan() {
-                    0.0
-                } else {
-                    process.io_rate_read_bps
-                };
-                let write_rate = if process.io_rate_write_bps.is_nan() {
-                    0.0
-                } else {
-                    process.io_rate_write_bps
-                };
-                let total_rate = read_rate + write_rate;
+                // Total I/O rate (read + write combined). If either side could
+                // not be read the sum is NaN and prints as N/A, matching the
+                // per-direction columns beside it.
+                let total_rate = process.io_rate_read_bps + process.io_rate_write_bps;
                 print_rate(str, total_rate, coloring && !is_shadowed, crt);
             }
             #[cfg(target_os = "linux")]

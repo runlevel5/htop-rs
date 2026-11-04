@@ -45,46 +45,17 @@ pub fn ioprio_data(ioprio: i32) -> i32 {
 pub fn get_io_priority(pid: i32) -> i32 {
     #[cfg(target_os = "linux")]
     {
-        // SYS_ioprio_get is 252 on x86_64, 290 on i386
-        // Use libc::SYS_ioprio_get if available, otherwise use the constant
-        #[cfg(target_arch = "x86_64")]
-        const SYS_IOPRIO_GET: libc::c_long = 252;
-        #[cfg(target_arch = "x86")]
-        const SYS_IOPRIO_GET: libc::c_long = 290;
-        #[cfg(target_arch = "aarch64")]
-        const SYS_IOPRIO_GET: libc::c_long = 31;
-        #[cfg(target_arch = "arm")]
-        const SYS_IOPRIO_GET: libc::c_long = 315;
-
-        #[cfg(any(
-            target_arch = "x86_64",
-            target_arch = "x86",
-            target_arch = "aarch64",
-            target_arch = "arm"
-        ))]
-        {
-            let result = unsafe {
-                libc::syscall(
-                    SYS_IOPRIO_GET,
-                    IOPRIO_WHO_PROCESS as libc::c_int,
-                    pid as libc::c_int,
-                )
-            };
-            if result < 0 { -1 } else { result as i32 }
-        }
-
-        #[cfg(not(any(
-            target_arch = "x86_64",
-            target_arch = "x86",
-            target_arch = "aarch64",
-            target_arch = "arm"
-        )))]
-        {
-            // Unsupported architecture
-            -1
-        }
+        // libc carries the syscall number for every Linux architecture
+        // SAFETY: ioprio_get takes two plain integer arguments and touches no memory
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_ioprio_get,
+                IOPRIO_WHO_PROCESS as libc::c_int,
+                pid as libc::c_int,
+            )
+        };
+        if result < 0 { -1 } else { result as i32 }
     }
-
     #[cfg(not(target_os = "linux"))]
     {
         // Not available on non-Linux

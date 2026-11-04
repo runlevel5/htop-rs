@@ -2495,7 +2495,7 @@ impl Default for Process {
 }
 
 /// Process list that manages a collection of processes
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ProcessList {
     pub processes: Vec<Process>,
     /// Maps each PID to its index in `processes`.
