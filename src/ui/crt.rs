@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub use ncurses::Screen;
+pub use ncurses::Window;
 pub use ncurses::acs::{
     ACS_HLINE, ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER, ACS_VLINE,
 };
@@ -23,8 +25,6 @@ pub use ncurses::mouse::{
     BUTTON5_PRESSED,
 };
 pub use ncurses::types::{AttrT, ERR};
-pub use ncurses::Screen;
-pub use ncurses::Window;
 
 use crate::core::{ColorScheme, Settings};
 
@@ -622,20 +622,20 @@ impl Crt {
         }
 
         // Fallback: check locale environment variables
-        if let Ok(lang) = std::env::var("LANG") {
-            if lang.to_lowercase().contains("utf") {
-                return true;
-            }
+        if let Ok(lang) = std::env::var("LANG")
+            && lang.to_lowercase().contains("utf")
+        {
+            return true;
         }
-        if let Ok(lc) = std::env::var("LC_ALL") {
-            if lc.to_lowercase().contains("utf") {
-                return true;
-            }
+        if let Ok(lc) = std::env::var("LC_ALL")
+            && lc.to_lowercase().contains("utf")
+        {
+            return true;
         }
-        if let Ok(lc) = std::env::var("LC_CTYPE") {
-            if lc.to_lowercase().contains("utf") {
-                return true;
-            }
+        if let Ok(lc) = std::env::var("LC_CTYPE")
+            && lc.to_lowercase().contains("utf")
+        {
+            return true;
         }
         false
     }
@@ -648,9 +648,7 @@ impl Crt {
 
         if !self.screen.has_colors() {
             // No color support, use A_NORMAL for everything
-            for color in &mut self.colors {
-                *color = A_NORMAL;
-            }
+            self.colors.fill(A_NORMAL);
             return;
         }
 
@@ -683,13 +681,13 @@ impl Crt {
                 {
                     // Use -1 (terminal default) for black background, matching C htop
                     let bg = if use_default_bg && j == 0 { -1 } else { j };
-                    if let Err(e) = self.screen.init_pair(idx, i, bg) {
-                        if debug_colors {
-                            eprintln!(
-                                "DEBUG: init_pair({}, fg={}, bg={}) failed: {:?}",
-                                idx, i, bg, e
-                            );
-                        }
+                    if let Err(e) = self.screen.init_pair(idx, i, bg)
+                        && debug_colors
+                    {
+                        eprintln!(
+                            "DEBUG: init_pair({}, fg={}, bg={}) failed: {:?}",
+                            idx, i, bg, e
+                        );
                     }
                 }
             }
@@ -703,26 +701,24 @@ impl Crt {
         if let Err(e) = self
             .screen
             .init_pair(COLOR_INDEX_GRAY_BLACK, gray_fg, gray_bg)
+            && debug_colors
         {
-            if debug_colors {
-                eprintln!(
-                    "DEBUG: init_pair(GRAY_BLACK={}, fg={}, bg={}) failed: {:?}",
-                    COLOR_INDEX_GRAY_BLACK, gray_fg, gray_bg, e
-                );
-            }
+            eprintln!(
+                "DEBUG: init_pair(GRAY_BLACK={}, fg={}, bg={}) failed: {:?}",
+                COLOR_INDEX_GRAY_BLACK, gray_fg, gray_bg, e
+            );
         }
 
         // WhiteDefault pair (white on terminal default background)
         if let Err(e) = self
             .screen
             .init_pair(COLOR_INDEX_WHITE_DEFAULT, COLOR_WHITE, -1)
+            && debug_colors
         {
-            if debug_colors {
-                eprintln!(
-                    "DEBUG: init_pair(WHITE_DEFAULT={}, fg={}, bg=-1) failed: {:?}",
-                    COLOR_INDEX_WHITE_DEFAULT, COLOR_WHITE, e
-                );
-            }
+            eprintln!(
+                "DEBUG: init_pair(WHITE_DEFAULT={}, fg={}, bg=-1) failed: {:?}",
+                COLOR_INDEX_WHITE_DEFAULT, COLOR_WHITE, e
+            );
         }
 
         // WhiteBlack pair - replacement for pair 0 (white-on-black) which can't be customized
@@ -731,13 +727,12 @@ impl Crt {
         if let Err(e) = self
             .screen
             .init_pair(COLOR_INDEX_WHITE_BLACK, COLOR_WHITE, white_black_bg)
+            && debug_colors
         {
-            if debug_colors {
-                eprintln!(
-                    "DEBUG: init_pair(WHITE_BLACK={}, fg={}, bg={}) failed: {:?}",
-                    COLOR_INDEX_WHITE_BLACK, COLOR_WHITE, white_black_bg, e
-                );
-            }
+            eprintln!(
+                "DEBUG: init_pair(WHITE_BLACK={}, fg={}, bg={}) failed: {:?}",
+                COLOR_INDEX_WHITE_BLACK, COLOR_WHITE, white_black_bg, e
+            );
         }
 
         // Now set up the color scheme
@@ -896,9 +891,7 @@ impl Crt {
     fn setup_monochrome(&mut self) {
         // Monochrome uses terminal attributes (A_BOLD, A_DIM, A_REVERSE) instead of colors
         // Initialize all to A_NORMAL first
-        for color in &mut self.colors {
-            *color = A_NORMAL;
-        }
+        self.colors.fill(A_NORMAL);
 
         // Function bar and keys
         self.colors[ColorElement::FunctionBar as usize] = A_REVERSE;
@@ -1796,11 +1789,7 @@ impl Crt {
         // This reduces the delay when pressing ESC (which is also prefix for arrow keys)
         self.screen.set_escdelay(25);
         let ch = self.screen.getch().unwrap_or(ERR);
-        if ch == ERR {
-            None
-        } else {
-            Some(ch)
-        }
+        if ch == ERR { None } else { Some(ch) }
     }
 
     /// Read a key in non-blocking mode with fast escape handling
@@ -1809,11 +1798,7 @@ impl Crt {
         self.screen.set_escdelay(25);
         self.screen.nodelay(true);
         let ch = self.screen.getch().unwrap_or(ERR);
-        if ch == ERR {
-            None
-        } else {
-            Some(ch)
-        }
+        if ch == ERR { None } else { Some(ch) }
     }
 
     /// Get mouse event after KEY_MOUSE was returned and store it
@@ -1862,29 +1847,28 @@ impl Crt {
                 return Some(KEY_RIGHTCLICK);
             } else if event.is_left_click() {
                 // Check if click is on function bar (bottom row)
-                if event.y == screen_height - 1 {
-                    if let Some(get_key) = func_bar_click {
-                        if let Some(key) = get_key(event.x) {
-                            return Some(key);
-                        }
-                    }
+                if event.y == screen_height - 1
+                    && let Some(get_key) = func_bar_click
+                    && let Some(key) = get_key(event.x)
+                {
+                    return Some(key);
                 }
                 // Check if click is on screen tabs row
-                if let Some((tab_y, tab_boundaries)) = tab_info {
-                    if event.y == tab_y {
-                        // Find which tab was clicked
-                        for (idx, &(start_x, end_x)) in tab_boundaries.iter().enumerate() {
-                            if event.x >= start_x && event.x <= end_x {
-                                return Some(KEY_TAB_CLICK + idx as i32);
-                            }
+                if let Some((tab_y, tab_boundaries)) = tab_info
+                    && event.y == tab_y
+                {
+                    // Find which tab was clicked
+                    for (idx, &(start_x, end_x)) in tab_boundaries.iter().enumerate() {
+                        if event.x >= start_x && event.x <= end_x {
+                            return Some(KEY_TAB_CLICK + idx as i32);
                         }
                     }
                 }
                 // Check if click is on panel header
-                if let Some(py) = panel_y {
-                    if event.y == py {
-                        return Some(KEY_HEADER_CLICK);
-                    }
+                if let Some(py) = panel_y
+                    && event.y == py
+                {
+                    return Some(KEY_HEADER_CLICK);
                 }
                 // Return KEY_MOUSE for other left clicks (panel handling)
                 return Some(KEY_MOUSE);

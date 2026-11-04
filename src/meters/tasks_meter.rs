@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 
 use super::{
-    draw_bar_with_text, draw_graph_self_scaling, draw_tasks_stacked_graph, draw_text_segments,
-    BarSegment, GraphData, Meter, MeterMode, TasksStackedGraphData, TextSegment,
-    TASKS_STACKED_GRAPH_SEGMENTS,
+    BarSegment, GraphData, Meter, MeterMode, TASKS_STACKED_GRAPH_SEGMENTS, TasksStackedGraphData,
+    TextSegment, draw_bar_with_text, draw_graph_self_scaling, draw_tasks_stacked_graph,
+    draw_text_segments,
 };
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -309,14 +309,14 @@ mod tests {
     #[test]
     fn test_tasks_meter_update() {
         let mut meter = TasksMeter::new();
-        let mut machine = Machine::default();
-
-        machine.total_tasks = 300;
-        machine.running_tasks = 5;
-        machine.kernel_threads = 100;
-        machine.userland_threads = 50;
-        machine.active_cpus = 8;
-
+        let machine = Machine {
+            total_tasks: 300,
+            running_tasks: 5,
+            kernel_threads: 100,
+            userland_threads: 50,
+            active_cpus: 8,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         // total_tasks = total - kernel - userland = 300 - 100 - 50 = 150
@@ -331,14 +331,14 @@ mod tests {
     #[test]
     fn test_tasks_meter_update_running_capped() {
         let mut meter = TasksMeter::new();
-        let mut machine = Machine::default();
-
-        machine.total_tasks = 100;
-        machine.running_tasks = 20; // More than active CPUs
-        machine.kernel_threads = 10;
-        machine.userland_threads = 10;
-        machine.active_cpus = 4;
-
+        let machine = Machine {
+            total_tasks: 100,
+            running_tasks: 20, // More than active CPUs
+            kernel_threads: 10,
+            userland_threads: 10,
+            active_cpus: 4,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         // Running is capped at active_cpus
@@ -362,14 +362,14 @@ mod tests {
     fn test_tasks_meter_update_saturating_sub() {
         // Test that total_tasks doesn't underflow
         let mut meter = TasksMeter::new();
-        let mut machine = Machine::default();
-
-        // total_tasks < kernel + userland would cause underflow without saturating_sub
-        machine.total_tasks = 50;
-        machine.kernel_threads = 100;
-        machine.userland_threads = 100;
-        machine.active_cpus = 4;
-
+        let machine = Machine {
+            // total_tasks < kernel + userland would cause underflow without saturating_sub
+            total_tasks: 50,
+            kernel_threads: 100,
+            userland_threads: 100,
+            active_cpus: 4,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         // Should be 0, not negative/wrapped

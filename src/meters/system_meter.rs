@@ -58,10 +58,10 @@ impl SystemMeter {
         // Add edition if available (e.g., "Workstation Edition")
         // Note: os_info crate may not parse edition from /etc/os-release
         // C htop reads VARIANT or VARIANT_ID from /etc/os-release directly
-        if let Some(edition) = info.edition() {
-            if !edition.is_empty() {
-                parts.push(format!("({})", edition));
-            }
+        if let Some(edition) = info.edition()
+            && !edition.is_empty()
+        {
+            parts.push(format!("({})", edition));
         }
 
         parts.join(" ")

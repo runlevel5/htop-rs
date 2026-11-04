@@ -8,8 +8,8 @@
 
 #![allow(dead_code)]
 
-use super::crt::{ColorElement, A_NORMAL, KEY_ESC, KEY_RETURN};
 use super::Crt;
+use super::crt::{A_NORMAL, ColorElement, KEY_ESC, KEY_RETURN};
 use crate::core::Settings;
 
 /// Default function key labels (6-char fixed width with trailing spaces, like C htop)

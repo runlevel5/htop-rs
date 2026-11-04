@@ -4,7 +4,7 @@
 
 use chrono::Local;
 
-use super::{draw_led, Meter, MeterMode};
+use super::{Meter, MeterMode, draw_led};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -175,9 +175,9 @@ mod tests {
         let month: u32 = date_parts[1].parse().expect("Invalid month");
         let day: u32 = date_parts[2].parse().expect("Invalid day");
 
-        assert!(year >= 2020 && year <= 2100, "Year should be reasonable");
-        assert!(month >= 1 && month <= 12, "Month should be 1-12");
-        assert!(day >= 1 && day <= 31, "Day should be 1-31");
+        assert!((2020..=2100).contains(&year), "Year should be reasonable");
+        assert!((1..=12).contains(&month), "Month should be 1-12");
+        assert!((1..=31).contains(&day), "Day should be 1-31");
 
         // Validate time part (HH:MM:SS)
         let time_parts: Vec<&str> = parts[1].split(':').collect();

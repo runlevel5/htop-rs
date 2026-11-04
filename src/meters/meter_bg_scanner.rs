@@ -254,11 +254,11 @@ fn collect_battery_data() -> Option<MeterExpensiveData> {
             // Check for battery
             if name_str.starts_with("BAT") {
                 let capacity_path = path.join("capacity");
-                if let Ok(content) = fs::read_to_string(&capacity_path) {
-                    if let Ok(cap) = content.trim().parse::<f64>() {
-                        total_capacity += cap;
-                        battery_count += 1;
-                    }
+                if let Ok(content) = fs::read_to_string(&capacity_path)
+                    && let Ok(cap) = content.trim().parse::<f64>()
+                {
+                    total_capacity += cap;
+                    battery_count += 1;
                 }
             }
         }

@@ -3,10 +3,11 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)] // UI drawing functions naturally have many parameters
 
+use super::Crt;
 use super::crt::{
-    ColorElement, A_NORMAL, KEY_BACKSLASH, KEY_BACKSPACE, KEY_CTRL_A, KEY_CTRL_B, KEY_CTRL_BS,
+    A_NORMAL, ColorElement, KEY_BACKSLASH, KEY_BACKSPACE, KEY_CTRL_A, KEY_CTRL_B, KEY_CTRL_BS,
     KEY_CTRL_E, KEY_CTRL_F, KEY_CTRL_N, KEY_CTRL_P, KEY_CTRL_U, KEY_DEL_MAC, KEY_DOWN, KEY_END,
-    KEY_ESC, KEY_F10, KEY_F15, KEY_F3, KEY_F4, KEY_HOME, KEY_LC_Q, KEY_LEFT, KEY_NPAGE, KEY_PPAGE,
+    KEY_ESC, KEY_F3, KEY_F4, KEY_F10, KEY_F15, KEY_HOME, KEY_LC_Q, KEY_LEFT, KEY_NPAGE, KEY_PPAGE,
     KEY_PRINTABLE_END, KEY_PRINTABLE_START, KEY_Q, KEY_RIGHT, KEY_SLASH, KEY_UP,
 };
 use super::function_bar::FunctionBar;
@@ -17,14 +18,13 @@ use super::row_print::{print_bytes, print_rate};
 use super::row_print::{
     print_count, print_kbytes, print_left_aligned, print_percentage, print_time,
 };
-use super::Crt;
 use crate::core::{
-    highlight_flags, FieldWidths, Machine, Process, ProcessField, ProcessState, Settings,
+    FieldWidths, Machine, Process, ProcessField, ProcessState, Settings, highlight_flags,
 };
 #[cfg(target_os = "linux")]
 use crate::platform::linux::{
-    ioprio_class, ioprio_data, IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE, IOPRIO_CLASS_NONE,
-    IOPRIO_CLASS_RT,
+    IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE, IOPRIO_CLASS_NONE, IOPRIO_CLASS_RT, ioprio_class,
+    ioprio_data,
 };
 
 /// Incremental mode type
@@ -301,14 +301,12 @@ impl MainPanel {
             // We use the PID→index map to avoid the O(n²) lookup that iter_tree() does
             for &pid in &machine.processes.tree_display_order {
                 // O(1) lookup to get process index
-                if let Some(&idx) = pid_to_idx.get(&pid) {
-                    if let Some(process) = machine.processes.processes.get(idx) {
-                        // Only include visible processes (show_children handling)
-                        if process.is_visible
-                            && self.should_show_process(process, settings, machine)
-                        {
-                            self.cached_display_indices.push(idx);
-                        }
+                if let Some(&idx) = pid_to_idx.get(&pid)
+                    && let Some(process) = machine.processes.processes.get(idx)
+                {
+                    // Only include visible processes (show_children handling)
+                    if process.is_visible && self.should_show_process(process, settings, machine) {
+                        self.cached_display_indices.push(idx);
                     }
                 }
             }
@@ -1728,10 +1726,10 @@ impl MainPanel {
         }
 
         // Check user filter
-        if let Some(filter_uid) = machine.filter_user_id {
-            if process.uid != filter_uid {
-                return false;
-            }
+        if let Some(filter_uid) = machine.filter_user_id
+            && process.uid != filter_uid
+        {
+            return false;
         }
 
         // Check kernel threads filter
@@ -2224,7 +2222,7 @@ impl MainPanel {
 
     /// Helper for filtering with explicit filter
     fn matches_filter_with(&self, process: &Process, filter: &Option<String>) -> bool {
-        if let Some(ref f) = filter {
+        if let Some(f) = filter {
             let cmd = process.get_command().to_lowercase();
             let filter_lower = f.to_lowercase();
             cmd.contains(&filter_lower)

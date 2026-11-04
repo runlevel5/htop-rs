@@ -11,16 +11,16 @@
 #![allow(dead_code)]
 #![allow(clippy::too_many_arguments)]
 
+use super::Crt;
 use super::crt::{
-    ColorElement, A_NORMAL, KEY_BACKSLASH, KEY_BACKSPACE, KEY_CTRL_L, KEY_CTRL_N, KEY_CTRL_P,
-    KEY_DOWN, KEY_END, KEY_ENTER, KEY_ESC, KEY_F10, KEY_F15, KEY_F3, KEY_F4, KEY_F5, KEY_F8,
-    KEY_F9, KEY_HOME, KEY_LC_F, KEY_LC_Q, KEY_LC_T, KEY_MOUSE, KEY_NPAGE, KEY_PPAGE, KEY_SLASH,
+    A_NORMAL, ColorElement, KEY_BACKSLASH, KEY_BACKSPACE, KEY_CTRL_L, KEY_CTRL_N, KEY_CTRL_P,
+    KEY_DOWN, KEY_END, KEY_ENTER, KEY_ESC, KEY_F3, KEY_F4, KEY_F5, KEY_F8, KEY_F9, KEY_F10,
+    KEY_F15, KEY_HOME, KEY_LC_F, KEY_LC_Q, KEY_LC_T, KEY_MOUSE, KEY_NPAGE, KEY_PPAGE, KEY_SLASH,
     KEY_UP, KEY_WHEELDOWN, KEY_WHEELUP,
 };
 use super::function_bar::FunctionBar;
-use super::info_screen::{run_info_screen, InfoScreenConfig};
-use super::search_filter::{process_mouse_event, HandleResult, SearchFilterState};
-use super::Crt;
+use super::info_screen::{InfoScreenConfig, run_info_screen};
+use super::search_filter::{HandleResult, SearchFilterState, process_mouse_event};
 
 /// Parsed lsof file entry (from lsof -F output)
 #[derive(Default)]
@@ -109,8 +109,7 @@ pub fn show_file_locks(crt: &mut Crt, pid: i32, command: &str) {
     let mut lines = read_locks();
 
     // Header matching C htop ProcessLocksScreen
-    let header_str =
-        "   FD TYPE       EXCLUSION  READ/WRITE DEVICE       NODE               START                 END  FILENAME";
+    let header_str = "   FD TYPE       EXCLUSION  READ/WRITE DEVICE       NODE               START                 END  FILENAME";
 
     let config = InfoScreenConfig {
         title: format!("Snapshot of file locks of process {} - {}", pid, command),
@@ -545,7 +544,7 @@ fn run_lsof(pid: i32) -> Result<Vec<LsofFileEntry>, String> {
             return Err(
                 "Could not execute 'lsof'. Please make sure it is available in your $PATH."
                     .to_string(),
-            )
+            );
         }
     };
 
@@ -648,10 +647,10 @@ fn run_lsof(pid: i32) -> Result<Vec<LsofFileEntry>, String> {
     #[cfg(target_os = "linux")]
     if !has_size_field {
         for file in &mut files {
-            if file.size.is_empty() {
-                if let Ok(metadata) = std::fs::metadata(&file.name) {
-                    file.size = metadata.len().to_string();
-                }
+            if file.size.is_empty()
+                && let Ok(metadata) = std::fs::metadata(&file.name)
+            {
+                file.size = metadata.len().to_string();
             }
         }
     }
@@ -1138,13 +1137,12 @@ pub fn show_strace(crt: &mut Crt, pid: i32, command: &str) {
                         // Search from current+1 to end, then wrap to beginning
                         for offset in 0..len {
                             let i = (start + offset) % len;
-                            if let Some(&idx) = filtered_indices.get(i) {
-                                if let Some(line) = lines.get(idx) {
-                                    if line.to_lowercase().contains(&search_lower) {
-                                        selected = i as i32;
-                                        break;
-                                    }
-                                }
+                            if let Some(&idx) = filtered_indices.get(i)
+                                && let Some(line) = lines.get(idx)
+                                && line.to_lowercase().contains(&search_lower)
+                            {
+                                selected = i as i32;
+                                break;
                             }
                         }
                     }
@@ -1163,13 +1161,12 @@ pub fn show_strace(crt: &mut Crt, pid: i32, command: &str) {
                             // Search backwards with wrap
                             for offset in 0..len {
                                 let i = (start + len - offset) % len;
-                                if let Some(&idx) = filtered_indices.get(i) {
-                                    if let Some(line) = lines.get(idx) {
-                                        if line.to_lowercase().contains(&search_lower) {
-                                            selected = i as i32;
-                                            break;
-                                        }
-                                    }
+                                if let Some(&idx) = filtered_indices.get(i)
+                                    && let Some(line) = lines.get(idx)
+                                    && line.to_lowercase().contains(&search_lower)
+                                {
+                                    selected = i as i32;
+                                    break;
                                 }
                             }
                         }

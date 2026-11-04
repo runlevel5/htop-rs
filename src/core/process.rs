@@ -617,28 +617,46 @@ impl ProcessField {
             // Common fields
             ProcessField::Pid => "Process/thread ID",
             ProcessField::Command => "Command line (insert as last column only)",
-            ProcessField::State => "Process state (S sleeping, R running, D disk, Z zombie, T traced, W paging)",
+            ProcessField::State => {
+                "Process state (S sleeping, R running, D disk, Z zombie, T traced, W paging)"
+            }
             ProcessField::Ppid => "Parent process ID",
             ProcessField::Pgrp => "Process group ID",
             ProcessField::Session => "Process's session ID",
             ProcessField::Tty => "Controlling terminal",
             ProcessField::Tpgid => "Process ID of the fg process group of the controlling terminal",
-            ProcessField::Minflt => "Number of minor faults which have not required loading a memory page from disk",
-            ProcessField::Majflt => "Number of major faults which have required loading a memory page from disk",
+            ProcessField::Minflt => {
+                "Number of minor faults which have not required loading a memory page from disk"
+            }
+            ProcessField::Majflt => {
+                "Number of major faults which have required loading a memory page from disk"
+            }
             ProcessField::Priority => "Kernel's internal priority for the process",
-            ProcessField::Nice => "Nice value (the higher the value, the more it lets other processes take priority)",
+            ProcessField::Nice => {
+                "Nice value (the higher the value, the more it lets other processes take priority)"
+            }
             ProcessField::Starttime => "Time the process was started",
             ProcessField::Processor => "Id of the CPU the process last executed on",
             ProcessField::MSize => "Total program size in virtual memory",
-            ProcessField::MResident => "Resident set size, size of the text and data sections, plus stack usage",
+            ProcessField::MResident => {
+                "Resident set size, size of the text and data sections, plus stack usage"
+            }
             ProcessField::StUid => "User ID of the process owner",
-            ProcessField::PercentCpu => "Percentage of the CPU time the process used in the last sampling",
-            ProcessField::PercentMem => "Percentage of the memory the process is using, based on resident memory size",
-            ProcessField::User => "Username of the process owner (or user ID if name cannot be determined)",
+            ProcessField::PercentCpu => {
+                "Percentage of the CPU time the process used in the last sampling"
+            }
+            ProcessField::PercentMem => {
+                "Percentage of the memory the process is using, based on resident memory size"
+            }
+            ProcessField::User => {
+                "Username of the process owner (or user ID if name cannot be determined)"
+            }
             ProcessField::Time => "Total time the process has spent in user and system time",
             ProcessField::Nlwp => "Number of threads in the process",
             ProcessField::Tgid => "Thread group ID (i.e. process ID)",
-            ProcessField::PercentNormCpu => "Normalized percentage of the CPU time the process used in the last sampling (normalized by cpu count)",
+            ProcessField::PercentNormCpu => {
+                "Normalized percentage of the CPU time the process used in the last sampling (normalized by cpu count)"
+            }
             ProcessField::Elapsed => "Time since the process was started",
             ProcessField::SchedulerPolicy => "Current scheduling policy of the process",
             ProcessField::ProcComm => "comm string of the process from /proc/[pid]/comm",
@@ -653,7 +671,9 @@ impl ProcessField {
             #[cfg(target_os = "linux")]
             ProcessField::Utime => "User CPU time - time the process spent executing in user mode",
             #[cfg(target_os = "linux")]
-            ProcessField::Stime => "System CPU time - time the kernel spent running system calls for this process",
+            ProcessField::Stime => {
+                "System CPU time - time the kernel spent running system calls for this process"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::Cutime => "Children processes' user CPU time",
             #[cfg(target_os = "linux")]
@@ -663,7 +683,9 @@ impl ProcessField {
             #[cfg(target_os = "linux")]
             ProcessField::MText => "Size of the .text segment of the process (CODE)",
             #[cfg(target_os = "linux")]
-            ProcessField::MData => "Size of the .data segment plus stack usage of the process (DATA)",
+            ProcessField::MData => {
+                "Size of the .data segment plus stack usage of the process (DATA)"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::MLib => "The library size of the process (calculated from memory maps)",
             #[cfg(target_os = "linux")]
@@ -681,9 +703,13 @@ impl ProcessField {
             #[cfg(target_os = "linux")]
             ProcessField::Cnclwb => "Bytes of cancelled write(2) I/O",
             #[cfg(target_os = "linux")]
-            ProcessField::IOReadRate => "The I/O rate of read(2) in bytes per second for the process",
+            ProcessField::IOReadRate => {
+                "The I/O rate of read(2) in bytes per second for the process"
+            }
             #[cfg(target_os = "linux")]
-            ProcessField::IOWriteRate => "The I/O rate of write(2) in bytes per second for the process",
+            ProcessField::IOWriteRate => {
+                "The I/O rate of write(2) in bytes per second for the process"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::IORate => "Total I/O rate in bytes per second",
             #[cfg(target_os = "linux")]
@@ -699,29 +725,43 @@ impl ProcessField {
             #[cfg(target_os = "linux")]
             ProcessField::PercentSwapDelay => "Swapin delay %",
             #[cfg(target_os = "linux")]
-            ProcessField::MPss => "proportional set size, same as M_RESIDENT but each page is divided by the number of processes sharing it",
+            ProcessField::MPss => {
+                "proportional set size, same as M_RESIDENT but each page is divided by the number of processes sharing it"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::MSwap => "Size of the process's swapped pages",
             #[cfg(target_os = "linux")]
-            ProcessField::MPsswp => "shows proportional swap share of this mapping, unlike \"Swap\", this does not take into account swapped out page of underlying shmem objects",
+            ProcessField::MPsswp => {
+                "shows proportional swap share of this mapping, unlike \"Swap\", this does not take into account swapped out page of underlying shmem objects"
+            }
             #[cfg(target_os = "linux")]
-            ProcessField::Ctxt => "Context switches (incremental sum of voluntary_ctxt_switches and nonvoluntary_ctxt_switches)",
+            ProcessField::Ctxt => {
+                "Context switches (incremental sum of voluntary_ctxt_switches and nonvoluntary_ctxt_switches)"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::SecAttr => "Security attribute of the process (e.g. SELinux or AppArmor)",
             #[cfg(target_os = "linux")]
             ProcessField::AutogroupId => "The autogroup identifier of the process",
             #[cfg(target_os = "linux")]
-            ProcessField::AutogroupNice => "Nice value (the higher the value, the more other processes take priority) associated with the process autogroup",
+            ProcessField::AutogroupNice => {
+                "Nice value (the higher the value, the more other processes take priority) associated with the process autogroup"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::CCGroup => "Which cgroup the process is in (condensed to essentials)",
             #[cfg(target_os = "linux")]
-            ProcessField::Container => "Name of the container the process is in (guessed by heuristics)",
+            ProcessField::Container => {
+                "Name of the container the process is in (guessed by heuristics)"
+            }
             #[cfg(target_os = "linux")]
-            ProcessField::MPriv => "The private memory size of the process - resident set size minus shared memory",
+            ProcessField::MPriv => {
+                "The private memory size of the process - resident set size minus shared memory"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::GpuTime => "Total GPU time",
             #[cfg(target_os = "linux")]
-            ProcessField::GpuPercent => "Percentage of the GPU time the process used in the last sampling",
+            ProcessField::GpuPercent => {
+                "Percentage of the GPU time the process used in the last sampling"
+            }
             #[cfg(target_os = "linux")]
             ProcessField::IsContainer => "Whether the process is running inside a child container",
 
@@ -1566,10 +1606,10 @@ impl Process {
 
     /// Get the basename of the command
     pub fn get_basename(&self) -> &str {
-        if let Some(ref cmdline) = self.cmdline {
-            if self.cmdline_basename_end > self.cmdline_basename_start {
-                return &cmdline[self.cmdline_basename_start..self.cmdline_basename_end];
-            }
+        if let Some(ref cmdline) = self.cmdline
+            && self.cmdline_basename_end > self.cmdline_basename_start
+        {
+            return &cmdline[self.cmdline_basename_start..self.cmdline_basename_end];
         }
         if let Some(ref comm) = self.comm {
             return comm.as_str();
@@ -1581,10 +1621,10 @@ impl Process {
     /// This is used when showProgramPath is false - matches C htop behavior
     /// which shows cmdline[cmdlineBasenameStart..] (not just the basename)
     pub fn get_command_from_basename(&self) -> &str {
-        if let Some(ref cmdline) = self.cmdline {
-            if self.cmdline_basename_start < cmdline.len() {
-                return &cmdline[self.cmdline_basename_start..];
-            }
+        if let Some(ref cmdline) = self.cmdline
+            && self.cmdline_basename_start < cmdline.len()
+        {
+            return &cmdline[self.cmdline_basename_start..];
         }
         // Fallback to get_command behavior
         self.get_command()
@@ -1839,61 +1879,61 @@ impl Process {
         // Case 1: Fallback to cmdline (no merged command or missing exe/comm)
         if !params.show_merged_command || proc_exe.is_none() || proc_comm.is_none() {
             // Check if we should show comm as prefix
-            if let Some(comm) = proc_comm {
-                if (params.show_merged_command
+            if let Some(comm) = proc_comm
+                && (params.show_merged_command
                     || (self.is_userland_thread && params.show_thread_names))
-                    && !comm.is_empty()
-                {
-                    let cmdline_base = &cmdline[cmdline_basename_start..];
-                    let cmp_len = comm.len().min(TASK_COMM_LEN - 1);
-                    if !cmdline_base.starts_with(&comm[..cmp_len]) {
-                        // comm differs from cmdline basename - show comm prefix
-                        add_highlight(
-                            &mut self.merged_command.highlights,
-                            result.len(),
-                            0,
-                            comm.len(),
-                            comm_attr,
-                            highlight_flags::COMM,
-                            mb_mismatch,
-                        );
-                        result.push_str(comm);
-
-                        if !params.show_merged_command {
-                            // Not showing merged command, just comm prefix
-                            self.merged_command.str_value = Some(result);
-                            return;
-                        }
-
-                        // Add separator
-                        add_highlight(
-                            &mut self.merged_command.highlights,
-                            result.len(),
-                            0,
-                            1,
-                            params.separator_attr,
-                            highlight_flags::SEPARATOR,
-                            mb_mismatch,
-                        );
-                        mb_mismatch += separator_len - 1;
-                        result.push_str(tree_separator);
-                    }
-                }
-            }
-
-            // Add dist path prefix shadow if enabled
-            if params.shadow_dist_path_prefix && params.show_program_path {
-                if let Some(prefix_len) = Self::get_dist_path_prefix_len(cmdline) {
+                && !comm.is_empty()
+            {
+                let cmdline_base = &cmdline[cmdline_basename_start..];
+                let cmp_len = comm.len().min(TASK_COMM_LEN - 1);
+                if !cmdline_base.starts_with(&comm[..cmp_len]) {
+                    // comm differs from cmdline basename - show comm prefix
                     add_highlight(
                         &mut self.merged_command.highlights,
                         result.len(),
                         0,
-                        prefix_len,
-                        params.shadow_attr,
-                        highlight_flags::PREFIXDIR,
+                        comm.len(),
+                        comm_attr,
+                        highlight_flags::COMM,
                         mb_mismatch,
                     );
+                    result.push_str(comm);
+
+                    if !params.show_merged_command {
+                        // Not showing merged command, just comm prefix
+                        self.merged_command.str_value = Some(result);
+                        return;
+                    }
+
+                    // Add separator
+                    add_highlight(
+                        &mut self.merged_command.highlights,
+                        result.len(),
+                        0,
+                        1,
+                        params.separator_attr,
+                        highlight_flags::SEPARATOR,
+                        mb_mismatch,
+                    );
+                    mb_mismatch += separator_len - 1;
+                    result.push_str(tree_separator);
                 }
+            }
+
+            // Add dist path prefix shadow if enabled
+            if params.shadow_dist_path_prefix
+                && params.show_program_path
+                && let Some(prefix_len) = Self::get_dist_path_prefix_len(cmdline)
+            {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    0,
+                    prefix_len,
+                    params.shadow_attr,
+                    highlight_flags::PREFIXDIR,
+                    mb_mismatch,
+                );
             }
 
             // Add basename highlight
@@ -1979,14 +2019,12 @@ impl Process {
             && self.cmdline.is_some()
             && params.find_comm_in_cmdline
             && (!self.is_userland_thread || params.show_thread_names)
-        {
-            if let Some((start, len)) =
+            && let Some((start, len)) =
                 Self::find_comm_in_cmdline(comm, cmdline, cmdline_basename_start)
-            {
-                have_comm_in_cmdline = true;
-                comm_start = start;
-                comm_len_cmdline = len;
-            }
+        {
+            have_comm_in_cmdline = true;
+            comm_start = start;
+            comm_len_cmdline = len;
         }
 
         // Strip exe from cmdline if enabled
@@ -2012,18 +2050,18 @@ impl Process {
         // Start with copying exe
         if params.show_program_path {
             // Add dist path prefix shadow
-            if params.shadow_dist_path_prefix {
-                if let Some(prefix_len) = Self::get_dist_path_prefix_len(exe) {
-                    add_highlight(
-                        &mut self.merged_command.highlights,
-                        result.len(),
-                        0,
-                        prefix_len,
-                        params.shadow_attr,
-                        highlight_flags::PREFIXDIR,
-                        mb_mismatch,
-                    );
-                }
+            if params.shadow_dist_path_prefix
+                && let Some(prefix_len) = Self::get_dist_path_prefix_len(exe)
+            {
+                add_highlight(
+                    &mut self.merged_command.highlights,
+                    result.len(),
+                    0,
+                    prefix_len,
+                    params.shadow_attr,
+                    highlight_flags::PREFIXDIR,
+                    mb_mismatch,
+                );
             }
             // Comm highlight in exe
             if have_comm_in_exe {
@@ -2166,18 +2204,18 @@ impl Process {
         }
 
         // Add dist path prefix shadow for cmdline
-        if params.shadow_dist_path_prefix {
-            if let Some(prefix_len) = Self::get_dist_path_prefix_len(cmdline_remainder) {
-                add_highlight(
-                    &mut self.merged_command.highlights,
-                    result.len(),
-                    0,
-                    prefix_len,
-                    params.shadow_attr,
-                    highlight_flags::PREFIXDIR,
-                    mb_mismatch,
-                );
-            }
+        if params.shadow_dist_path_prefix
+            && let Some(prefix_len) = Self::get_dist_path_prefix_len(cmdline_remainder)
+        {
+            add_highlight(
+                &mut self.merged_command.highlights,
+                result.len(),
+                0,
+                prefix_len,
+                params.shadow_attr,
+                highlight_flags::PREFIXDIR,
+                mb_mismatch,
+            );
         }
 
         // Add comm highlight in cmdline if found there
@@ -2377,10 +2415,10 @@ impl Process {
         }
 
         // Special case for NixOS store paths
-        if let Some(rest) = path.strip_prefix("/nix/store/") {
-            if let Some(pos) = rest.find('/') {
-                return Some("/nix/store/".len() + pos + 1);
-            }
+        if let Some(rest) = path.strip_prefix("/nix/store/")
+            && let Some(pos) = rest.find('/')
+        {
+            return Some("/nix/store/".len() + pos + 1);
         }
 
         None
@@ -2605,11 +2643,7 @@ impl ProcessList {
             match a_parent.cmp(&b_parent) {
                 std::cmp::Ordering::Equal => {
                     let cmp = a.compare_by_field(b, sort_key);
-                    if ascending {
-                        cmp
-                    } else {
-                        cmp.reverse()
-                    }
+                    if ascending { cmp } else { cmp.reverse() }
                 }
                 other => other,
             }
@@ -2734,11 +2768,7 @@ impl ProcessList {
             let a = &self.processes[*idx_a];
             let b = &self.processes[*idx_b];
             let cmp = a.compare_by_field(b, sort_key);
-            if ascending {
-                cmp
-            } else {
-                cmp.reverse()
-            }
+            if ascending { cmp } else { cmp.reverse() }
         });
 
         let last_idx = children.len() - 1;
@@ -3335,7 +3365,7 @@ mod tests {
     #[test]
     fn test_process_field_clone_copy() {
         let field = ProcessField::Pid;
-        let cloned = field.clone();
+        let cloned = field;
         let copied = field;
         assert_eq!(field, cloned);
         assert_eq!(field, copied);

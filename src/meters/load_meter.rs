@@ -3,8 +3,8 @@
 use std::cell::RefCell;
 
 use super::{
-    draw_bar_with_text, draw_graph, draw_load_stacked_graph, draw_text_segments, BarSegment,
-    GraphData, LoadStackedGraphData, Meter, MeterMode, TextSegment, LOAD_STACKED_GRAPH_SEGMENTS,
+    BarSegment, GraphData, LOAD_STACKED_GRAPH_SEGMENTS, LoadStackedGraphData, Meter, MeterMode,
+    TextSegment, draw_bar_with_text, draw_graph, draw_load_stacked_graph, draw_text_segments,
 };
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -443,11 +443,11 @@ mod tests {
     #[test]
     fn test_load_average_meter_update() {
         let mut meter = LoadAverageMeter::new();
-        let mut machine = Machine::default();
-
-        machine.load_average = [1.5, 2.0, 1.8];
-        machine.active_cpus = 8;
-
+        let machine = Machine {
+            load_average: [1.5, 2.0, 1.8],
+            active_cpus: 8,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.load1, 1.5);
@@ -533,11 +533,11 @@ mod tests {
     #[test]
     fn test_load_meter_update() {
         let mut meter = LoadMeter::new();
-        let mut machine = Machine::default();
-
-        machine.load_average = [3.5, 2.0, 1.5];
-        machine.active_cpus = 4;
-
+        let machine = Machine {
+            load_average: [3.5, 2.0, 1.5],
+            active_cpus: 4,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.load1, 3.5);

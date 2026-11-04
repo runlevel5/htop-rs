@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use super::{draw_led, Meter, MeterMode};
+use super::{Meter, MeterMode, draw_led};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -268,10 +268,10 @@ mod tests {
     #[test]
     fn test_uptime_meter_update() {
         let mut meter = UptimeMeter::new();
-        let mut machine = Machine::default();
-
-        machine.uptime = Duration::from_secs(123456);
-
+        let machine = Machine {
+            uptime: Duration::from_secs(123456),
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.uptime, Duration::from_secs(123456));

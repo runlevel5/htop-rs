@@ -145,9 +145,10 @@ mod tests {
     #[test]
     fn test_hostname_meter_update() {
         let mut meter = HostnameMeter::new();
-        let mut machine = Machine::default();
-        machine.hostname = "test-host.local".to_string();
-
+        let machine = Machine {
+            hostname: "test-host.local".to_string(),
+            ..Default::default()
+        };
         assert!(meter.hostname.is_empty());
         meter.update(&machine);
 
@@ -167,9 +168,10 @@ mod tests {
     #[test]
     fn test_hostname_meter_update_replaces_hostname() {
         let mut meter = HostnameMeter::new();
-        let mut machine = Machine::default();
-
-        machine.hostname = "first-host".to_string();
+        let mut machine = Machine {
+            hostname: "first-host".to_string(),
+            ..Default::default()
+        };
         meter.update(&machine);
         assert_eq!(meter.hostname, "first-host");
 

@@ -360,17 +360,17 @@ impl Machine {
     /// Check if a process should be shown based on filters
     pub fn should_show_process(&self, process: &Process) -> bool {
         // Check PID filter
-        if let Some(ref filter) = self.pid_filter {
-            if !filter.contains(&(process.pid as u32)) {
-                return false;
-            }
+        if let Some(ref filter) = self.pid_filter
+            && !filter.contains(&(process.pid as u32))
+        {
+            return false;
         }
 
         // Check user filter
-        if let Some(uid) = self.filter_user_id {
-            if process.uid != uid {
-                return false;
-            }
+        if let Some(uid) = self.filter_user_id
+            && process.uid != uid
+        {
+            return false;
         }
 
         true

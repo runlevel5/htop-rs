@@ -237,13 +237,13 @@ pub struct MeterConfig {
 
 /// Parse meter name with optional parameter, e.g., "CPU(1)" -> ("CPU", 1)
 fn parse_meter_name(name: &str) -> (String, u32) {
-    if let Some(open_paren) = name.find('(') {
-        if let Some(close_paren) = name.find(')') {
-            let base_name = name[..open_paren].to_string();
-            let param_str = &name[open_paren + 1..close_paren];
-            let param = param_str.parse::<u32>().unwrap_or(0);
-            return (base_name, param);
-        }
+    if let Some(open_paren) = name.find('(')
+        && let Some(close_paren) = name.find(')')
+    {
+        let base_name = name[..open_paren].to_string();
+        let param_str = &name[open_paren + 1..close_paren];
+        let param = param_str.parse::<u32>().unwrap_or(0);
+        return (base_name, param);
     }
     (name.to_string(), 0)
 }
@@ -615,10 +615,10 @@ impl Settings {
 
             // Check for screen property: ".sort_key=value"
             if let Some(stripped) = line.strip_prefix('.') {
-                if let Some(idx) = current_screen_idx {
-                    if let Some((key, value)) = stripped.split_once('=') {
-                        self.parse_screen_property(idx, key.trim(), value.trim());
-                    }
+                if let Some(idx) = current_screen_idx
+                    && let Some((key, value)) = stripped.split_once('=')
+                {
+                    self.parse_screen_property(idx, key.trim(), value.trim());
                 }
                 continue;
             }
@@ -750,19 +750,19 @@ impl Settings {
                 // Can be field name or numeric ID
                 if let Some(field) = ProcessField::from_name(value) {
                     screen.sort_key = field;
-                } else if let Ok(id) = value.parse::<u32>() {
-                    if let Some(field) = ProcessField::from_id(id) {
-                        screen.sort_key = field;
-                    }
+                } else if let Ok(id) = value.parse::<u32>()
+                    && let Some(field) = ProcessField::from_id(id)
+                {
+                    screen.sort_key = field;
                 }
             }
             "tree_sort_key" => {
                 if let Some(field) = ProcessField::from_name(value) {
                     screen.tree_sort_key = field;
-                } else if let Ok(id) = value.parse::<u32>() {
-                    if let Some(field) = ProcessField::from_id(id) {
-                        screen.tree_sort_key = field;
-                    }
+                } else if let Ok(id) = value.parse::<u32>()
+                    && let Some(field) = ProcessField::from_id(id)
+                {
+                    screen.tree_sort_key = field;
                 }
             }
             "sort_direction" => {
@@ -979,10 +979,10 @@ impl Settings {
                 // Try to parse as name first, then as numeric index
                 if let Some(layout) = HeaderLayout::from_name(value) {
                     self.header_layout = layout;
-                } else if let Ok(idx) = value.parse::<usize>() {
-                    if let Some(layout) = HeaderLayout::from_index(idx) {
-                        self.header_layout = layout;
-                    }
+                } else if let Ok(idx) = value.parse::<usize>()
+                    && let Some(layout) = HeaderLayout::from_index(idx)
+                {
+                    self.header_layout = layout;
                 }
             }
             "sort_key" => {
@@ -993,12 +993,12 @@ impl Settings {
                     if !self.screens.is_empty() {
                         self.screens[0].sort_key = field;
                     }
-                } else if let Ok(id) = value.parse::<u32>() {
-                    if let Some(field) = ProcessField::from_id(id) {
-                        self.sort_key = Some(field);
-                        if !self.screens.is_empty() {
-                            self.screens[0].sort_key = field;
-                        }
+                } else if let Ok(id) = value.parse::<u32>()
+                    && let Some(field) = ProcessField::from_id(id)
+                {
+                    self.sort_key = Some(field);
+                    if !self.screens.is_empty() {
+                        self.screens[0].sort_key = field;
                     }
                 }
             }
@@ -1007,12 +1007,11 @@ impl Settings {
                     if !self.screens.is_empty() {
                         self.screens[0].tree_sort_key = field;
                     }
-                } else if let Ok(id) = value.parse::<u32>() {
-                    if let Some(field) = ProcessField::from_id(id) {
-                        if !self.screens.is_empty() {
-                            self.screens[0].tree_sort_key = field;
-                        }
-                    }
+                } else if let Ok(id) = value.parse::<u32>()
+                    && let Some(field) = ProcessField::from_id(id)
+                    && !self.screens.is_empty()
+                {
+                    self.screens[0].tree_sort_key = field;
                 }
             }
             "sort_direction" => {
@@ -1024,10 +1023,10 @@ impl Settings {
                 }
             }
             "tree_sort_direction" => {
-                if let Ok(dir) = value.parse::<i32>() {
-                    if !self.screens.is_empty() {
-                        self.screens[0].tree_direction = if dir >= 0 { 1 } else { -1 };
-                    }
+                if let Ok(dir) = value.parse::<i32>()
+                    && !self.screens.is_empty()
+                {
+                    self.screens[0].tree_direction = if dir >= 0 { 1 } else { -1 };
                 }
             }
             "tree_view_always_by_pid" => {
@@ -1458,7 +1457,7 @@ mod tests {
     #[test]
     fn test_meter_mode_clone_copy() {
         let mode = MeterMode::Graph;
-        let cloned = mode.clone();
+        let cloned = mode;
         let copied = mode;
         assert_eq!(mode, cloned);
         assert_eq!(mode, copied);

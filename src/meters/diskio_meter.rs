@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_bar_with_text, draw_graph, draw_led, BarSegment, GraphData, Meter, MeterMode};
+use super::{BarSegment, GraphData, Meter, MeterMode, draw_bar_with_text, draw_graph, draw_led};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -411,15 +411,15 @@ mod tests {
     #[test]
     fn test_diskio_meter_update_with_data() {
         let mut meter = DiskIOMeter::new();
-        let mut machine = Machine::default();
-
-        machine.disk_io_last_update = 1000;
-        machine.realtime_ms = 1500; // 500ms since last update
-        machine.disk_io_read_rate = 1024.0 * 1024.0; // 1 MiB/s
-        machine.disk_io_write_rate = 512.0 * 1024.0; // 512 KiB/s
-        machine.disk_io_utilization = 50.0;
-        machine.disk_io_num_disks = 2;
-
+        let machine = Machine {
+            disk_io_last_update: 1000,
+            realtime_ms: 1500,                  // 500ms since last update
+            disk_io_read_rate: 1024.0 * 1024.0, // 1 MiB/s
+            disk_io_write_rate: 512.0 * 1024.0, // 512 KiB/s
+            disk_io_utilization: 50.0,
+            disk_io_num_disks: 2,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.status, RateStatus::Data);
@@ -432,12 +432,12 @@ mod tests {
     #[test]
     fn test_diskio_meter_update_stale() {
         let mut meter = DiskIOMeter::new();
-        let mut machine = Machine::default();
-
-        machine.disk_io_last_update = 1000;
-        machine.disk_io_num_disks = 1; // Need disks to not be Init
-        machine.realtime_ms = 32000; // 31 seconds since last update (> 30s = stale)
-
+        let machine = Machine {
+            disk_io_last_update: 1000,
+            disk_io_num_disks: 1, // Need disks to not be Init
+            realtime_ms: 32000,   // 31 seconds since last update (> 30s = stale)
+            ..Default::default()
+        };
         meter.update(&machine);
         assert_eq!(meter.status, RateStatus::Stale);
     }

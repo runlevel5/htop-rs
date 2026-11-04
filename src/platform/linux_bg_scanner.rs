@@ -119,83 +119,81 @@ fn collect_for_pid(
     };
 
     // STATM - memory details
-    if flags.contains(ScanFlags::STATM) {
-        if let Ok(statm) = proc.statm() {
-            data.m_share = Some((statm.shared * page_size as u64) as i64);
-            data.m_text = Some((statm.text * page_size as u64) as i64);
-            data.m_data = Some((statm.data * page_size as u64) as i64);
-        }
+    if flags.contains(ScanFlags::STATM)
+        && let Ok(statm) = proc.statm()
+    {
+        data.m_share = Some((statm.shared * page_size as u64) as i64);
+        data.m_text = Some((statm.text * page_size as u64) as i64);
+        data.m_data = Some((statm.data * page_size as u64) as i64);
     }
 
     // CGROUP
-    if flags.contains(ScanFlags::CGROUP) {
-        if let Ok(cgroups) = proc.cgroups() {
-            if let Some(cgroup) = cgroups.0.first() {
-                let cgroup_path = cgroup.pathname.clone();
-                data.cgroup_short = Some(filter_cgroup_name(&cgroup_path));
-                data.container_short = filter_container(&cgroup_path);
-                data.cgroup = Some(cgroup_path);
-            }
-        }
+    if flags.contains(ScanFlags::CGROUP)
+        && let Ok(cgroups) = proc.cgroups()
+        && let Some(cgroup) = cgroups.0.first()
+    {
+        let cgroup_path = cgroup.pathname.clone();
+        data.cgroup_short = Some(filter_cgroup_name(&cgroup_path));
+        data.container_short = filter_container(&cgroup_path);
+        data.cgroup = Some(cgroup_path);
     }
 
     // OOM score
-    if flags.contains(ScanFlags::OOM) {
-        if let Ok(oom) = std::fs::read_to_string(format!("/proc/{}/oom_score", pid)) {
-            if let Ok(score) = oom.trim().parse::<i32>() {
-                data.oom_score = Some(score);
-            }
-        }
+    if flags.contains(ScanFlags::OOM)
+        && let Ok(oom) = std::fs::read_to_string(format!("/proc/{}/oom_score", pid))
+        && let Ok(score) = oom.trim().parse::<i32>()
+    {
+        data.oom_score = Some(score);
     }
 
     // SMAPS (PSS, Swap, SwapPss)
-    if flags.contains(ScanFlags::SMAPS) {
-        if let Ok(content) = std::fs::read_to_string(format!("/proc/{}/smaps_rollup", pid)) {
-            for line in content.lines() {
-                if let Some(rest) = line.strip_prefix("Pss:") {
-                    if let Some(kb) = parse_kb_value(rest) {
-                        data.m_pss = Some(kb * 1024);
-                    }
-                } else if let Some(rest) = line.strip_prefix("Swap:") {
-                    if let Some(kb) = parse_kb_value(rest) {
-                        data.m_swap = Some(kb * 1024);
-                    }
-                } else if let Some(rest) = line.strip_prefix("SwapPss:") {
-                    if let Some(kb) = parse_kb_value(rest) {
-                        data.m_psswp = Some(kb * 1024);
-                    }
+    if flags.contains(ScanFlags::SMAPS)
+        && let Ok(content) = std::fs::read_to_string(format!("/proc/{}/smaps_rollup", pid))
+    {
+        for line in content.lines() {
+            if let Some(rest) = line.strip_prefix("Pss:") {
+                if let Some(kb) = parse_kb_value(rest) {
+                    data.m_pss = Some(kb * 1024);
                 }
+            } else if let Some(rest) = line.strip_prefix("Swap:") {
+                if let Some(kb) = parse_kb_value(rest) {
+                    data.m_swap = Some(kb * 1024);
+                }
+            } else if let Some(rest) = line.strip_prefix("SwapPss:")
+                && let Some(kb) = parse_kb_value(rest)
+            {
+                data.m_psswp = Some(kb * 1024);
             }
         }
     }
 
     // Autogroup
-    if flags.contains(ScanFlags::AUTOGROUP) {
-        if let Ok(content) = std::fs::read_to_string(format!("/proc/{}/autogroup", pid)) {
-            // Format: "/autogroup-ID nice NICE"
-            let parts: Vec<&str> = content.split_whitespace().collect();
-            if parts.len() >= 3 {
-                // Parse ID from "/autogroup-123"
-                if let Some(id_str) = parts[0].strip_prefix("/autogroup-") {
-                    if let Ok(id) = id_str.parse::<i64>() {
-                        data.autogroup_id = Some(id);
-                    }
-                }
-                // Parse nice value
-                if let Ok(nice) = parts[2].parse::<i32>() {
-                    data.autogroup_nice = Some(nice);
-                }
+    if flags.contains(ScanFlags::AUTOGROUP)
+        && let Ok(content) = std::fs::read_to_string(format!("/proc/{}/autogroup", pid))
+    {
+        // Format: "/autogroup-ID nice NICE"
+        let parts: Vec<&str> = content.split_whitespace().collect();
+        if parts.len() >= 3 {
+            // Parse ID from "/autogroup-123"
+            if let Some(id_str) = parts[0].strip_prefix("/autogroup-")
+                && let Ok(id) = id_str.parse::<i64>()
+            {
+                data.autogroup_id = Some(id);
+            }
+            // Parse nice value
+            if let Ok(nice) = parts[2].parse::<i32>() {
+                data.autogroup_nice = Some(nice);
             }
         }
     }
 
     // Security attribute
-    if flags.contains(ScanFlags::SEC_ATTR) {
-        if let Ok(attr) = std::fs::read_to_string(format!("/proc/{}/attr/current", pid)) {
-            let attr = attr.trim().trim_end_matches('\0').to_string();
-            if !attr.is_empty() {
-                data.secattr = Some(attr);
-            }
+    if flags.contains(ScanFlags::SEC_ATTR)
+        && let Ok(attr) = std::fs::read_to_string(format!("/proc/{}/attr/current", pid))
+    {
+        let attr = attr.trim().trim_end_matches('\0').to_string();
+        if !attr.is_empty() {
+            data.secattr = Some(attr);
         }
     }
 

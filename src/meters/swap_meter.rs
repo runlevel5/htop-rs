@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 
 use super::{
-    draw_bar_with_text, draw_graph, draw_swap_stacked_graph, draw_text_segments, human_unit,
-    BarSegment, GraphData, Meter, MeterMode, SwapStackedGraphData, TextSegment,
-    SWAP_STACKED_GRAPH_SEGMENTS,
+    BarSegment, GraphData, Meter, MeterMode, SWAP_STACKED_GRAPH_SEGMENTS, SwapStackedGraphData,
+    TextSegment, draw_bar_with_text, draw_graph, draw_swap_stacked_graph, draw_text_segments,
+    human_unit,
 };
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -293,12 +293,12 @@ mod tests {
     #[test]
     fn test_swap_meter_update() {
         let mut meter = SwapMeter::new();
-        let mut machine = Machine::default();
-
-        machine.total_swap = 8 * 1024 * 1024; // 8 GB in KB
-        machine.used_swap = 2 * 1024 * 1024; // 2 GB
-        machine.cached_swap = 512 * 1024; // 512 MB
-
+        let machine = Machine {
+            total_swap: 8 * 1024 * 1024, // 8 GB in KB
+            used_swap: 2 * 1024 * 1024,  // 2 GB
+            cached_swap: 512 * 1024,     // 512 MB
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.total, 8.0 * 1024.0 * 1024.0);

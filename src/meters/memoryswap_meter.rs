@@ -188,19 +188,18 @@ mod tests {
     #[test]
     fn test_memoryswap_meter_update() {
         let mut meter = MemorySwapMeter::new();
-        let mut machine = Machine::default();
+        let machine = Machine {
+            // Set up memory values
+            total_mem: 16 * 1024 * 1024, // 16 GB in KB
+            used_mem: 8 * 1024 * 1024,   // 8 GB
+            buffers_mem: 512 * 1024,     // 512 MB
+            cached_mem: 2 * 1024 * 1024, // 2 GB
 
-        // Set up memory values
-        machine.total_mem = 16 * 1024 * 1024; // 16 GB in KB
-        machine.used_mem = 8 * 1024 * 1024; // 8 GB
-        machine.buffers_mem = 512 * 1024; // 512 MB
-        machine.cached_mem = 2 * 1024 * 1024; // 2 GB
-
-        // Set up swap values
-        machine.total_swap = 4 * 1024 * 1024; // 4 GB in KB
-        machine.used_swap = 1 * 1024 * 1024; // 1 GB
-
-        // Update should not panic
+            // Set up swap values
+            total_swap: 4 * 1024 * 1024, // 4 GB in KB
+            used_swap: 1024 * 1024,      // 1 GB
+            ..Default::default()
+        };
         meter.update(&machine);
     }
 

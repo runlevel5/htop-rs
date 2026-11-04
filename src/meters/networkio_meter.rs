@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_bar_with_text, draw_graph, draw_led, BarSegment, GraphData, Meter, MeterMode};
+use super::{BarSegment, GraphData, Meter, MeterMode, draw_bar_with_text, draw_graph, draw_led};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;
@@ -374,15 +374,15 @@ mod tests {
     #[test]
     fn test_networkio_meter_update_with_data() {
         let mut meter = NetworkIOMeter::new();
-        let mut machine = Machine::default();
-
-        machine.net_io_last_update = 1000;
-        machine.realtime_ms = 1500;
-        machine.net_io_receive_rate = 1024.0 * 1024.0; // 1 MiB/s
-        machine.net_io_transmit_rate = 512.0 * 1024.0; // 512 KiB/s
-        machine.net_io_receive_packets = 1000;
-        machine.net_io_transmit_packets = 500;
-
+        let machine = Machine {
+            net_io_last_update: 1000,
+            realtime_ms: 1500,
+            net_io_receive_rate: 1024.0 * 1024.0, // 1 MiB/s
+            net_io_transmit_rate: 512.0 * 1024.0, // 512 KiB/s
+            net_io_receive_packets: 1000,
+            net_io_transmit_packets: 500,
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.status, RateStatus::Data);
@@ -395,11 +395,11 @@ mod tests {
     #[test]
     fn test_networkio_meter_update_stale() {
         let mut meter = NetworkIOMeter::new();
-        let mut machine = Machine::default();
-
-        machine.net_io_last_update = 1000;
-        machine.realtime_ms = 32000; // > 30 seconds = stale
-
+        let machine = Machine {
+            net_io_last_update: 1000,
+            realtime_ms: 32000, // > 30 seconds = stale
+            ..Default::default()
+        };
         meter.update(&machine);
         assert_eq!(meter.status, RateStatus::Stale);
     }

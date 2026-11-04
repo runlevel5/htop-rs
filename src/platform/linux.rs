@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::core::{CpuData, Machine, Process, ProcessState, ScanFlags};
 
 use super::linux_bg_scanner::{
-    start_linux_bg_scan, LinuxBackgroundScanner, LinuxExpensiveData, LinuxScanParams,
+    LinuxBackgroundScanner, LinuxExpensiveData, LinuxScanParams, start_linux_bg_scan,
 };
 
 // IO Priority constants (from linux/ioprio.h)
@@ -69,11 +69,7 @@ pub fn get_io_priority(pid: i32) -> i32 {
                     pid as libc::c_int,
                 )
             };
-            if result < 0 {
-                -1
-            } else {
-                result as i32
-            }
+            if result < 0 { -1 } else { result as i32 }
         }
 
         #[cfg(not(any(
@@ -345,10 +341,10 @@ fn is_kernel_thread_pid(pid: i32) -> bool {
             let after_comm = &content[end_paren + 1..];
             let fields: Vec<&str> = after_comm.split_whitespace().collect();
             // fields[1] is ppid (index 0 is state)
-            if fields.len() > 1 {
-                if let Ok(ppid) = fields[1].parse::<i32>() {
-                    return ppid == 2;
-                }
+            if fields.len() > 1
+                && let Ok(ppid) = fields[1].parse::<i32>()
+            {
+                return ppid == 2;
             }
         }
     }
@@ -432,15 +428,15 @@ pub fn scan_processes(machine: &mut Machine) {
 
     // Merge any completed background scan results into processes
     // This applies data from the previous frame's background scan
-    if let Some(ref mut scanner) = machine.bg_scanner {
-        if let Some(bg_results) = scanner.try_take_results() {
-            if debug_timing {
-                eprintln!("[SCAN] Merging {} background results", bg_results.len());
-            }
-            for (pid, data) in bg_results.iter() {
-                if let Some(process) = machine.processes.get_mut(*pid) {
-                    merge_expensive_data(process, data);
-                }
+    if let Some(ref mut scanner) = machine.bg_scanner
+        && let Some(bg_results) = scanner.try_take_results()
+    {
+        if debug_timing {
+            eprintln!("[SCAN] Merging {} background results", bg_results.len());
+        }
+        for (pid, data) in bg_results.iter() {
+            if let Some(process) = machine.processes.get_mut(*pid) {
+                merge_expensive_data(process, data);
             }
         }
     }
@@ -570,13 +566,13 @@ pub fn scan_processes(machine: &mut Machine) {
             process.comm = Some(stat_comm);
 
             // Try to get full cmdline
-            if let Ok(cmdline) = proc.cmdline() {
-                if !cmdline.is_empty() {
-                    let joined = cmdline.join(" ");
-                    // basename_end is the length of the first argument
-                    let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
-                    process.update_cmdline(joined, basename_end);
-                }
+            if let Ok(cmdline) = proc.cmdline()
+                && !cmdline.is_empty()
+            {
+                let joined = cmdline.join(" ");
+                // basename_end is the length of the first argument
+                let basename_end = cmdline.first().map(|s| s.len()).unwrap_or(0);
+                process.update_cmdline(joined, basename_end);
             }
 
             // Try to get exe path and check if deleted
@@ -598,10 +594,10 @@ pub fn scan_processes(machine: &mut Machine) {
         }
 
         // Try to get cwd - only read when CWD column is displayed
-        if flags.contains(ScanFlags::CWD) {
-            if let Ok(cwd) = proc.cwd() {
-                process.cwd = Some(cwd.to_string_lossy().to_string());
-            }
+        if flags.contains(ScanFlags::CWD)
+            && let Ok(cwd) = proc.cwd()
+        {
+            process.cwd = Some(cwd.to_string_lossy().to_string());
         }
 
         // Get UID using fast fstat() instead of parsing /proc/PID/status (51x faster!)
@@ -625,23 +621,22 @@ pub fn scan_processes(machine: &mut Machine) {
 
         // IO statistics - only read when IO columns are displayed
         // (requires root or same user)
-        if flags.contains(ScanFlags::IO) {
-            if let Ok(io) = proc.io() {
-                let prev_read = process.io_read_bytes;
-                let prev_write = process.io_write_bytes;
+        if flags.contains(ScanFlags::IO)
+            && let Ok(io) = proc.io()
+        {
+            let prev_read = process.io_read_bytes;
+            let prev_write = process.io_write_bytes;
 
-                process.io_read_bytes = io.read_bytes;
-                process.io_write_bytes = io.write_bytes;
+            process.io_read_bytes = io.read_bytes;
+            process.io_write_bytes = io.write_bytes;
 
-                if !is_new && time_delta > 0.0 {
-                    if process.io_read_bytes >= prev_read {
-                        process.io_read_rate =
-                            (process.io_read_bytes - prev_read) as f64 / time_delta;
-                    }
-                    if process.io_write_bytes >= prev_write {
-                        process.io_write_rate =
-                            (process.io_write_bytes - prev_write) as f64 / time_delta;
-                    }
+            if !is_new && time_delta > 0.0 {
+                if process.io_read_bytes >= prev_read {
+                    process.io_read_rate = (process.io_read_bytes - prev_read) as f64 / time_delta;
+                }
+                if process.io_write_bytes >= prev_write {
+                    process.io_write_rate =
+                        (process.io_write_bytes - prev_write) as f64 / time_delta;
                 }
             }
         }
@@ -722,133 +717,129 @@ pub fn scan_processes(machine: &mut Machine) {
         // in the list when the user toggles to show them.
         let should_scan_threads = (!machine.hide_userland_threads || !machine.threads_discovered)
             && !is_kernel_thread_pid(pid);
-        if should_scan_threads {
-            if let Ok(tasks) = proc.tasks() {
-                for task_result in tasks {
-                    let task = match task_result {
-                        Ok(t) => t,
-                        Err(_) => continue,
-                    };
+        if should_scan_threads && let Ok(tasks) = proc.tasks() {
+            for task_result in tasks {
+                let task = match task_result {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
 
-                    // Skip the main thread (tid == pid)
-                    let tid = task.tid;
-                    if tid == pid {
-                        continue;
-                    }
-
-                    // Get task stat
-                    let task_stat = match task.stat() {
-                        Ok(s) => s,
-                        Err(_) => continue,
-                    };
-
-                    // Check if thread already exists
-                    let thread_is_new = machine.processes.get(tid).is_none();
-                    let thread_prev_time = if !thread_is_new {
-                        machine.processes.get(tid).map(|p| p.time).unwrap_or(0)
-                    } else {
-                        0
-                    };
-
-                    let mut thread = if thread_is_new {
-                        Process::new(tid)
-                    } else {
-                        machine
-                            .processes
-                            .get(tid)
-                            .cloned()
-                            .unwrap_or_else(|| Process::new(tid))
-                    };
-
-                    // Basic info from task stat
-                    thread.pid = tid;
-                    thread.ppid = pid; // Thread's parent is the main process
-                    thread.tgid = pid; // Thread group ID is the main process PID
-                    thread.pgrp = task_stat.pgrp;
-                    thread.session = task_stat.session;
-                    thread.tty_nr = main_tty_nr;
-                    thread.tty_name = main_tty_name.clone();
-                    thread.tpgid = task_stat.tpgid;
-                    thread.priority = task_stat.priority;
-                    thread.nice = task_stat.nice;
-                    thread.nlwp = 1; // Threads show as 1
-                    thread.processor = task_stat.processor.unwrap_or(-1);
-                    thread.minflt = task_stat.minflt;
-                    thread.majflt = task_stat.majflt;
-
-                    // Process state
-                    thread.state = convert_process_state(task_stat.state);
-
-                    // CPU time
-                    let thread_utime = task_stat.utime;
-                    let thread_stime = task_stat.stime;
-                    let thread_total_ticks = thread_utime + thread_stime;
-                    thread.time = ((thread_total_ticks as f64 / ticks_per_second) * 100.0) as u64;
-                    thread.utime = ((thread_utime as f64 / ticks_per_second) * 100.0) as u64;
-                    thread.stime = ((thread_stime as f64 / ticks_per_second) * 100.0) as u64;
-
-                    // Calculate CPU percentage
-                    if !thread_is_new && time_delta > 0.0 && thread.time > thread_prev_time {
-                        let time_diff = (thread.time - thread_prev_time) as f64;
-                        thread.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
-                        thread.percent_cpu =
-                            thread.percent_cpu.min(100.0 * machine.active_cpus as f32);
-                    }
-
-                    // Start time
-                    thread.starttime_ctime =
-                        boot_time + (task_stat.starttime as i64 / ticks_per_second as i64);
-
-                    // Memory (shared with main process, but we read from task stat for consistency)
-                    thread.m_virt = (task_stat.vsize / 1024) as i64;
-                    thread.m_resident = (task_stat.rss as i64) * page_size;
-                    if total_mem_kb > 0.0 {
-                        thread.percent_mem =
-                            ((thread.m_resident as f64 / total_mem_kb) * 100.0) as f32;
-                    }
-
-                    // Extract thread's own comm (move instead of clone to avoid allocation)
-                    let thread_comm = task_stat.comm;
-
-                    // Inherit shared data from main process
-                    thread.uid = main_uid;
-                    thread.user = main_user.clone();
-                    thread.comm = Some(thread_comm); // Thread has its own comm (moved, not cloned)
-                    thread.cmdline = main_cmdline.clone();
-                    thread.cmdline_basename_start = main_cmdline_basename_start;
-                    thread.cmdline_basename_end = main_cmdline_basename_end;
-                    thread.exe = main_exe.clone();
-                    thread.exe_basename_offset = main_exe_basename_offset;
-                    thread.exe_deleted = main_exe_deleted;
-                    thread.cwd = main_cwd.clone();
-                    thread.cgroup = main_cgroup.clone();
-                    thread.cgroup_short = main_cgroup_short.clone();
-                    thread.container_short = main_container_short.clone();
-
-                    // Mark as userland thread
-                    thread.is_userland_thread = true;
-                    thread.is_kernel_thread = false;
-
-                    // IO Priority (thread-specific)
-                    thread.io_priority = get_io_priority(tid);
-
-                    // Track max values
-                    if tid > max_pid {
-                        max_pid = tid;
-                    }
-                    if thread.percent_cpu > max_percent_cpu {
-                        max_percent_cpu = thread.percent_cpu;
-                    }
-
-                    thread.updated = true;
-
-                    // Count userland thread statistics
-                    // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
-                    machine.total_tasks += 1;
-                    machine.userland_threads += 1;
-
-                    machine.processes.add(thread, machine.monotonic_ms);
+                // Skip the main thread (tid == pid)
+                let tid = task.tid;
+                if tid == pid {
+                    continue;
                 }
+
+                // Get task stat
+                let task_stat = match task.stat() {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+
+                // Check if thread already exists
+                let thread_is_new = machine.processes.get(tid).is_none();
+                let thread_prev_time = if !thread_is_new {
+                    machine.processes.get(tid).map(|p| p.time).unwrap_or(0)
+                } else {
+                    0
+                };
+
+                let mut thread = if thread_is_new {
+                    Process::new(tid)
+                } else {
+                    machine
+                        .processes
+                        .get(tid)
+                        .cloned()
+                        .unwrap_or_else(|| Process::new(tid))
+                };
+
+                // Basic info from task stat
+                thread.pid = tid;
+                thread.ppid = pid; // Thread's parent is the main process
+                thread.tgid = pid; // Thread group ID is the main process PID
+                thread.pgrp = task_stat.pgrp;
+                thread.session = task_stat.session;
+                thread.tty_nr = main_tty_nr;
+                thread.tty_name = main_tty_name.clone();
+                thread.tpgid = task_stat.tpgid;
+                thread.priority = task_stat.priority;
+                thread.nice = task_stat.nice;
+                thread.nlwp = 1; // Threads show as 1
+                thread.processor = task_stat.processor.unwrap_or(-1);
+                thread.minflt = task_stat.minflt;
+                thread.majflt = task_stat.majflt;
+
+                // Process state
+                thread.state = convert_process_state(task_stat.state);
+
+                // CPU time
+                let thread_utime = task_stat.utime;
+                let thread_stime = task_stat.stime;
+                let thread_total_ticks = thread_utime + thread_stime;
+                thread.time = ((thread_total_ticks as f64 / ticks_per_second) * 100.0) as u64;
+                thread.utime = ((thread_utime as f64 / ticks_per_second) * 100.0) as u64;
+                thread.stime = ((thread_stime as f64 / ticks_per_second) * 100.0) as u64;
+
+                // Calculate CPU percentage
+                if !thread_is_new && time_delta > 0.0 && thread.time > thread_prev_time {
+                    let time_diff = (thread.time - thread_prev_time) as f64;
+                    thread.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
+                    thread.percent_cpu = thread.percent_cpu.min(100.0 * machine.active_cpus as f32);
+                }
+
+                // Start time
+                thread.starttime_ctime =
+                    boot_time + (task_stat.starttime as i64 / ticks_per_second as i64);
+
+                // Memory (shared with main process, but we read from task stat for consistency)
+                thread.m_virt = (task_stat.vsize / 1024) as i64;
+                thread.m_resident = (task_stat.rss as i64) * page_size;
+                if total_mem_kb > 0.0 {
+                    thread.percent_mem = ((thread.m_resident as f64 / total_mem_kb) * 100.0) as f32;
+                }
+
+                // Extract thread's own comm (move instead of clone to avoid allocation)
+                let thread_comm = task_stat.comm;
+
+                // Inherit shared data from main process
+                thread.uid = main_uid;
+                thread.user = main_user.clone();
+                thread.comm = Some(thread_comm); // Thread has its own comm (moved, not cloned)
+                thread.cmdline = main_cmdline.clone();
+                thread.cmdline_basename_start = main_cmdline_basename_start;
+                thread.cmdline_basename_end = main_cmdline_basename_end;
+                thread.exe = main_exe.clone();
+                thread.exe_basename_offset = main_exe_basename_offset;
+                thread.exe_deleted = main_exe_deleted;
+                thread.cwd = main_cwd.clone();
+                thread.cgroup = main_cgroup.clone();
+                thread.cgroup_short = main_cgroup_short.clone();
+                thread.container_short = main_container_short.clone();
+
+                // Mark as userland thread
+                thread.is_userland_thread = true;
+                thread.is_kernel_thread = false;
+
+                // IO Priority (thread-specific)
+                thread.io_priority = get_io_priority(tid);
+
+                // Track max values
+                if tid > max_pid {
+                    max_pid = tid;
+                }
+                if thread.percent_cpu > max_percent_cpu {
+                    max_percent_cpu = thread.percent_cpu;
+                }
+
+                thread.updated = true;
+
+                // Count userland thread statistics
+                // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
+                machine.total_tasks += 1;
+                machine.userland_threads += 1;
+
+                machine.processes.add(thread, machine.monotonic_ms);
             }
         }
     }
@@ -1060,10 +1051,10 @@ fn scan_cpu_frequency_from_cpuinfo(machine: &mut Machine) {
 
         // Parse processor number
         if line.starts_with("processor") {
-            if let Some(value) = line.split(':').nth(1) {
-                if let Ok(cpu_id) = value.trim().parse::<usize>() {
-                    current_cpu = Some(cpu_id);
-                }
+            if let Some(value) = line.split(':').nth(1)
+                && let Ok(cpu_id) = value.trim().parse::<usize>()
+            {
+                current_cpu = Some(cpu_id);
             }
             continue;
         }
@@ -1087,15 +1078,15 @@ fn scan_cpu_frequency_from_cpuinfo(machine: &mut Machine) {
             None
         };
 
-        if let (Some(freq), Some(cpu_id)) = (frequency, current_cpu) {
-            if cpu_id < machine.cpus.len() {
-                // Only set if not already set by sysfs (sysfs takes precedence)
-                if machine.cpus[cpu_id].frequency <= 0.0 {
-                    machine.cpus[cpu_id].frequency = freq;
-                }
-                num_cpus_with_frequency += 1;
-                total_frequency += freq;
+        if let (Some(freq), Some(cpu_id)) = (frequency, current_cpu)
+            && cpu_id < machine.cpus.len()
+        {
+            // Only set if not already set by sysfs (sysfs takes precedence)
+            if machine.cpus[cpu_id].frequency <= 0.0 {
+                machine.cpus[cpu_id].frequency = freq;
             }
+            num_cpus_with_frequency += 1;
+            total_frequency += freq;
         }
     }
 
@@ -1437,10 +1428,10 @@ fn read_smaps_file(process: &mut Process, pid: i32) {
             if let Some(value) = parse_smaps_value(&line, 5) {
                 process.m_swap += value;
             }
-        } else if line.starts_with("SwapPss:") {
-            if let Some(value) = parse_smaps_value(&line, 8) {
-                process.m_psswp += value;
-            }
+        } else if line.starts_with("SwapPss:")
+            && let Some(value) = parse_smaps_value(&line, 8)
+        {
+            process.m_psswp += value;
         }
     }
 }
@@ -1613,63 +1604,63 @@ pub fn filter_cgroup_name(cgroup: &str) -> String {
 pub fn filter_container(cgroup: &str) -> Option<String> {
     // Docker container detection
     // Pattern: /docker/<container_id> or /system.slice/docker-<id>.scope
-    if cgroup.contains("/docker/") {
-        if let Some(id_start) = cgroup.rfind("/docker/") {
-            let id = &cgroup[id_start + 8..];
-            // Truncate to first 12 chars like docker does
+    if cgroup.contains("/docker/")
+        && let Some(id_start) = cgroup.rfind("/docker/")
+    {
+        let id = &cgroup[id_start + 8..];
+        // Truncate to first 12 chars like docker does
+        let short_id = if id.len() > 12 { &id[..12] } else { id };
+        return Some(format!("docker:{}", short_id));
+    }
+
+    // Docker with systemd cgroup driver
+    // Pattern: docker-<id>.scope
+    if cgroup.contains("docker-")
+        && let Some(start) = cgroup.find("docker-")
+    {
+        let rest = &cgroup[start + 7..];
+        if let Some(end) = rest.find('.') {
+            let id = &rest[..end];
             let short_id = if id.len() > 12 { &id[..12] } else { id };
             return Some(format!("docker:{}", short_id));
         }
     }
 
-    // Docker with systemd cgroup driver
-    // Pattern: docker-<id>.scope
-    if cgroup.contains("docker-") {
-        if let Some(start) = cgroup.find("docker-") {
-            let rest = &cgroup[start + 7..];
-            if let Some(end) = rest.find('.') {
-                let id = &rest[..end];
-                let short_id = if id.len() > 12 { &id[..12] } else { id };
-                return Some(format!("docker:{}", short_id));
-            }
-        }
-    }
-
     // Podman container detection
-    if cgroup.contains("/libpod-") {
-        if let Some(start) = cgroup.find("/libpod-") {
-            let id = &cgroup[start + 8..];
-            let short_id = if id.len() > 12 { &id[..12] } else { id };
-            return Some(format!("podman:{}", short_id));
-        }
+    if cgroup.contains("/libpod-")
+        && let Some(start) = cgroup.find("/libpod-")
+    {
+        let id = &cgroup[start + 8..];
+        let short_id = if id.len() > 12 { &id[..12] } else { id };
+        return Some(format!("podman:{}", short_id));
     }
 
     // LXC container detection
     // Pattern: /lxc/<name> or /lxc.payload.<name>
-    if cgroup.contains("/lxc/") {
-        if let Some(start) = cgroup.rfind("/lxc/") {
-            let name = &cgroup[start + 5..];
-            let name = name.split('/').next().unwrap_or(name);
-            return Some(format!("lxc:{}", name));
-        }
+    if cgroup.contains("/lxc/")
+        && let Some(start) = cgroup.rfind("/lxc/")
+    {
+        let name = &cgroup[start + 5..];
+        let name = name.split('/').next().unwrap_or(name);
+        return Some(format!("lxc:{}", name));
     }
 
-    if cgroup.contains("/lxc.payload.") {
-        if let Some(start) = cgroup.find("/lxc.payload.") {
-            let name = &cgroup[start + 13..];
-            let name = name.split('/').next().unwrap_or(name);
-            return Some(format!("lxc:{}", name));
-        }
+    if cgroup.contains("/lxc.payload.")
+        && let Some(start) = cgroup.find("/lxc.payload.")
+    {
+        let name = &cgroup[start + 13..];
+        let name = name.split('/').next().unwrap_or(name);
+        return Some(format!("lxc:{}", name));
     }
 
     // systemd-nspawn container detection
     // Pattern: /machine.slice/machine-<name>.scope
-    if cgroup.contains("/machine.slice/machine-") {
-        if let Some(start) = cgroup.find("/machine.slice/machine-") {
-            let name = &cgroup[start + 23..];
-            if let Some(end) = name.find('.') {
-                return Some(format!("nspawn:{}", &name[..end]));
-            }
+    if cgroup.contains("/machine.slice/machine-")
+        && let Some(start) = cgroup.find("/machine.slice/machine-")
+    {
+        let name = &cgroup[start + 23..];
+        if let Some(end) = name.find('.') {
+            return Some(format!("nspawn:{}", &name[..end]));
         }
     }
 
