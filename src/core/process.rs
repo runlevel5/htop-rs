@@ -1297,6 +1297,18 @@ pub struct MergedCommand {
     pub highlights: Vec<CmdlineHighlight>,
 }
 
+/// Order two rates, treating an unknown rate (NaN) as the lowest value so
+/// rows that could not be read sort after real values in a descending list
+#[cfg(target_os = "linux")]
+fn compare_rate(a: f64, b: f64) -> Ordering {
+    match (a.is_nan(), b.is_nan()) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
+    }
+}
+
 /// Represents a single process
 #[derive(Debug, Clone)]
 pub struct Process {
@@ -1734,7 +1746,36 @@ impl Process {
             ProcessField::Command | ProcessField::ProcComm => {
                 self.get_command().cmp(other.get_command())
             }
+            #[cfg(target_os = "linux")]
+            ProcessField::IOPriority => self
+                .effective_io_priority()
+                .cmp(&other.effective_io_priority()),
+            #[cfg(target_os = "linux")]
+            ProcessField::IORate => compare_rate(
+                self.io_rate_read_bps + self.io_rate_write_bps,
+                other.io_rate_read_bps + other.io_rate_write_bps,
+            ),
+            #[cfg(target_os = "linux")]
+            ProcessField::IOReadRate => compare_rate(self.io_rate_read_bps, other.io_rate_read_bps),
+            #[cfg(target_os = "linux")]
+            ProcessField::IOWriteRate => {
+                compare_rate(self.io_rate_write_bps, other.io_rate_write_bps)
+            }
             _ => self.pid.cmp(&other.pid),
+        }
+    }
+
+    /// The IO priority the kernel actually applies: a process with no explicit
+    /// class runs as best-effort at a level derived from its nice value
+    #[cfg(target_os = "linux")]
+    fn effective_io_priority(&self) -> i32 {
+        use crate::platform::linux::{
+            IOPRIO_CLASS_BE, IOPRIO_CLASS_NONE, ioprio_class, ioprio_tuple,
+        };
+        if self.io_priority < 0 || ioprio_class(self.io_priority) == IOPRIO_CLASS_NONE {
+            ioprio_tuple(IOPRIO_CLASS_BE, ((self.nice + 20) / 5) as i32)
+        } else {
+            self.io_priority
         }
     }
 
@@ -3092,6 +3133,78 @@ mod tests {
         // Equal CPU values keep their insertion order
         assert_eq!(pids, vec![4, 1, 3, 2]);
         assert_eq!(pl.index_of(2), Some(3));
+    }
+
+    // ==================== I/O column sorting tests ====================
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_io_priority_sorts_by_effective_level() {
+        use crate::platform::linux::{IOPRIO_CLASS_BE, IOPRIO_CLASS_IDLE, ioprio_tuple};
+        // No explicit class: level derives from nice, so nice -5 (B3) ranks before nice 0 (B4)
+        let mut quiet = Process::new(1);
+        quiet.io_priority = 0;
+        quiet.nice = 0;
+        let mut eager = Process::new(2);
+        eager.io_priority = 0;
+        eager.nice = -5;
+        assert_eq!(
+            eager.compare_by_field(&quiet, ProcessField::IOPriority),
+            Ordering::Less
+        );
+
+        // An explicit class wins over the nice-derived one
+        let mut idle = Process::new(3);
+        idle.io_priority = ioprio_tuple(IOPRIO_CLASS_IDLE, 0);
+        let mut be2 = Process::new(4);
+        be2.io_priority = ioprio_tuple(IOPRIO_CLASS_BE, 2);
+        assert_eq!(
+            be2.compare_by_field(&idle, ProcessField::IOPriority),
+            Ordering::Less
+        );
+        // An unreadable priority (-1) falls back to the nice-derived level
+        let mut unknown = Process::new(5);
+        unknown.io_priority = -1;
+        unknown.nice = 0;
+        assert_eq!(
+            unknown.compare_by_field(&quiet, ProcessField::IOPriority),
+            Ordering::Equal
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_io_rates_sort_with_unknown_last() {
+        let mut fast = Process::new(1);
+        fast.io_rate_read_bps = 4096.0;
+        fast.io_rate_write_bps = 0.0;
+        let mut slow = Process::new(2);
+        slow.io_rate_read_bps = 10.0;
+        slow.io_rate_write_bps = 10.0;
+        let mut unknown = Process::new(3);
+        unknown.io_rate_read_bps = f64::NAN;
+        unknown.io_rate_write_bps = f64::NAN;
+
+        assert_eq!(
+            fast.compare_by_field(&slow, ProcessField::IORate),
+            Ordering::Greater
+        );
+        assert_eq!(
+            slow.compare_by_field(&fast, ProcessField::IOReadRate),
+            Ordering::Less
+        );
+        assert_eq!(
+            fast.compare_by_field(&slow, ProcessField::IOWriteRate),
+            Ordering::Less
+        );
+        assert_eq!(
+            unknown.compare_by_field(&slow, ProcessField::IORate),
+            Ordering::Less
+        );
+        assert_eq!(
+            unknown.compare_by_field(&unknown, ProcessField::IORate),
+            Ordering::Equal
+        );
     }
 
     // ==================== ProcessList index tests ====================

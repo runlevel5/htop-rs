@@ -28,6 +28,12 @@ const IOPRIO_PRIO_MASK: i32 = (1 << IOPRIO_CLASS_SHIFT) - 1;
 /// IOPRIO_WHO_PROCESS: get/set IO priority for a process
 const IOPRIO_WHO_PROCESS: i32 = 1;
 
+/// Build an ioprio value from a class and a level
+#[inline]
+pub fn ioprio_tuple(class: i32, data: i32) -> i32 {
+    (class << IOPRIO_CLASS_SHIFT) | (data & IOPRIO_PRIO_MASK)
+}
+
 /// Extract the IO priority class from an ioprio value
 #[inline]
 pub fn ioprio_class(ioprio: i32) -> i32 {

@@ -785,6 +785,17 @@ impl ScreenManager {
         // Set check_deleted_libs from highlight_deleted_exe setting
         machine.check_deleted_libs = self.settings.highlight_deleted_exe;
 
+        // Sort the way the active screen is configured, as switching screens
+        // does; without this the first screen kept the built-in CPU% sort
+        // until the user changed it
+        {
+            let screen = &self.settings.screens[self.settings.active_screen];
+            machine.sort_key = screen.sort_key;
+            machine.sort_descending = screen.direction < 0;
+            self.settings.sort_key = Some(screen.sort_key);
+            self.settings.sort_descending = screen.direction < 0;
+        }
+
         // Initial scan BEFORE layout so we know actual CPU count for meter heights.
         // The first table scan is waited for so the screen starts populated.
         platform::scan_system(machine);
