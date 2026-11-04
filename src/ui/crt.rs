@@ -775,8 +775,18 @@ impl Crt {
     /// Enable input delay
     /// Matches C htop CRT_enableDelay
     pub fn enable_delay(&mut self) {
+        // Clear any millisecond timeout so the half-delay applies again
+        self.screen.timeout(-1);
         let delay_tenths = (self.delay as i32).clamp(1, 255);
         let _ = self.screen.halfdelay(delay_tenths);
+    }
+
+    /// Make the next input read return after at most `ms` milliseconds.
+    /// Finer than the tenth-of-a-second half-delay; used by the main loop to
+    /// wake exactly when the next update is due or a scan result may be ready.
+    pub fn set_input_timeout_ms(&mut self, ms: u64) {
+        let ms = ms.clamp(1, i32::MAX as u64) as i32;
+        self.screen.timeout(ms);
     }
 
     /// Read a key from input

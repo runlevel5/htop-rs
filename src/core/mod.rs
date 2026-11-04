@@ -12,8 +12,10 @@ mod field_widths;
 mod machine;
 mod process;
 mod settings;
+mod table_scanner;
 
 pub use field_widths::*;
 pub use machine::*;
 pub use process::*;
 pub use settings::*;
+pub use table_scanner::*;

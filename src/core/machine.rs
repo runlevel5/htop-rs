@@ -429,11 +429,43 @@ impl Machine {
         // during process iteration rather than after.
 
         // Sort processes only if needed (deferred sorting like C htop)
+        self.sort_if_needed();
+    }
+
+    /// Sort the process list if a sort was requested
+    pub fn sort_if_needed(&mut self) {
         if self.needs_sort {
             let ascending = !self.sort_descending;
             self.processes.sort_by(self.sort_key, ascending);
             self.needs_sort = false;
         }
+    }
+
+    /// Replace the process table with a fresh scan from the table scanner.
+    ///
+    /// The scanner's copy has no knowledge of what the UI did to the rows in
+    /// the meantime, so the state only the UI changes (tags, collapsed tree
+    /// nodes, which rows were shown) is carried over by PID.
+    pub fn apply_table_snapshot(&mut self, snapshot: crate::core::TableSnapshot) {
+        let previous = std::mem::replace(&mut self.processes, snapshot.processes);
+        // Keep the order the user was looking at; a deferred sort will tidy up later
+        self.processes.reorder_like(&previous);
+        for old in previous.iter() {
+            if let Some(process) = self.processes.get_mut(old.pid) {
+                process.tagged = old.tagged;
+                process.show_children = old.show_children;
+                process.was_shown |= old.was_shown;
+            }
+        }
+        self.field_widths = snapshot.field_widths;
+        self.total_tasks = snapshot.total_tasks;
+        self.running_tasks = snapshot.running_tasks;
+        self.userland_threads = snapshot.userland_threads;
+        self.kernel_threads = snapshot.kernel_threads;
+        self.max_pid = snapshot.max_pid;
+        self.max_user_id = snapshot.max_user_id;
+        self.monotonic_ms = snapshot.monotonic_ms;
+        self.prev_monotonic_ms = snapshot.prev_monotonic_ms;
     }
 
     /// Request a sort on next update (deferred sorting)
