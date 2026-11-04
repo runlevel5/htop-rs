@@ -705,7 +705,6 @@ impl SetupScreen {
         let display_height = (h - 1) as usize;
         let content_scroll = self.content_scroll;
         let content_index = self.content_index;
-        let focus = self.focus;
 
         // Prepare display strings for items (screen name is already baked into display_options[0])
         let mut items_to_draw: Vec<(usize, RichString, bool)> = Vec::new();
@@ -713,7 +712,8 @@ impl SetupScreen {
             let item_index = content_scroll as usize + i;
             if item_index < self.display_options.len() {
                 let item = &self.display_options[item_index];
-                let is_selected = item_index == content_index && focus == 1;
+                // Shown even when the categories panel has focus, in the unfocused colour
+                let is_selected = item_index == content_index;
                 let display_str = item.display(settings, crt);
                 items_to_draw.push((i, display_str, is_selected));
             }
@@ -791,7 +791,6 @@ impl SetupScreen {
 
         let current_scheme = settings.color_scheme as usize;
         let content_index = self.content_index;
-        let focus = self.focus;
 
         crt.attrset(reset_color);
         for row in 0..h {
@@ -815,7 +814,8 @@ impl SetupScreen {
             }
 
             crt.mv(y + 1 + i as i32, x);
-            let is_selected = i == content_index && focus == 1;
+            // Shown even when the categories panel has focus, in the unfocused colour
+            let is_selected = i == content_index;
             let is_checked = i == current_scheme;
 
             if is_selected {
@@ -875,10 +875,13 @@ impl SetupScreen {
         let display_height = (h - 1) as usize; // Minus header row
 
         let text_attr = crt.color(ColorElement::Process);
-        let selected_attr = crt.color(ColorElement::PanelSelectionFocus);
+        let selected_attr = if self.focus == 1 {
+            crt.color(ColorElement::PanelSelectionFocus)
+        } else {
+            crt.color(ColorElement::PanelSelectionUnfocus)
+        };
         let check_attr = crt.color(ColorElement::CheckBox);
 
-        let focus = self.focus;
         let content_index = self.content_index;
 
         crt.attrset(reset_color);
@@ -904,7 +907,8 @@ impl SetupScreen {
             }
 
             let screen_y = y + 1 + i as i32;
-            let is_selected = focus == 1 && i == content_index;
+            // Shown even when the categories panel has focus, in the unfocused colour
+            let is_selected = i == content_index;
             let is_checked = layout == current_layout;
 
             crt.mv(screen_y, x);
