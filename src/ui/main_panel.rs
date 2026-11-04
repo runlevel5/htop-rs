@@ -1617,10 +1617,12 @@ impl MainPanel {
 
             // Redraw old selected row (remove highlight) if in range and different from new
             if old_in_range && self.old_selected != self.selected {
-                let old_row = (self.old_selected - self.scroll_v) as usize;
-                let old_y = start_y + old_row as i32;
-                if old_row < self.cached_display_indices.len() {
-                    let process_idx = self.cached_display_indices[old_row];
+                // The screen line is relative to the scroll position; the
+                // process is looked up by its row in the display list
+                let old_y = start_y + (self.old_selected - self.scroll_v);
+                if let Some(&process_idx) =
+                    self.cached_display_indices.get(self.old_selected as usize)
+                {
                     if let Some(process) = machine.processes.processes.get(process_idx) {
                         self.draw_process(
                             crt,
@@ -1643,10 +1645,9 @@ impl MainPanel {
 
             // Redraw new selected row (add highlight) if in range
             if new_in_range {
-                let new_row = (self.selected - self.scroll_v) as usize;
-                let new_y = start_y + new_row as i32;
-                if new_row < self.cached_display_indices.len() {
-                    let process_idx = self.cached_display_indices[new_row];
+                let new_y = start_y + (self.selected - self.scroll_v);
+                if let Some(&process_idx) = self.cached_display_indices.get(self.selected as usize)
+                {
                     if let Some(process) = machine.processes.processes.get(process_idx) {
                         self.draw_process(
                             crt,
