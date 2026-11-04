@@ -863,6 +863,7 @@ pub fn draw_bar_with_text(
     let reset_attr = crt.color(ColorElement::ResetColor);
     let bracket_attr = crt.color(ColorElement::BarBorder);
     let shadow_attr = crt.color(ColorElement::BarShadow);
+    let text_attr = crt.color(ColorElement::BarText);
     // Pre-compute bar characters for each segment (theme-agnostic)
     let segment_bar_chars: Vec<char> = (0..segments.len()).map(|i| crt.bar_char(i)).collect();
 
@@ -910,18 +911,21 @@ pub fn draw_bar_with_text(
             total_bar += chars;
         }
 
-        // Draw the bar content
+        // Draw the bar content. Segment colours apply to the fill characters
+        // only: text that the fill reaches is drawn in the bar text colour and
+        // text beyond the fill in the shadow colour, so a value reads the same
+        // whichever segment happens to sit underneath it.
         let _ = win.mv(y, bar_x + 1);
         let mut pos = 0;
         for (idx, (chars, attr)) in bar_chars.iter().enumerate() {
-            let _ = win.attrset(*attr);
             let bar_ch = segment_bar_chars.get(idx).copied().unwrap_or('|');
             for _ in 0..*chars {
                 if pos >= padding && pos - padding < text_len {
-                    // Draw text character
                     let ch = text.chars().nth(pos - padding).unwrap_or(bar_ch);
+                    let _ = win.attrset(text_attr);
                     let _ = win.addch(ch as u32);
                 } else {
+                    let _ = win.attrset(*attr);
                     let _ = win.addch(bar_ch as u32);
                 }
                 pos += 1;

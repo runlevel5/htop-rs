@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 
 use super::{
-    CPU_STACKED_GRAPH_SEGMENTS, CpuStackedGraphData, DEFAULT_GRAPH_HEIGHT, GraphData, Meter,
-    MeterMode, draw_cpu_stacked_graph, draw_graph,
+    BarSegment, CPU_STACKED_GRAPH_SEGMENTS, CpuStackedGraphData, DEFAULT_GRAPH_HEIGHT, GraphData,
+    Meter, MeterMode, draw_bar_with_text, draw_cpu_stacked_graph, draw_graph,
 };
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -195,30 +195,6 @@ impl CpuMeter {
         show_cpu_frequency: bool,
         frequency: f64,
     ) {
-        // Draw caption (exactly 3 chars)
-        let caption_attr = crt.color(ColorElement::MeterText);
-
-        // Bar area starts after caption
-        let bar_x = x + 3;
-        let bar_width = width - 3;
-
-        if bar_width < 4 {
-            crt.with_window(|win| {
-                let _ = win.mv(y, x);
-                let _ = win.attrset(caption_attr);
-                let _ = win.addstr(&format!("{:>3}", caption));
-            });
-            return;
-        }
-
-        // Draw brackets
-        let bracket_attr = crt.color(ColorElement::BarBorder);
-
-        // Inner bar width (between brackets)
-        let inner_width = (bar_width - 2) as usize;
-
-        // Build the text to display inside the bar (right-aligned)
-        // Matches C htop: cpuUsageBuffer + " " + cpuFrequencyBuffer (all inside the bar)
         let mut text = String::new();
         if show_cpu_usage {
             text.push_str(&format!("{:.1}%", total_percent));
@@ -230,71 +206,23 @@ impl CpuMeter {
             text.push_str(&Self::format_frequency(frequency));
         }
 
-        let text_len = text.len();
-        let padding = inner_width.saturating_sub(text_len);
-
-        // Calculate how many chars each segment takes and pre-compute color attrs
-        let mut bar_chars: Vec<(usize, u32)> = Vec::new();
-        let mut total_bar = 0usize;
-        for (value, color) in values {
-            let chars = if total_percent > 0.0 || *value > 0.0 {
-                ((*value / 100.0) * inner_width as f64).ceil() as usize
-            } else {
-                0
-            };
-            let chars = chars.min(inner_width - total_bar);
-            // Pre-compute color attr here, BEFORE entering with_window
-            let attr = crt.color(*color);
-            bar_chars.push((chars, attr));
-            total_bar += chars;
-        }
-
-        let shadow_attr = crt.color(ColorElement::BarShadow);
-        let reset_attr = crt.color(ColorElement::ResetColor);
-        // Pre-compute bar characters for each segment (theme-agnostic)
-        let segment_bar_chars: Vec<char> = (0..bar_chars.len()).map(|i| crt.bar_char(i)).collect();
-
-        crt.with_window(|win| {
-            let _ = win.mv(y, x);
-            let _ = win.attrset(caption_attr);
-            let _ = win.addstr(&format!("{:>3}", caption));
-
-            let _ = win.attrset(bracket_attr);
-            let _ = win.mvaddch(y, bar_x, '[' as u32);
-            let _ = win.mvaddch(y, bar_x + bar_width - 1, ']' as u32);
-
-            // Draw the bar content with text overlaid
-            let _ = win.mv(y, bar_x + 1);
-            let mut pos = 0;
-            for (idx, (chars, attr)) in bar_chars.iter().enumerate() {
-                let _ = win.attrset(*attr);
-                let bar_ch = segment_bar_chars.get(idx).copied().unwrap_or('|');
-                for _ in 0..*chars {
-                    if !text.is_empty() && pos >= padding && pos - padding < text_len {
-                        let ch = text.chars().nth(pos - padding).unwrap_or(bar_ch);
-                        let _ = win.addch(ch as u32);
-                    } else {
-                        let _ = win.addch(bar_ch as u32);
-                    }
-                    pos += 1;
-                }
-            }
-
-            // Fill remaining with shadow (and text if extends into shadow)
-            let _ = win.attrset(shadow_attr);
-            while pos < inner_width {
-                if !text.is_empty() && pos >= padding && pos - padding < text_len {
-                    let ch = text.chars().nth(pos - padding).unwrap_or(' ');
-                    let _ = win.addch(ch as u32);
-                } else {
-                    let _ = win.addch(' ' as u32);
-                }
-                pos += 1;
-            }
-
-            // Reset color at the end
-            let _ = win.attrset(reset_attr);
-        });
+        let segments: Vec<BarSegment> = values
+            .iter()
+            .map(|(value, color)| BarSegment {
+                value: *value,
+                attr: crt.color(*color),
+            })
+            .collect();
+        draw_bar_with_text(
+            crt,
+            x,
+            y,
+            width,
+            &format!("{:>3}", caption),
+            &segments,
+            100.0,
+            &text,
+        );
     }
 
     /// Draw a single CPU bar

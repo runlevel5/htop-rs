@@ -4,7 +4,10 @@
 
 use std::cell::RefCell;
 
-use super::{GraphData, Meter, MeterMode, draw_graph, draw_graph_colored, draw_led};
+use super::{
+    BarSegment, GraphData, Meter, MeterMode, draw_bar_with_text, draw_graph, draw_graph_colored,
+    draw_led,
+};
 use crate::core::{Machine, Settings};
 use crate::ui::{ColorElement, Crt};
 
@@ -125,83 +128,14 @@ impl Meter for FileDescriptorsMeter {
     ) {
         match self.mode {
             MeterMode::Bar => {
-                let caption_attr = crt.color(ColorElement::MeterText);
-                let bracket_attr = crt.color(ColorElement::BarBorder);
-                let fd_used_attr = crt.color(ColorElement::FileDescriptorUsed);
-                let shadow_attr = crt.color(ColorElement::BarShadow);
-                let reset_attr = crt.color(ColorElement::ResetColor);
-                // Pre-compute bar character (theme-agnostic) - FD meter only uses segment 0
-                let bar_ch = crt.bar_char(0);
-
                 let used = self.fd_used.unwrap_or(0) as f64;
                 let total = self.bar_total;
                 let text = self.bar_text();
-
-                crt.with_window(|win| {
-                    // Draw caption "FDs" (3 chars)
-                    let _ = win.mv(y, x);
-                    let _ = win.attrset(caption_attr);
-                    let _ = win.addstr("FDs");
-
-                    // Bar area starts after caption
-                    let bar_x = x + 3;
-                    let bar_width = width - 3;
-
-                    if bar_width < 4 {
-                        let _ = win.attrset(reset_attr);
-                        return;
-                    }
-
-                    // Draw brackets
-                    let _ = win.attrset(bracket_attr);
-                    let _ = win.mvaddch(y, bar_x, '[' as u32);
-                    let _ = win.mvaddch(y, bar_x + bar_width - 1, ']' as u32);
-
-                    // Inner bar width (between brackets)
-                    let inner_width = (bar_width - 2) as usize;
-
-                    // Build the bar content with text right-aligned
-                    let text_len = text.len();
-                    let padding = inner_width.saturating_sub(text_len);
-
-                    // Calculate bar fill
-                    let bar_chars = if total > 0.0 {
-                        ((used / total) * inner_width as f64).ceil() as usize
-                    } else {
-                        0
-                    };
-                    let bar_chars = bar_chars.min(inner_width);
-
-                    // Draw the bar content
-                    let _ = win.mv(y, bar_x + 1);
-                    let mut pos = 0;
-
-                    // Draw used portion
-                    let _ = win.attrset(fd_used_attr);
-                    while pos < bar_chars {
-                        if pos >= padding && pos - padding < text_len {
-                            let ch = text.chars().nth(pos - padding).unwrap_or(bar_ch);
-                            let _ = win.addch(ch as u32);
-                        } else {
-                            let _ = win.addch(bar_ch as u32);
-                        }
-                        pos += 1;
-                    }
-
-                    // Fill remaining with shadow
-                    let _ = win.attrset(shadow_attr);
-                    while pos < inner_width {
-                        if pos >= padding && pos - padding < text_len {
-                            let ch = text.chars().nth(pos - padding).unwrap_or(' ');
-                            let _ = win.addch(ch as u32);
-                        } else {
-                            let _ = win.addch(' ' as u32);
-                        }
-                        pos += 1;
-                    }
-
-                    let _ = win.attrset(reset_attr);
-                });
+                let segments = [BarSegment {
+                    value: used,
+                    attr: crt.color(ColorElement::FileDescriptorUsed),
+                }];
+                draw_bar_with_text(crt, x, y, width, "FDs", &segments, total, &text);
             }
             MeterMode::Text => {
                 let text_attr = crt.color(ColorElement::MeterText);
