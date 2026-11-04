@@ -1617,53 +1617,52 @@ impl MainPanel {
 
             // Redraw old selected row (remove highlight) if in range and different from new
             if old_in_range && self.old_selected != self.selected {
-                let old_row = (self.old_selected - self.scroll_v) as usize;
-                let old_y = start_y + old_row as i32;
-                if old_row < self.cached_display_indices.len() {
-                    let process_idx = self.cached_display_indices[old_row];
-                    if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(
-                            crt,
-                            old_y,
-                            process,
-                            false,
-                            focus,
-                            settings,
-                            current_uid,
-                            realtime_ms,
-                            monotonic_ms,
-                            initial_scan_done,
-                            active_cpus,
-                            &machine.field_widths,
-                        );
-                        self.shown_indices.push(process_idx);
-                    }
+                // The screen line is relative to the scroll position; the
+                // process is looked up by its row in the display list
+                let old_y = start_y + (self.old_selected - self.scroll_v);
+                if let Some(&process_idx) =
+                    self.cached_display_indices.get(self.old_selected as usize)
+                    && let Some(process) = machine.processes.processes.get(process_idx)
+                {
+                    self.draw_process(
+                        crt,
+                        old_y,
+                        process,
+                        false,
+                        focus,
+                        settings,
+                        current_uid,
+                        realtime_ms,
+                        monotonic_ms,
+                        initial_scan_done,
+                        active_cpus,
+                        &machine.field_widths,
+                    );
+                    self.shown_indices.push(process_idx);
                 }
             }
 
             // Redraw new selected row (add highlight) if in range
             if new_in_range {
-                let new_row = (self.selected - self.scroll_v) as usize;
-                let new_y = start_y + new_row as i32;
-                if new_row < self.cached_display_indices.len() {
-                    let process_idx = self.cached_display_indices[new_row];
-                    if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(
-                            crt,
-                            new_y,
-                            process,
-                            true,
-                            focus,
-                            settings,
-                            current_uid,
-                            realtime_ms,
-                            monotonic_ms,
-                            initial_scan_done,
-                            active_cpus,
-                            &machine.field_widths,
-                        );
-                        self.shown_indices.push(process_idx);
-                    }
+                let new_y = start_y + (self.selected - self.scroll_v);
+                if let Some(&process_idx) = self.cached_display_indices.get(self.selected as usize)
+                    && let Some(process) = machine.processes.processes.get(process_idx)
+                {
+                    self.draw_process(
+                        crt,
+                        new_y,
+                        process,
+                        true,
+                        focus,
+                        settings,
+                        current_uid,
+                        realtime_ms,
+                        monotonic_ms,
+                        initial_scan_done,
+                        active_cpus,
+                        &machine.field_widths,
+                    );
+                    self.shown_indices.push(process_idx);
                 }
             }
         }
@@ -1722,10 +1721,10 @@ impl MainPanel {
     }
 
     /// Handle a key event
-    pub fn on_key(&mut self, key: i32, machine: &Machine) -> HandlerResult {
+    pub fn on_key(&mut self, key: i32, machine: &Machine, settings: &Settings) -> HandlerResult {
         // Handle search mode
         if self.inc_search.active {
-            return self.handle_search_key(key, machine);
+            return self.handle_search_key(key, machine, settings);
         }
 
         match key {
@@ -1820,19 +1819,24 @@ impl MainPanel {
     }
 
     /// Handle key in search/filter mode (matches C htop IncSet_handleKey)
-    fn handle_search_key(&mut self, key: i32, machine: &Machine) -> HandlerResult {
+    fn handle_search_key(
+        &mut self,
+        key: i32,
+        machine: &Machine,
+        settings: &Settings,
+    ) -> HandlerResult {
         let is_filter = self.inc_search.is_filter();
         let is_search = self.inc_search.is_search();
 
         match key {
             // F3 - find next (search mode only)
             KEY_F3 if is_search => {
-                self.find_next(machine, 1);
+                self.find_next(machine, settings, 1);
                 HandlerResult::Handled
             }
             // Shift-F3 - find previous (search mode only)
             KEY_F15 if is_search => {
-                self.find_next(machine, -1);
+                self.find_next(machine, settings, -1);
                 HandlerResult::Handled
             }
             KEY_ESC => {
@@ -1861,7 +1865,7 @@ impl MainPanel {
                 // Reset selection color since text is cleared
                 self.following = false;
                 self.selection_color = ColorElement::PanelSelectionFocus;
-                self.do_incremental_search(machine);
+                self.do_incremental_search(machine, settings);
                 HandlerResult::Handled
             }
             KEY_BACKSPACE | KEY_DEL_MAC | KEY_CTRL_BS => {
@@ -1875,7 +1879,7 @@ impl MainPanel {
                     };
                     self.invalidate_display_list();
                 }
-                self.do_incremental_search(machine);
+                self.do_incremental_search(machine, settings);
                 HandlerResult::Handled
             }
             ch if (KEY_PRINTABLE_START..KEY_PRINTABLE_END).contains(&ch) => {
@@ -1885,7 +1889,7 @@ impl MainPanel {
                     self.filter = Some(self.inc_search.text.clone());
                     self.invalidate_display_list();
                 }
-                self.do_incremental_search(machine);
+                self.do_incremental_search(machine, settings);
                 HandlerResult::Handled
             }
             _ => {
@@ -1923,55 +1927,72 @@ impl MainPanel {
 
     /// Find next/previous match (matches C htop IncMode_find)
     /// step: 1 for next, -1 for previous
-    fn find_next(&mut self, machine: &Machine, step: i32) {
+    /// The display row of the first process at or after `start` (wrapping, in
+    /// `step` direction) whose command matches `pred`, searching the rows the
+    /// panel actually shows, in the order it shows them.
+    ///
+    /// The selection is a display-row index, so searching any other list (all
+    /// processes, or tree order without the hidden rows) would highlight the
+    /// wrong row whenever kernel or userland threads are hidden, a user filter
+    /// is set, or the tree view reorders rows.
+    fn find_display_row(
+        &mut self,
+        machine: &Machine,
+        settings: &Settings,
+        start: i32,
+        step: i32,
+        pred: impl Fn(&Process) -> bool,
+    ) -> Option<i32> {
+        if !self.display_list_valid {
+            self.rebuild_display_list(machine, settings);
+        }
+        let rows = self.cached_display_indices.len() as i32;
+        if rows == 0 {
+            return None;
+        }
+        let mut row = start.rem_euclid(rows);
+        for _ in 0..rows {
+            let matches = self
+                .cached_display_indices
+                .get(row as usize)
+                .and_then(|&idx| machine.processes.processes.get(idx))
+                .is_some_and(&pred);
+            if matches {
+                return Some(row);
+            }
+            row = (row + step).rem_euclid(rows);
+        }
+        None
+    }
+
+    /// Select a display row found by a search and mark the search as found
+    fn select_search_hit(&mut self, row: i32) {
+        self.selected = row;
+        let rows = self.cached_display_indices.len() as i32;
+        self.ensure_visible(rows);
+        self.inc_search.found = true;
+        // Use yellow "following" selection for search and filter modes
+        self.following = true;
+        self.selection_color = ColorElement::PanelSelectionFollow;
+    }
+
+    /// F3 / Shift-F3: move to the next or previous matching row, wrapping
+    fn find_next(&mut self, machine: &Machine, settings: &Settings, step: i32) {
         if self.inc_search.text.is_empty() {
             return;
         }
-
-        let processes: Vec<&Process> = machine
-            .processes
-            .iter()
-            .filter(|p| self.matches_filter(p))
-            .collect();
-
-        let size = processes.len() as i32;
-        if size == 0 {
-            return;
-        }
-
-        let mut i = self.selected;
-        loop {
-            i += step;
-            // Wrap around
-            if i >= size {
-                i = 0;
-            }
-            if i < 0 {
-                i = size - 1;
-            }
-            // If we're back where we started, no match found
-            if i == self.selected {
-                self.inc_search.found = false;
-                return;
-            }
-
-            if contains_ignore_ascii_case(
-                processes[i as usize].get_command(),
-                &self.inc_search.text,
-            ) {
-                self.selected = i;
-                self.ensure_visible(size);
-                self.inc_search.found = true;
-                // Use yellow "following" selection for search mode
-                self.following = true;
-                self.selection_color = ColorElement::PanelSelectionFollow;
-                return;
-            }
+        let text = self.inc_search.text.clone();
+        let start = self.selected + step;
+        match self.find_display_row(machine, settings, start, step, |p| {
+            contains_ignore_ascii_case(p.get_command(), &text)
+        }) {
+            Some(row) => self.select_search_hit(row),
+            None => self.inc_search.found = false,
         }
     }
 
     /// Perform incremental search (matches C htop search function)
-    fn do_incremental_search(&mut self, machine: &Machine) {
+    fn do_incremental_search(&mut self, machine: &Machine, settings: &Settings) {
         if self.inc_search.text.is_empty() {
             self.inc_search.found = true;
             // No search text - reset to normal selection color
@@ -1979,31 +2000,19 @@ impl MainPanel {
             self.selection_color = ColorElement::PanelSelectionFocus;
             return;
         }
-
-        // Search from current position
-        let processes: Vec<&Process> = machine
-            .processes
-            .iter()
-            .filter(|p| self.matches_filter(p))
-            .collect();
-
-        for (i, process) in processes.iter().enumerate() {
-            if contains_ignore_ascii_case(process.get_command(), &self.inc_search.text) {
-                self.selected = i as i32;
-                self.ensure_visible(processes.len() as i32);
-                self.inc_search.found = true;
-                // Use yellow "following" selection for both search and filter modes
-                self.following = true;
-                self.selection_color = ColorElement::PanelSelectionFollow;
-                return;
+        // Search from the top of the displayed rows
+        let text = self.inc_search.text.clone();
+        match self.find_display_row(machine, settings, 0, 1, |p| {
+            contains_ignore_ascii_case(p.get_command(), &text)
+        }) {
+            Some(row) => self.select_search_hit(row),
+            None => {
+                // No match found
+                self.inc_search.found = false;
+                self.following = false;
+                self.selection_color = ColorElement::PanelSelectionFocus;
             }
         }
-
-        // No match found
-        self.inc_search.found = false;
-        // Keep following state but indicate no match
-        self.following = false;
-        self.selection_color = ColorElement::PanelSelectionFocus;
     }
 
     /// Move selection by delta
@@ -2151,56 +2160,23 @@ impl MainPanel {
     }
 
     /// Start incremental PID search
-    pub fn start_pid_search(&mut self, digit: char, machine: &Machine) {
+    pub fn start_pid_search(&mut self, digit: char, machine: &Machine, settings: &Settings) {
         // Initialize or append to PID search string
-        if self.pid_search.is_none() {
-            self.pid_search = Some(String::new());
-        }
-
-        if let Some(ref mut search) = self.pid_search {
+        let search_str = {
+            let search = self.pid_search.get_or_insert_with(String::new);
             search.push(digit);
-        }
-
-        // Get the search string (non-mutable borrow)
-        let search_str = self.pid_search.as_ref().unwrap().clone();
-        let filter = self.filter.clone();
-
-        // Find process matching the PID prefix
-        let processes: Vec<&Process> = if self.tree_view {
-            machine
-                .processes
-                .iter_tree()
-                .filter(|p| self.matches_filter_with(p, &filter))
-                .collect()
-        } else {
-            machine
-                .processes
-                .iter()
-                .filter(|p| self.matches_filter_with(p, &filter))
-                .collect()
+            search.clone()
         };
 
-        // Find first process whose PID starts with the search number
-        for (i, p) in processes.iter().enumerate() {
-            if p.pid.to_string().starts_with(&search_str) {
-                self.selected = i as i32;
-                self.ensure_visible(processes.len() as i32);
-                break;
-            }
+        // Select the first displayed row whose PID starts with the typed digits
+        if let Some(row) = self.find_display_row(machine, settings, 0, 1, |p| {
+            p.pid.to_string().starts_with(&search_str)
+        }) {
+            self.selected = row;
+            let rows = self.cached_display_indices.len() as i32;
+            self.ensure_visible(rows);
         }
-
-        // Clear the search after a delay (we'll clear it next time a non-digit key is pressed)
-        // For now, just clear after processing
-        // In C htop, there's a timeout - we'll simplify by clearing on next non-digit
-    }
-
-    /// Helper for filtering with explicit filter
-    fn matches_filter_with(&self, process: &Process, filter: &Option<String>) -> bool {
-        if let Some(f) = filter {
-            contains_ignore_ascii_case(process.get_command(), f)
-        } else {
-            true
-        }
+        // The search string is cleared on the next non-digit key
     }
 
     /// Clear PID search state
@@ -2248,5 +2224,143 @@ mod filter_tests {
         assert!(!contains_ignore_ascii_case("/usr/bin/python3", "ruby"));
         assert!(!contains_ignore_ascii_case("py", "python"));
         assert!(!contains_ignore_ascii_case("", "x"));
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use crate::core::{Machine, Process, ProcessField, Settings};
+
+    /// A machine holding processes `(pid, ppid, command, kernel_thread)` in the given order
+    fn machine_with(procs: &[(i32, i32, &str, bool)]) -> Machine {
+        let mut machine = Machine::default();
+        for &(pid, ppid, cmd, kthread) in procs {
+            let mut p = Process::new(pid);
+            p.ppid = ppid;
+            p.comm = Some(cmd.to_string());
+            p.cmdline = Some(cmd.to_string());
+            p.is_kernel_thread = kthread;
+            machine.processes.add(p, 0);
+        }
+        machine
+    }
+
+    fn panel() -> MainPanel {
+        let mut panel = MainPanel::new();
+        panel.h = 50;
+        panel
+    }
+
+    /// The PID shown on the selected row
+    fn selected_pid(panel: &MainPanel, machine: &Machine) -> Option<i32> {
+        let idx = *panel.cached_display_indices.get(panel.selected as usize)?;
+        machine.processes.processes.get(idx).map(|p| p.pid)
+    }
+
+    fn type_search(panel: &mut MainPanel, machine: &Machine, settings: &Settings, text: &str) {
+        panel.inc_search.start(IncType::Search, None);
+        for c in text.chars() {
+            panel.on_key(c as i32, machine, settings);
+        }
+    }
+
+    #[test]
+    fn search_selects_the_matching_row_when_hidden_rows_precede_it() {
+        // Two hidden kernel threads come before the match in the process list
+        let machine = machine_with(&[
+            (2, 0, "kthreadd", true),
+            (3, 2, "kworker", true),
+            (10, 1, "bash", false),
+            (11, 1, "target-app --serve", false),
+        ]);
+        let settings = Settings {
+            hide_kernel_threads: true,
+            ..Default::default()
+        };
+        let mut panel = panel();
+
+        type_search(&mut panel, &machine, &settings, "target-app");
+        assert!(panel.inc_search.found);
+        assert_eq!(selected_pid(&panel, &machine), Some(11));
+    }
+
+    #[test]
+    fn search_follows_tree_order() {
+        // Process list order differs from tree order: 30 is a child of 10
+        let mut machine = machine_with(&[
+            (1, 0, "init", false),
+            (20, 1, "other", false),
+            (10, 1, "parent", false),
+            (30, 10, "needle-child", false),
+        ]);
+        machine.processes.build_tree(ProcessField::Pid, true);
+        let settings = Settings::default();
+        let mut panel = panel();
+        panel.tree_view = true;
+
+        type_search(&mut panel, &machine, &settings, "needle");
+        assert_eq!(selected_pid(&panel, &machine), Some(30));
+    }
+
+    #[test]
+    fn f3_and_shift_f3_cycle_through_matches_and_wrap() {
+        let machine = machine_with(&[
+            (2, 0, "kthreadd", true),
+            (10, 1, "worker a", false),
+            (11, 1, "idle", false),
+            (12, 1, "worker b", false),
+        ]);
+        let settings = Settings {
+            hide_kernel_threads: true,
+            ..Default::default()
+        };
+        let mut panel = panel();
+
+        type_search(&mut panel, &machine, &settings, "worker");
+        assert_eq!(selected_pid(&panel, &machine), Some(10));
+        panel.on_key(KEY_F3, &machine, &settings);
+        assert_eq!(selected_pid(&panel, &machine), Some(12));
+        panel.on_key(KEY_F3, &machine, &settings);
+        assert_eq!(
+            selected_pid(&panel, &machine),
+            Some(10),
+            "F3 wraps to the first match"
+        );
+        panel.on_key(KEY_F15, &machine, &settings);
+        assert_eq!(
+            selected_pid(&panel, &machine),
+            Some(12),
+            "Shift-F3 wraps backwards"
+        );
+    }
+
+    #[test]
+    fn search_reports_no_match() {
+        let machine = machine_with(&[(10, 1, "bash", false)]);
+        let settings = Settings::default();
+        let mut panel = panel();
+
+        type_search(&mut panel, &machine, &settings, "nope");
+        assert!(!panel.inc_search.found);
+    }
+
+    #[test]
+    fn pid_search_selects_the_displayed_row() {
+        let machine = machine_with(&[
+            (2, 0, "kthreadd", true),
+            (3, 2, "kworker", true),
+            (100, 1, "a", false),
+            (4242, 1, "b", false),
+        ]);
+        let settings = Settings {
+            hide_kernel_threads: true,
+            ..Default::default()
+        };
+        let mut panel = panel();
+
+        panel.start_pid_search('4', &machine, &settings);
+        panel.start_pid_search('2', &machine, &settings);
+        assert_eq!(selected_pid(&panel, &machine), Some(4242));
     }
 }
