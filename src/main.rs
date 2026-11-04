@@ -69,7 +69,9 @@ fn print_help() {
     println!("-n --max-iterations=NUMBER      Exit htop after NUMBER iterations/frame updates");
     println!("-p --pid=PID[,PID,PID...]       Show only the given PIDs");
     println!("   --readonly                   Disable all system and process changing features");
-    println!("-s --sort-key=COLUMN            Sort by COLUMN in list view (try --sort-key=help for a list)");
+    println!(
+        "-s --sort-key=COLUMN            Sort by COLUMN in list view (try --sort-key=help for a list)"
+    );
     println!("-t --tree                       Show the tree view (can be combined with -s)");
     println!("-u --user[=USERNAME]            Show only processes for a given user (or $USER)");
     println!("-U --no-unicode                 Do not use unicode but plain ASCII");
@@ -158,7 +160,10 @@ fn setup_signal_handlers() {
     // ncurses-pure-rs doesn't install its own SIGWINCH handler (unlike real ncurses),
     // so we catch it ourselves and set a flag that event loops check.
     unsafe {
-        libc::signal(libc::SIGWINCH, handle_sigwinch as *const () as libc::sighandler_t);
+        let _ = nix::sys::signal::signal(
+            nix::sys::signal::Signal::SIGWINCH,
+            nix::sys::signal::SigHandler::Handler(handle_sigwinch),
+        );
     }
 }
 
@@ -297,10 +302,10 @@ fn main() -> Result<()> {
     platform::done();
 
     // Save settings if changed
-    if settings.changed {
-        if let Err(e) = settings.write() {
-            eprintln!("Warning: Failed to save settings: {}", e);
-        }
+    if settings.changed
+        && let Err(e) = settings.write()
+    {
+        eprintln!("Warning: Failed to save settings: {}", e);
     }
 
     Ok(())
@@ -330,14 +335,9 @@ mod ctrlc {
         }
 
         unsafe {
-            libc::signal(
-                libc::SIGINT,
-                handle_signal as *const () as libc::sighandler_t,
-            );
-            libc::signal(
-                libc::SIGTERM,
-                handle_signal as *const () as libc::sighandler_t,
-            );
+            use nix::sys::signal::{SigHandler, Signal, signal};
+            let _ = signal(Signal::SIGINT, SigHandler::Handler(handle_signal));
+            let _ = signal(Signal::SIGTERM, SigHandler::Handler(handle_signal));
         }
 
         // Box the handler, then box it again to get a thin pointer

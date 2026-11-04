@@ -5,8 +5,8 @@
 
 #![allow(dead_code)]
 
-use super::crt::{attr_t, A_NORMAL};
 use super::Crt;
+use super::crt::{A_NORMAL, attr_t};
 
 /// A character with its display attributes
 #[derive(Debug, Clone, Copy)]
@@ -213,10 +213,10 @@ impl RichString {
 
         // Pad with spaces if needed
         // Use pad_attr if specified, otherwise keep current_attr for background
-        if let Some(attr) = pad_attr {
-            if attr != current_attr {
-                crt.attrset(attr);
-            }
+        if let Some(attr) = pad_attr
+            && attr != current_attr
+        {
+            crt.attrset(attr);
         }
         while written < width {
             crt.addch_raw(' ' as u32);

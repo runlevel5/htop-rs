@@ -13,16 +13,16 @@ mod types;
 pub use meter_registry::*;
 pub use types::*;
 
+use super::Crt;
 use super::crt::{
-    ColorElement, KEY_BACKSPACE, KEY_DC, KEY_DEL_MAC, KEY_DOWN, KEY_END, KEY_ENTER, KEY_F10,
-    KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_HOME, KEY_LEFT, KEY_MOUSE,
-    KEY_NPAGE, KEY_PPAGE, KEY_RESIZE, KEY_RIGHT, KEY_UP,
+    ColorElement, KEY_BACKSPACE, KEY_DC, KEY_DEL_MAC, KEY_DOWN, KEY_END, KEY_ENTER, KEY_F2, KEY_F4,
+    KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_HOME, KEY_LEFT, KEY_MOUSE, KEY_NPAGE,
+    KEY_PPAGE, KEY_RESIZE, KEY_RIGHT, KEY_UP,
 };
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::panel::{HandlerResult, Panel};
 use super::rich_string::RichString;
-use super::Crt;
 #[cfg(target_os = "linux")]
 use crate::core::ScanFlags;
 use crate::core::{
@@ -1296,7 +1296,7 @@ impl SetupScreen {
             // Get display name (with renaming support)
             let display = if is_selected && has_focus && screens_renaming {
                 // Show rename buffer with cursor
-                format!("{}_", &screens_rename_buffer)
+                format!("{}_", screens_rename_buffer)
             } else {
                 screen.heading.clone()
             };
@@ -1760,11 +1760,9 @@ impl SetupScreen {
             }
 
             // Increase for number items
-            KEY_PLUS | KEY_F8 => {
-                if self.focus == 1 {
-                    self.handle_increase(settings);
-                    return HandlerResult::Handled;
-                }
+            KEY_PLUS | KEY_F8 if self.focus == 1 => {
+                self.handle_increase(settings);
+                return HandlerResult::Handled;
             }
 
             _ => {}
@@ -2459,10 +2457,10 @@ impl SetupScreen {
         } else {
             // Column panel
             let col_idx = self.meters_column_focus;
-            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
-                if *sel > 0 {
-                    *sel -= 1;
-                }
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx)
+                && *sel > 0
+            {
+                *sel -= 1;
             }
         }
     }
@@ -2493,10 +2491,10 @@ impl SetupScreen {
                 .get(col_idx)
                 .map(|m| m.len().saturating_sub(1))
                 .unwrap_or(0);
-            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
-                if *sel < max_index {
-                    *sel += 1;
-                }
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx)
+                && *sel < max_index
+            {
+                *sel += 1;
             }
         }
     }
@@ -2561,22 +2559,23 @@ impl SetupScreen {
             .copied()
             .unwrap_or(0);
 
-        if let Some(column) = settings.header_columns.get_mut(col_idx) {
-            if selection < column.len() {
-                column.remove(selection);
-                settings.changed = true;
-                self.changed = true;
+        if let Some(column) = settings.header_columns.get_mut(col_idx)
+            && selection < column.len()
+        {
+            column.remove(selection);
+            settings.changed = true;
+            self.changed = true;
 
-                // Adjust selection
-                if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
-                    if *sel > 0 && *sel >= column.len() {
-                        *sel = column.len().saturating_sub(1);
-                    }
-                }
-
-                // Repopulate header
-                header.populate_from_settings(settings);
+            // Adjust selection
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx)
+                && *sel > 0
+                && *sel >= column.len()
+            {
+                *sel = column.len().saturating_sub(1);
             }
+
+            // Repopulate header
+            header.populate_from_settings(settings);
         }
 
         // Stop moving mode if we were moving
@@ -2597,36 +2596,36 @@ impl SetupScreen {
             .get_meter_supported_modes(col_idx, selection)
             .unwrap_or(0xFFFF); // Default to all modes if not found
 
-        if let Some(column) = settings.header_columns.get_mut(col_idx) {
-            if let Some(meter) = column.get_mut(selection) {
-                // Cycle order: Bar -> Text -> Graph -> Led -> StackedGraph -> Bar
-                let modes = [
-                    MeterMode::Bar,
-                    MeterMode::Text,
-                    MeterMode::Graph,
-                    MeterMode::Led,
-                    MeterMode::StackedGraph,
-                ];
+        if let Some(column) = settings.header_columns.get_mut(col_idx)
+            && let Some(meter) = column.get_mut(selection)
+        {
+            // Cycle order: Bar -> Text -> Graph -> Led -> StackedGraph -> Bar
+            let modes = [
+                MeterMode::Bar,
+                MeterMode::Text,
+                MeterMode::Graph,
+                MeterMode::Led,
+                MeterMode::StackedGraph,
+            ];
 
-                // Find current mode index
-                let current_idx = modes.iter().position(|&m| m == meter.mode).unwrap_or(0);
+            // Find current mode index
+            let current_idx = modes.iter().position(|&m| m == meter.mode).unwrap_or(0);
 
-                // Find next supported mode
-                for i in 1..=modes.len() {
-                    let next_idx = (current_idx + i) % modes.len();
-                    let next_mode = modes[next_idx];
-                    if (supported_modes & (1 << next_mode as u32)) != 0 {
-                        meter.mode = next_mode;
-                        break;
-                    }
+            // Find next supported mode
+            for i in 1..=modes.len() {
+                let next_idx = (current_idx + i) % modes.len();
+                let next_mode = modes[next_idx];
+                if (supported_modes & (1 << next_mode as u32)) != 0 {
+                    meter.mode = next_mode;
+                    break;
                 }
-
-                settings.changed = true;
-                self.changed = true;
-
-                // Repopulate header
-                header.populate_from_settings(settings);
             }
+
+            settings.changed = true;
+            self.changed = true;
+
+            // Repopulate header
+            header.populate_from_settings(settings);
         }
     }
 
@@ -2643,20 +2642,20 @@ impl SetupScreen {
             return;
         }
 
-        if let Some(column) = settings.header_columns.get_mut(col_idx) {
-            if selection < column.len() {
-                column.swap(selection, selection - 1);
-                settings.changed = true;
-                self.changed = true;
+        if let Some(column) = settings.header_columns.get_mut(col_idx)
+            && selection < column.len()
+        {
+            column.swap(selection, selection - 1);
+            settings.changed = true;
+            self.changed = true;
 
-                // Update selection
-                if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
-                    *sel = selection - 1;
-                }
-
-                // Repopulate header
-                header.populate_from_settings(settings);
+            // Update selection
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                *sel = selection - 1;
             }
+
+            // Repopulate header
+            header.populate_from_settings(settings);
         }
     }
 
@@ -2669,20 +2668,20 @@ impl SetupScreen {
             .copied()
             .unwrap_or(0);
 
-        if let Some(column) = settings.header_columns.get_mut(col_idx) {
-            if selection + 1 < column.len() {
-                column.swap(selection, selection + 1);
-                settings.changed = true;
-                self.changed = true;
+        if let Some(column) = settings.header_columns.get_mut(col_idx)
+            && selection + 1 < column.len()
+        {
+            column.swap(selection, selection + 1);
+            settings.changed = true;
+            self.changed = true;
 
-                // Update selection
-                if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
-                    *sel = selection + 1;
-                }
-
-                // Repopulate header
-                header.populate_from_settings(settings);
+            // Update selection
+            if let Some(sel) = self.meters_column_selection.get_mut(col_idx) {
+                *sel = selection + 1;
             }
+
+            // Repopulate header
+            header.populate_from_settings(settings);
         }
     }
 
@@ -2826,20 +2825,21 @@ impl SetupScreen {
             // Skip non-interactive items in display options
             if self.category == SetupCategory::DisplayOptions {
                 while self.content_index > 0 {
-                    if let Some(item) = self.display_options.get(self.content_index) {
-                        if item.is_interactive() {
-                            break;
-                        }
+                    if let Some(item) = self.display_options.get(self.content_index)
+                        && item.is_interactive()
+                    {
+                        break;
                     }
                     self.content_index -= 1;
                 }
                 // Check if current is interactive, if not go back up
-                if let Some(item) = self.display_options.get(self.content_index) {
-                    if !item.is_interactive() && self.content_index > 0 {
-                        // Can't find interactive item going up, stay where we were
-                        self.content_index += 1;
-                        self.skip_to_interactive(_settings, true);
-                    }
+                if let Some(item) = self.display_options.get(self.content_index)
+                    && !item.is_interactive()
+                    && self.content_index > 0
+                {
+                    // Can't find interactive item going up, stay where we were
+                    self.content_index += 1;
+                    self.skip_to_interactive(_settings, true);
                 }
             }
 
@@ -2862,10 +2862,10 @@ impl SetupScreen {
             // Skip non-interactive items in display options
             if self.category == SetupCategory::DisplayOptions {
                 while self.content_index < max_index - 1 {
-                    if let Some(item) = self.display_options.get(self.content_index) {
-                        if item.is_interactive() {
-                            break;
-                        }
+                    if let Some(item) = self.display_options.get(self.content_index)
+                        && item.is_interactive()
+                    {
+                        break;
                     }
                     self.content_index += 1;
                 }
@@ -2883,19 +2883,19 @@ impl SetupScreen {
         let max_index = self.display_options.len();
         if forward {
             while self.content_index < max_index {
-                if let Some(item) = self.display_options.get(self.content_index) {
-                    if item.is_interactive() {
-                        break;
-                    }
+                if let Some(item) = self.display_options.get(self.content_index)
+                    && item.is_interactive()
+                {
+                    break;
                 }
                 self.content_index += 1;
             }
         } else {
             while self.content_index > 0 {
-                if let Some(item) = self.display_options.get(self.content_index) {
-                    if item.is_interactive() {
-                        break;
-                    }
+                if let Some(item) = self.display_options.get(self.content_index)
+                    && item.is_interactive()
+                {
+                    break;
                 }
                 self.content_index -= 1;
             }
@@ -2992,45 +2992,45 @@ impl SetupScreen {
     }
 
     fn handle_decrease(&mut self, settings: &mut Settings) {
-        if self.category == SetupCategory::DisplayOptions {
-            if let Some(item) = self.display_options.get(self.content_index) {
-                match item {
-                    OptionItem::Number { field, min, .. } => {
-                        let current = field.get_int(settings);
-                        let new_val = (current - 1).max(*min);
-                        field.set_int(settings, new_val);
-                        settings.changed = true;
-                        self.changed = true;
-                    }
-                    OptionItem::Check { field, .. } => {
-                        field.set_bool(settings, false);
-                        settings.changed = true;
-                        self.changed = true;
-                    }
-                    _ => {}
+        if self.category == SetupCategory::DisplayOptions
+            && let Some(item) = self.display_options.get(self.content_index)
+        {
+            match item {
+                OptionItem::Number { field, min, .. } => {
+                    let current = field.get_int(settings);
+                    let new_val = (current - 1).max(*min);
+                    field.set_int(settings, new_val);
+                    settings.changed = true;
+                    self.changed = true;
                 }
+                OptionItem::Check { field, .. } => {
+                    field.set_bool(settings, false);
+                    settings.changed = true;
+                    self.changed = true;
+                }
+                _ => {}
             }
         }
     }
 
     fn handle_increase(&mut self, settings: &mut Settings) {
-        if self.category == SetupCategory::DisplayOptions {
-            if let Some(item) = self.display_options.get(self.content_index) {
-                match item {
-                    OptionItem::Number { field, max, .. } => {
-                        let current = field.get_int(settings);
-                        let new_val = (current + 1).min(*max);
-                        field.set_int(settings, new_val);
-                        settings.changed = true;
-                        self.changed = true;
-                    }
-                    OptionItem::Check { field, .. } => {
-                        field.set_bool(settings, true);
-                        settings.changed = true;
-                        self.changed = true;
-                    }
-                    _ => {}
+        if self.category == SetupCategory::DisplayOptions
+            && let Some(item) = self.display_options.get(self.content_index)
+        {
+            match item {
+                OptionItem::Number { field, max, .. } => {
+                    let current = field.get_int(settings);
+                    let new_val = (current + 1).min(*max);
+                    field.set_int(settings, new_val);
+                    settings.changed = true;
+                    self.changed = true;
                 }
+                OptionItem::Check { field, .. } => {
+                    field.set_bool(settings, true);
+                    settings.changed = true;
+                    self.changed = true;
+                }
+                _ => {}
             }
         }
     }
@@ -3274,19 +3274,18 @@ impl SetupScreen {
                 let item_y = (y - content_panel.y - 1) as usize;
                 let clicked_index = self.content_scroll as usize + item_y;
 
-                if clicked_index < self.display_options.len() {
-                    if let Some(OptionItem::Number { field, min, .. }) =
+                if clicked_index < self.display_options.len()
+                    && let Some(OptionItem::Number { field, min, .. }) =
                         self.display_options.get(clicked_index)
-                    {
-                        self.content_index = clicked_index;
-                        // Decrease the value (clamp at min)
-                        let current = field.get_int(settings);
-                        let new_val = (current - 1).max(*min);
-                        field.set_int(settings, new_val);
-                        settings.changed = true;
-                        self.changed = true;
-                        return Some(HandlerResult::Handled);
-                    }
+                {
+                    self.content_index = clicked_index;
+                    // Decrease the value (clamp at min)
+                    let current = field.get_int(settings);
+                    let new_val = (current - 1).max(*min);
+                    field.set_int(settings, new_val);
+                    settings.changed = true;
+                    self.changed = true;
+                    return Some(HandlerResult::Handled);
                 }
             }
         }
@@ -3718,16 +3717,15 @@ impl SetupScreen {
                     self.columns_selection -= 1;
                 }
             }
-            2 => {
+            2
                 // Available columns panel (no move mode)
-                if self.available_columns_selection > 0 {
+                if self.available_columns_selection > 0 => {
                     self.available_columns_selection -= 1;
                     // Adjust scroll
                     if (self.available_columns_selection as i32) < self.available_columns_scroll {
                         self.available_columns_scroll = self.available_columns_selection as i32;
                     }
                 }
-            }
             _ => {}
         }
     }

@@ -3,8 +3,8 @@
 use std::cell::RefCell;
 
 use super::{
-    draw_bar_with_text, draw_graph, draw_stacked_graph, draw_text_segments, human_unit, BarSegment,
-    GraphData, Meter, MeterMode, StackedGraphData, TextSegment, STACKED_GRAPH_SEGMENTS,
+    BarSegment, GraphData, Meter, MeterMode, STACKED_GRAPH_SEGMENTS, StackedGraphData, TextSegment,
+    draw_bar_with_text, draw_graph, draw_stacked_graph, draw_text_segments, human_unit,
 };
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -465,16 +465,16 @@ mod tests {
     #[test]
     fn test_memory_meter_update() {
         let mut meter = MemoryMeter::new();
-        let mut machine = Machine::default();
-
-        machine.total_mem = 16 * 1024 * 1024; // 16 GB in KB
-        machine.used_mem = 8 * 1024 * 1024; // 8 GB
-        machine.buffers_mem = 512 * 1024; // 512 MB
-        machine.shared_mem = 256 * 1024; // 256 MB
-        machine.compressed_mem = 0;
-        machine.cached_mem = 2 * 1024 * 1024; // 2 GB
-        machine.available_mem = 6 * 1024 * 1024; // 6 GB
-
+        let machine = Machine {
+            total_mem: 16 * 1024 * 1024, // 16 GB in KB
+            used_mem: 8 * 1024 * 1024,   // 8 GB
+            buffers_mem: 512 * 1024,     // 512 MB
+            shared_mem: 256 * 1024,      // 256 MB
+            compressed_mem: 0,
+            cached_mem: 2 * 1024 * 1024,    // 2 GB
+            available_mem: 6 * 1024 * 1024, // 6 GB
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.total, 16.0 * 1024.0 * 1024.0);

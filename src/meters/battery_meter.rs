@@ -7,7 +7,7 @@
 //! The meter receives updates via `merge_expensive_data()`.
 
 use super::meter_bg_scanner::{MeterDataId, MeterExpensiveData};
-use super::{draw_bar, Meter, MeterMode};
+use super::{Meter, MeterMode, draw_bar};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;

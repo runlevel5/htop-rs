@@ -8,8 +8,8 @@
 //! - Standard navigation keys
 
 use super::crt::{
-    ColorElement, Crt, A_NORMAL, KEY_CTRL_L, KEY_CTRL_N, KEY_CTRL_P, KEY_DOWN, KEY_END, KEY_F10,
-    KEY_F5, KEY_HOME, KEY_NPAGE, KEY_PPAGE, KEY_UP, KEY_WHEELDOWN, KEY_WHEELUP,
+    A_NORMAL, ColorElement, Crt, KEY_CTRL_L, KEY_CTRL_N, KEY_CTRL_P, KEY_DOWN, KEY_END, KEY_F5,
+    KEY_F10, KEY_HOME, KEY_NPAGE, KEY_PPAGE, KEY_UP, KEY_WHEELDOWN, KEY_WHEELUP,
 };
 use super::search_filter::{self, HandleResult, SearchFilterState};
 

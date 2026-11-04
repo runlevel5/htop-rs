@@ -16,7 +16,7 @@ use crate::core::{CpuData, Machine};
 use crate::core::{Process, ProcessState};
 
 use super::darwin_bg_scanner::{
-    start_darwin_bg_scan, DarwinBackgroundScanner, DarwinExpensiveData,
+    DarwinBackgroundScanner, DarwinExpensiveData, start_darwin_bg_scan,
 };
 
 // sysctl MIB constants
@@ -294,7 +294,7 @@ struct XswUsage {
     xsu_encrypted: bool,
 }
 
-extern "C" {
+unsafe extern "C" {
     fn mach_host_self() -> u32;
     fn mach_task_self() -> u32;
     fn host_statistics64(host: u32, flavor: c_int, info: *mut c_void, count: *mut u32) -> c_int;
@@ -310,7 +310,7 @@ extern "C" {
 }
 
 // libproc functions
-extern "C" {
+unsafe extern "C" {
     fn proc_listallpids(buffer: *mut c_void, buffersize: c_int) -> c_int;
     fn proc_pidinfo(
         pid: c_int,
@@ -345,11 +345,7 @@ fn sysctl<T>(mib: &[c_int]) -> Option<T> {
         )
     };
 
-    if ret == 0 {
-        Some(value)
-    } else {
-        None
-    }
+    if ret == 0 { Some(value) } else { None }
 }
 
 /// Safe wrapper for sysctlbyname
@@ -409,11 +405,7 @@ fn sysctlbyname_u64(name: &str) -> Option<u64> {
         )
     };
 
-    if ret == 0 {
-        Some(value)
-    } else {
-        None
-    }
+    if ret == 0 { Some(value) } else { None }
 }
 
 /// Initialize macOS platform
@@ -428,10 +420,10 @@ pub fn done() {}
 pub fn get_system_info(machine: &mut Machine) {
     // Get hostname
     let mut hostname = [0u8; 256];
-    if unsafe { libc::gethostname(hostname.as_mut_ptr() as *mut i8, hostname.len()) } == 0 {
-        if let Ok(name) = CStr::from_bytes_until_nul(&hostname) {
-            machine.hostname = name.to_string_lossy().to_string();
-        }
+    if unsafe { libc::gethostname(hostname.as_mut_ptr() as *mut i8, hostname.len()) } == 0
+        && let Ok(name) = CStr::from_bytes_until_nul(&hostname)
+    {
+        machine.hostname = name.to_string_lossy().to_string();
     }
 
     // Get kernel version
@@ -589,7 +581,7 @@ pub fn scan_memory(machine: &mut Machine) {
         machine.compressed_mem = compressed as i64;
         machine.buffers_mem = purgeable; // Purgeable = buffers in C htop
         machine.cached_mem = inactive; // Inactive = cache in C htop
-                                       // Note: shared_mem stays as -1 (not available on macOS)
+        // Note: shared_mem stays as -1 (not available on macOS)
 
         // Available memory
         let free = vm_stat.free_count as u64 * page_kb;
@@ -817,10 +809,10 @@ fn get_process_cwd(pid: i32) -> Option<String> {
 
     // Convert to string
     let path_bytes = &vpi.pvi_cdir.vip_path;
-    if let Some(pos) = path_bytes.iter().position(|&c| c == 0) {
-        if let Ok(path) = std::str::from_utf8(&path_bytes[..pos]) {
-            return Some(path.to_string());
-        }
+    if let Some(pos) = path_bytes.iter().position(|&c| c == 0)
+        && let Ok(path) = std::str::from_utf8(&path_bytes[..pos])
+    {
+        return Some(path.to_string());
     }
 
     None
@@ -852,18 +844,18 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
 
     // Merge any completed background scan results into processes
     // This applies data from the previous frame's background scan
-    if let Some(ref mut scanner) = machine.bg_scanner {
-        if let Some(bg_results) = scanner.try_take_results() {
-            if debug_timing {
-                eprintln!(
-                    "[SCAN-DARWIN] Merging {} background results",
-                    bg_results.len()
-                );
-            }
-            for (pid, data) in bg_results.iter() {
-                if let Some(process) = machine.processes.get_mut(*pid) {
-                    merge_expensive_data(process, data);
-                }
+    if let Some(ref mut scanner) = machine.bg_scanner
+        && let Some(bg_results) = scanner.try_take_results()
+    {
+        if debug_timing {
+            eprintln!(
+                "[SCAN-DARWIN] Merging {} background results",
+                bg_results.len()
+            );
+        }
+        for (pid, data) in bg_results.iter() {
+            if let Some(process) = machine.processes.get_mut(*pid) {
+                merge_expensive_data(process, data);
             }
         }
     }
@@ -940,10 +932,10 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
 
                 // Get comm from kinfo_proc.kp_proc.p_comm
                 let comm_bytes = &kinfo.kp_proc.p_comm;
-                if let Some(pos) = comm_bytes.iter().position(|&c| c == 0) {
-                    if let Ok(comm) = std::str::from_utf8(&comm_bytes[..pos]) {
-                        process.comm = Some(comm.to_string());
-                    }
+                if let Some(pos) = comm_bytes.iter().position(|&c| c == 0)
+                    && let Ok(comm) = std::str::from_utf8(&comm_bytes[..pos])
+                {
+                    process.comm = Some(comm.to_string());
                 }
 
                 // kernel_task has no cmdline, exe, or cwd
@@ -1065,27 +1057,27 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 )
             };
 
-            if name_len > 0 {
-                if let Ok(name) = CStr::from_bytes_until_nul(&name_buf) {
-                    process.comm = Some(name.to_string_lossy().to_string());
-                }
+            if name_len > 0
+                && let Ok(name) = CStr::from_bytes_until_nul(&name_buf)
+            {
+                process.comm = Some(name.to_string_lossy().to_string());
             }
 
             // Fallback to pbi_comm or kinfo p_comm
             if process.comm.is_none() {
                 if bsd_size > 0 {
                     // Use bsd_info.pbi_comm
-                    if let Some(pos) = bsd_info.pbi_comm.iter().position(|&c| c == 0) {
-                        if let Ok(comm) = std::str::from_utf8(&bsd_info.pbi_comm[..pos]) {
-                            process.comm = Some(comm.to_string());
-                        }
+                    if let Some(pos) = bsd_info.pbi_comm.iter().position(|&c| c == 0)
+                        && let Ok(comm) = std::str::from_utf8(&bsd_info.pbi_comm[..pos])
+                    {
+                        process.comm = Some(comm.to_string());
                     }
                 } else if let Some(ref ki) = kinfo {
                     // Fallback to kinfo p_comm for root processes
-                    if let Some(pos) = ki.kp_proc.p_comm.iter().position(|&c| c == 0) {
-                        if let Ok(comm) = std::str::from_utf8(&ki.kp_proc.p_comm[..pos]) {
-                            process.comm = Some(comm.to_string());
-                        }
+                    if let Some(pos) = ki.kp_proc.p_comm.iter().position(|&c| c == 0)
+                        && let Ok(comm) = std::str::from_utf8(&ki.kp_proc.p_comm[..pos])
+                    {
+                        process.comm = Some(comm.to_string());
                     }
                 }
             }
@@ -1096,11 +1088,11 @@ pub fn scan_processes_with_settings(machine: &mut Machine, update_process_names:
                 proc_pidpath(pid, path_buf.as_mut_ptr() as *mut c_void, MAXPATHLEN as u32)
             };
 
-            if path_len > 0 {
-                if let Ok(path) = CStr::from_bytes_until_nul(&path_buf) {
-                    let path_str = path.to_string_lossy().to_string();
-                    process.exe = Some(path_str);
-                }
+            if path_len > 0
+                && let Ok(path) = CStr::from_bytes_until_nul(&path_buf)
+            {
+                let path_str = path.to_string_lossy().to_string();
+                process.exe = Some(path_str);
             }
 
             // Get full command line with arguments via KERN_PROCARGS2
@@ -1268,9 +1260,5 @@ fn sysctlbyname_i32(name: &str) -> Option<i32> {
         )
     };
 
-    if ret == 0 {
-        Some(value)
-    } else {
-        None
-    }
+    if ret == 0 { Some(value) } else { None }
 }

@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::{draw_graph, draw_graph_colored, draw_led, GraphData, Meter, MeterMode};
+use super::{GraphData, Meter, MeterMode, draw_graph, draw_graph_colored, draw_led};
 use crate::core::{Machine, Settings};
 use crate::ui::{ColorElement, Crt};
 
@@ -370,11 +370,11 @@ mod tests {
     #[test]
     fn test_filedescriptors_meter_update() {
         let mut meter = FileDescriptorsMeter::new();
-        let mut machine = Machine::default();
-
-        machine.fd_used = Some(1234);
-        machine.fd_max = Some(65536);
-
+        let machine = Machine {
+            fd_used: Some(1234),
+            fd_max: Some(65536),
+            ..Default::default()
+        };
         meter.update(&machine);
 
         assert_eq!(meter.fd_used, Some(1234));

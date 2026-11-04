@@ -7,9 +7,9 @@
 
 #![allow(dead_code)]
 
-use super::crt::{attr_t, ColorElement};
-use super::rich_string::RichString;
 use super::Crt;
+use super::crt::{ColorElement, attr_t};
+use super::rich_string::RichString;
 
 /// Unit prefixes for memory formatting (K, M, G, T, P, E)
 const UNIT_PREFIXES: [char; 6] = ['K', 'M', 'G', 'T', 'P', 'E'];

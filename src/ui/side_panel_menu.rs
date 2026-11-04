@@ -4,6 +4,7 @@
 //! sort column selection, and user filter selection) that appear on the left side of the screen
 //! while the main process panel is shown on the right.
 
+use super::Crt;
 use super::crt::{
     KEY_DOWN, KEY_END, KEY_ESC, KEY_F10, KEY_HOME, KEY_LC_Q, KEY_LINEFEED, KEY_MOUSE, KEY_NPAGE,
     KEY_PPAGE, KEY_PRINTABLE_END, KEY_PRINTABLE_START, KEY_RETURN, KEY_UP, KEY_WHEELDOWN,
@@ -12,7 +13,6 @@ use super::crt::{
 use super::header::Header;
 use super::main_panel::MainPanel;
 use super::panel::Panel;
-use super::Crt;
 use crate::core::{Machine, Settings};
 
 /// Result of running a side panel menu

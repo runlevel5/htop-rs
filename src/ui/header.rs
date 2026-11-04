@@ -4,8 +4,8 @@
 
 use rayon::prelude::*;
 
-use super::crt::{ColorElement, A_NORMAL};
 use super::Crt;
+use super::crt::{A_NORMAL, ColorElement};
 use crate::core::{HeaderLayout, Machine, Settings};
 use crate::meters::meter_bg_scanner::{MeterBackgroundScanner, MeterDataId};
 use crate::meters::{Meter, MeterType};
@@ -142,10 +142,10 @@ impl Header {
         if let Some(bg_results) = self.bg_scanner.try_take_results() {
             for column in &mut self.columns {
                 for meter in column {
-                    if let Some(id) = meter.expensive_data_id() {
-                        if let Some(data) = bg_results.get(&id) {
-                            meter.merge_expensive_data(data);
-                        }
+                    if let Some(id) = meter.expensive_data_id()
+                        && let Some(data) = bg_results.get(&id)
+                    {
+                        meter.merge_expensive_data(data);
                     }
                 }
             }
@@ -162,10 +162,10 @@ impl Header {
         let mut requested: Vec<MeterDataId> = Vec::new();
         for column in &self.columns {
             for meter in column {
-                if let Some(id) = meter.expensive_data_id() {
-                    if !requested.contains(&id) {
-                        requested.push(id);
-                    }
+                if let Some(id) = meter.expensive_data_id()
+                    && !requested.contains(&id)
+                {
+                    requested.push(id);
                 }
             }
         }

@@ -6,12 +6,12 @@
 //! - Sort column menu (F6/>.)
 //! - User filter menu (u)
 
+use super::Crt;
 use super::crt::ColorElement;
 use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::main_panel::MainPanel;
 use super::panel::Panel;
-use super::Crt;
 use crate::core::{Machine, ProcessField, Settings};
 
 /// Convert SPDX license identifier to display string
@@ -453,13 +453,13 @@ pub fn show_kill_menu(crt: &mut Crt, machine: &mut Machine, ctx: &mut KillMenuCo
         super::side_panel_menu::run_side_panel_menu(crt, machine, &mut side_ctx, &mut signal_panel);
 
     // Send the signal if one was selected
-    if let super::side_panel_menu::SidePanelResult::Selected(selected_idx) = result {
-        if selected_idx < signals.len() {
-            let (_, sig_num) = signals[selected_idx];
-            // Signal 0 means "Cancel" in C htop
-            if sig_num != 0 {
-                send_signal(pid, sig_num);
-            }
+    if let super::side_panel_menu::SidePanelResult::Selected(selected_idx) = result
+        && selected_idx < signals.len()
+    {
+        let (_, sig_num) = signals[selected_idx];
+        // Signal 0 means "Cancel" in C htop
+        if sig_num != 0 {
+            send_signal(pid, sig_num);
         }
     }
 }
@@ -545,12 +545,12 @@ pub fn show_sort_menu(
         super::side_panel_menu::run_side_panel_menu(crt, machine, &mut side_ctx, &mut sort_panel);
 
     // Return the selected field
-    if let super::side_panel_menu::SidePanelResult::Selected(selected_idx) = result {
-        if selected_idx < fields.len() {
-            return SortMenuResult {
-                field: Some(fields[selected_idx]),
-            };
-        }
+    if let super::side_panel_menu::SidePanelResult::Selected(selected_idx) = result
+        && selected_idx < fields.len()
+    {
+        return SortMenuResult {
+            field: Some(fields[selected_idx]),
+        };
     }
 
     SortMenuResult { field: None }
@@ -624,19 +624,19 @@ pub fn show_user_menu(
     crt.enable_delay();
 
     // Return the selection
-    if let super::side_panel_menu::SidePanelResult::Selected(selected_idx) = result {
-        if selected_idx < menu_items.len() {
-            let (uid, _) = menu_items[selected_idx];
-            // i64::MIN means "All users" (no filter)
-            if uid == i64::MIN {
-                return UserMenuResult {
-                    user_id: Some(None),
-                };
-            } else {
-                return UserMenuResult {
-                    user_id: Some(Some(uid as u32)),
-                };
-            }
+    if let super::side_panel_menu::SidePanelResult::Selected(selected_idx) = result
+        && selected_idx < menu_items.len()
+    {
+        let (uid, _) = menu_items[selected_idx];
+        // i64::MIN means "All users" (no filter)
+        if uid == i64::MIN {
+            return UserMenuResult {
+                user_id: Some(None),
+            };
+        } else {
+            return UserMenuResult {
+                user_id: Some(Some(uid as u32)),
+            };
         }
     }
 

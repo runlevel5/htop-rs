@@ -7,7 +7,7 @@
 
 use chrono::Local;
 
-use super::{draw_led, Meter, MeterMode};
+use super::{Meter, MeterMode, draw_led};
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
 use crate::ui::Crt;

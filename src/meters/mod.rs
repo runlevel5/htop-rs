@@ -2041,19 +2041,19 @@ mod tests {
         // Each value 0-4 represents number of dots lit in that column
 
         // left=0, right=1 -> index 1
-        assert_eq!(GRAPH_DOTS_UTF8[0 * 5 + 1], "⢀");
+        assert_eq!(GRAPH_DOTS_UTF8[1], "⢀");
 
         // left=1, right=0 -> index 5
-        assert_eq!(GRAPH_DOTS_UTF8[1 * 5 + 0], "⡀");
+        assert_eq!(GRAPH_DOTS_UTF8[5], "⡀");
 
         // left=2, right=2 -> index 12
         assert_eq!(GRAPH_DOTS_UTF8[2 * 5 + 2], "⣤");
 
         // left=4, right=0 -> index 20
-        assert_eq!(GRAPH_DOTS_UTF8[4 * 5 + 0], "⡇");
+        assert_eq!(GRAPH_DOTS_UTF8[4 * 5], "⡇");
 
         // left=0, right=4 -> index 4
-        assert_eq!(GRAPH_DOTS_UTF8[0 * 5 + 4], "⢸");
+        assert_eq!(GRAPH_DOTS_UTF8[4], "⢸");
     }
 
     #[test]
@@ -2093,7 +2093,7 @@ mod tests {
     fn test_graph_dots_utf8_symmetry() {
         // Test some symmetric patterns
         // left=1, right=1 should show dots in both columns
-        assert_eq!(GRAPH_DOTS_UTF8[1 * 5 + 1], "⣀");
+        assert_eq!(GRAPH_DOTS_UTF8[5 + 1], "⣀");
 
         // left=3, right=3 should show 3 dots in each column
         assert_eq!(GRAPH_DOTS_UTF8[3 * 5 + 3], "⣶");

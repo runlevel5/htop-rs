@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 
 use super::{
-    draw_cpu_stacked_graph, draw_graph, CpuStackedGraphData, GraphData, Meter, MeterMode,
-    CPU_STACKED_GRAPH_SEGMENTS, DEFAULT_GRAPH_HEIGHT,
+    CPU_STACKED_GRAPH_SEGMENTS, CpuStackedGraphData, DEFAULT_GRAPH_HEIGHT, GraphData, Meter,
+    MeterMode, draw_cpu_stacked_graph, draw_graph,
 };
 use crate::core::{Machine, Settings};
 use crate::ui::ColorElement;
@@ -1456,10 +1456,10 @@ mod tests {
 
         // Non-detailed should combine values
         assert!(text.contains(": 50.0%")); // user
-                                           // sys = system + irq + softirq = 10 + 1 + 0.5 = 11.5
+        // sys = system + irq + softirq = 10 + 1 + 0.5 = 11.5
         assert!(text.contains("sys: 11.5%"));
         assert!(text.contains("low:  5.0%")); // nice
-                                              // vir = steal + guest = 0.2 + 0.1 = 0.3
+        // vir = steal + guest = 0.2 + 0.1 = 0.3
         assert!(text.contains("vir:  0.3%"));
     }
 

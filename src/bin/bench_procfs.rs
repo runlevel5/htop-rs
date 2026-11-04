@@ -269,11 +269,11 @@ fn main() {
     let mut parsed_count = 0;
     let mut total_comm_len = 0;
     for pid in &pids {
-        if let Ok(proc) = procfs::process::Process::new(*pid) {
-            if let Ok(stat) = proc.stat() {
-                total_comm_len += stat.comm.len();
-                parsed_count += 1;
-            }
+        if let Ok(proc) = procfs::process::Process::new(*pid)
+            && let Ok(stat) = proc.stat()
+        {
+            total_comm_len += stat.comm.len();
+            parsed_count += 1;
         }
     }
     let parsed_time = start.elapsed();
@@ -294,12 +294,12 @@ fn main() {
     let mut total_cmdline_bytes = 0;
     let mut total_cmdline_parts = 0;
     for pid in &pids {
-        if let Ok(proc) = procfs::process::Process::new(*pid) {
-            if let Ok(cmdline) = proc.cmdline() {
-                total_cmdline_parts += cmdline.len();
-                total_cmdline_bytes += cmdline.iter().map(|s| s.len()).sum::<usize>();
-                cmdline_count += 1;
-            }
+        if let Ok(proc) = procfs::process::Process::new(*pid)
+            && let Ok(cmdline) = proc.cmdline()
+        {
+            total_cmdline_parts += cmdline.len();
+            total_cmdline_bytes += cmdline.iter().map(|s| s.len()).sum::<usize>();
+            cmdline_count += 1;
         }
     }
     let cmdline_time = start.elapsed();

@@ -5,8 +5,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use super::Crt;
 use super::crt::{
-    ColorElement, A_NORMAL, CURSOR_INVISIBLE, CURSOR_VISIBLE, KEY_0, KEY_9, KEY_C, KEY_DOT,
+    A_NORMAL, CURSOR_INVISIBLE, CURSOR_VISIBLE, ColorElement, KEY_0, KEY_9, KEY_C, KEY_DOT,
     KEY_DOWN, KEY_ESC, KEY_F, KEY_F1, KEY_F2, KEY_F3, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9,
     KEY_GT, KEY_H, KEY_HASH, KEY_HEADER_CLICK, KEY_I, KEY_K, KEY_LBRACKET, KEY_LC_C, KEY_LC_E,
     KEY_LC_H, KEY_LC_K, KEY_LC_L, KEY_LC_M, KEY_LC_P, KEY_LC_S, KEY_LC_T, KEY_LC_U, KEY_LC_W,
@@ -18,7 +19,6 @@ use super::function_bar::FunctionBar;
 use super::header::Header;
 use super::main_panel::MainPanel;
 use super::panel::HandlerResult;
-use super::Crt;
 #[cfg(target_os = "linux")]
 use crate::core::ScanFlags;
 use crate::core::{CommandStrParams, Machine, ProcessField, Settings};
@@ -41,7 +41,7 @@ fn can_decrease_nice() -> bool {
     // On Linux, check RLIMIT_NICE
     #[cfg(target_os = "linux")]
     {
-        use nix::sys::resource::{getrlimit, Resource};
+        use nix::sys::resource::{Resource, getrlimit};
 
         if let Ok((soft_limit, _hard_limit)) = getrlimit(Resource::RLIMIT_NICE) {
             // nice_ceiling = 20 - rlim_cur
@@ -826,68 +826,68 @@ impl ScreenManager {
             }
 
             // Handle mouse events
-            if let Some(k) = key {
-                if k == KEY_MOUSE {
-                    // Process mouse event and convert to key code
-                    // Pass the panel's header y position for header click detection
-                    let panel_y = if self.main_panel.show_header {
-                        Some(self.main_panel.panel_y())
-                    } else {
-                        None
-                    };
-                    // Calculate tab boundaries for screen tab click detection
-                    let tab_info = if self.settings.screen_tabs {
-                        let (tab_y, boundaries) = self.calculate_tab_boundaries(crt);
-                        Some((tab_y, boundaries))
-                    } else {
-                        None
-                    };
-                    // Function bar click handler - only if function bar is visible and search is not active
-                    let show_function_bar = match self.settings.hide_function_bar {
-                        0 => true,
-                        1 => !self.function_bar_hidden,
-                        _ => false,
-                    };
-                    // When search/filter bar is active, use inc bar click handler
-                    // Otherwise use function bar click handler
-                    let inc_search_active = self.main_panel.inc_search.active;
-                    let is_filter = self.main_panel.inc_search.is_filter();
-                    let is_search = self.main_panel.inc_search.is_search();
-                    let func_bar_click: Option<&dyn Fn(i32) -> Option<i32>> = if inc_search_active {
-                        // Search/filter bar click handler
-                        Some(&|x: i32| {
-                            if is_filter {
-                                // Filter mode: "Enter" "Done  " "Esc" "Clear " ...
-                                if x < 11 {
-                                    return Some(KEY_RETURN); // Enter
-                                } else if x < 20 {
-                                    return Some(KEY_ESC); // Esc
-                                }
-                            } else if is_search {
-                                // Search mode: "F3" "Next  " "S-F3" "Prev   " "Esc" "Cancel " ...
-                                if x < 8 {
-                                    return Some(KEY_F3); // F3 - Next
-                                } else if x < 19 {
-                                    return Some(KEY_SF3); // Shift-F3 - Prev
-                                } else if x < 29 {
-                                    return Some(KEY_ESC); // Esc - Cancel
-                                }
+            if let Some(k) = key
+                && k == KEY_MOUSE
+            {
+                // Process mouse event and convert to key code
+                // Pass the panel's header y position for header click detection
+                let panel_y = if self.main_panel.show_header {
+                    Some(self.main_panel.panel_y())
+                } else {
+                    None
+                };
+                // Calculate tab boundaries for screen tab click detection
+                let tab_info = if self.settings.screen_tabs {
+                    let (tab_y, boundaries) = self.calculate_tab_boundaries(crt);
+                    Some((tab_y, boundaries))
+                } else {
+                    None
+                };
+                // Function bar click handler - only if function bar is visible and search is not active
+                let show_function_bar = match self.settings.hide_function_bar {
+                    0 => true,
+                    1 => !self.function_bar_hidden,
+                    _ => false,
+                };
+                // When search/filter bar is active, use inc bar click handler
+                // Otherwise use function bar click handler
+                let inc_search_active = self.main_panel.inc_search.active;
+                let is_filter = self.main_panel.inc_search.is_filter();
+                let is_search = self.main_panel.inc_search.is_search();
+                let func_bar_click: Option<&dyn Fn(i32) -> Option<i32>> = if inc_search_active {
+                    // Search/filter bar click handler
+                    Some(&|x: i32| {
+                        if is_filter {
+                            // Filter mode: "Enter" "Done  " "Esc" "Clear " ...
+                            if x < 11 {
+                                return Some(KEY_RETURN); // Enter
+                            } else if x < 20 {
+                                return Some(KEY_ESC); // Esc
                             }
-                            None
-                        })
-                    } else if show_function_bar {
-                        let func_bar = &self.main_panel.function_bar;
-                        Some(&|x: i32| func_bar.get_click_key(x))
-                    } else {
+                        } else if is_search {
+                            // Search mode: "F3" "Next  " "S-F3" "Prev   " "Esc" "Cancel " ...
+                            if x < 8 {
+                                return Some(KEY_F3); // F3 - Next
+                            } else if x < 19 {
+                                return Some(KEY_SF3); // Shift-F3 - Prev
+                            } else if x < 29 {
+                                return Some(KEY_ESC); // Esc - Cancel
+                            }
+                        }
                         None
-                    };
-                    key = crt.process_mouse_event(
-                        crt.height(),
-                        panel_y,
-                        tab_info.as_ref().map(|(y, b)| (*y, b.as_slice())),
-                        func_bar_click,
-                    );
-                }
+                    })
+                } else if show_function_bar {
+                    let func_bar = &self.main_panel.function_bar;
+                    Some(&|x: i32| func_bar.get_click_key(x))
+                } else {
+                    None
+                };
+                key = crt.process_mouse_event(
+                    crt.height(),
+                    panel_y,
+                    tab_info.as_ref().map(|(y, b)| (*y, b.as_slice())),
+                    func_bar_click,
+                );
             }
 
             if let Some(key) = key {
@@ -1035,10 +1035,10 @@ impl ScreenManager {
             }
             KEY_HEADER_CLICK => {
                 // Handle click on header row - change sort field or invert order
-                if let Some(event) = crt.last_mouse_event() {
-                    if let Some(field) = self.main_panel.field_at_x(event.x) {
-                        self.apply_sort_field(machine, field);
-                    }
+                if let Some(event) = crt.last_mouse_event()
+                    && let Some(field) = self.main_panel.field_at_x(event.x)
+                {
+                    self.apply_sort_field(machine, field);
                 }
                 return HandlerResult::Handled;
             }
@@ -1059,23 +1059,23 @@ impl ScreenManager {
             }
             KEY_PLUS => {
                 // '+' - expand tree node
-                if self.settings.tree_view {
-                    if let Some(pid) = self.main_panel.get_selected_pid(machine) {
-                        machine.processes.expand_tree(pid);
-                        let (sort_key, ascending) = self.get_tree_sort_settings();
-                        machine.processes.build_tree(sort_key, ascending);
-                    }
+                if self.settings.tree_view
+                    && let Some(pid) = self.main_panel.get_selected_pid(machine)
+                {
+                    machine.processes.expand_tree(pid);
+                    let (sort_key, ascending) = self.get_tree_sort_settings();
+                    machine.processes.build_tree(sort_key, ascending);
                 }
                 return HandlerResult::Handled;
             }
             KEY_MINUS => {
                 // '-' - collapse tree node
-                if self.settings.tree_view {
-                    if let Some(pid) = self.main_panel.get_selected_pid(machine) {
-                        machine.processes.collapse_tree(pid);
-                        let (sort_key, ascending) = self.get_tree_sort_settings();
-                        machine.processes.build_tree(sort_key, ascending);
-                    }
+                if self.settings.tree_view
+                    && let Some(pid) = self.main_panel.get_selected_pid(machine)
+                {
+                    machine.processes.collapse_tree(pid);
+                    let (sort_key, ascending) = self.get_tree_sort_settings();
+                    machine.processes.build_tree(sort_key, ascending);
                 }
                 return HandlerResult::Handled;
             }
@@ -1115,11 +1115,11 @@ impl ScreenManager {
                 self.main_panel.invalidate_display_list();
 
                 // Try to keep the same process selected, fall back to first row if not visible
-                if let Some(pid) = selected_pid {
-                    if !self.main_panel.try_select_pid(pid, machine, &self.settings) {
-                        self.main_panel.selected = 0;
-                        self.main_panel.scroll_v = 0;
-                    }
+                if let Some(pid) = selected_pid
+                    && !self.main_panel.try_select_pid(pid, machine, &self.settings)
+                {
+                    self.main_panel.selected = 0;
+                    self.main_panel.scroll_v = 0;
                 }
 
                 // Force full redraw since visible process list changed
@@ -1162,11 +1162,11 @@ impl ScreenManager {
                 self.main_panel.invalidate_display_list();
 
                 // Try to keep the same process selected, fall back to first row if not visible
-                if let Some(pid) = selected_pid {
-                    if !self.main_panel.try_select_pid(pid, machine, &self.settings) {
-                        self.main_panel.selected = 0;
-                        self.main_panel.scroll_v = 0;
-                    }
+                if let Some(pid) = selected_pid
+                    && !self.main_panel.try_select_pid(pid, machine, &self.settings)
+                {
+                    self.main_panel.selected = 0;
+                    self.main_panel.scroll_v = 0;
                 }
 
                 // Force full redraw since visible process list changed
@@ -1250,10 +1250,10 @@ impl ScreenManager {
             }
             KEY_LC_L => {
                 // 'l' - list open files with lsof
-                if !self.settings.readonly {
-                    if let Some((pid, command)) = self.get_selected_pid_command(machine) {
-                        super::process_info_screens::show_lsof(crt, pid, &command);
-                    }
+                if !self.settings.readonly
+                    && let Some((pid, command)) = self.get_selected_pid_command(machine)
+                {
+                    super::process_info_screens::show_lsof(crt, pid, &command);
                 }
                 return HandlerResult::Redraw;
             }
@@ -1291,10 +1291,10 @@ impl ScreenManager {
             }
             KEY_LC_S => {
                 // 's' - trace syscalls with strace
-                if !self.settings.readonly {
-                    if let Some((pid, command)) = self.get_selected_pid_command(machine) {
-                        super::process_info_screens::show_strace(crt, pid, &command);
-                    }
+                if !self.settings.readonly
+                    && let Some((pid, command)) = self.get_selected_pid_command(machine)
+                {
+                    super::process_info_screens::show_strace(crt, pid, &command);
                 }
                 return HandlerResult::Redraw;
             }
@@ -1533,11 +1533,7 @@ impl ScreenManager {
             let result =
                 unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, new_nice) };
 
-            if result == 0 {
-                Some(new_nice)
-            } else {
-                None
-            }
+            if result == 0 { Some(new_nice) } else { None }
         }
 
         #[cfg(not(unix))]

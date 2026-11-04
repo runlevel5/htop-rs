@@ -106,7 +106,7 @@ impl Default for ProcVnodePathInfo {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     fn proc_pidinfo(
         pid: c_int,
         flavor: c_int,
@@ -141,10 +141,10 @@ fn get_process_cwd(pid: i32) -> Option<String> {
 
     // Convert to string
     let path_bytes = &vpi.pvi_cdir.vip_path;
-    if let Some(pos) = path_bytes.iter().position(|&c| c == 0) {
-        if let Ok(path) = std::str::from_utf8(&path_bytes[..pos]) {
-            return Some(path.to_string());
-        }
+    if let Some(pos) = path_bytes.iter().position(|&c| c == 0)
+        && let Ok(path) = std::str::from_utf8(&path_bytes[..pos])
+    {
+        return Some(path.to_string());
     }
 
     None

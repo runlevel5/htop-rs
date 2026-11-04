@@ -5,11 +5,11 @@
 
 #![allow(dead_code)]
 
-use super::crt::{attr_t, ColorElement, A_BOLD, A_NORMAL, KEY_WHEELDOWN, KEY_WHEELUP};
+use super::Crt;
+use super::crt::{A_BOLD, A_NORMAL, ColorElement, KEY_WHEELDOWN, KEY_WHEELUP, attr_t};
 use super::crt::{KEY_DOWN, KEY_END, KEY_HOME, KEY_NPAGE, KEY_PPAGE, KEY_UP};
 use super::function_bar::FunctionBar;
 use super::rich_string::RichString;
-use super::Crt;
 
 /// Handler result from event processing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -398,21 +398,21 @@ impl Panel {
 
         // Search from current selection
         for i in (self.selected as usize + 1)..self.items.len() {
-            if let Some(first_char) = self.items[i].sort_key().chars().next() {
-                if first_char.to_lowercase().next() == Some(search_char) {
-                    self.set_selected(i as i32);
-                    return HandlerResult::Handled;
-                }
+            if let Some(first_char) = self.items[i].sort_key().chars().next()
+                && first_char.to_lowercase().next() == Some(search_char)
+            {
+                self.set_selected(i as i32);
+                return HandlerResult::Handled;
             }
         }
 
         // Wrap around to beginning
         for i in 0..self.selected as usize {
-            if let Some(first_char) = self.items[i].sort_key().chars().next() {
-                if first_char.to_lowercase().next() == Some(search_char) {
-                    self.set_selected(i as i32);
-                    return HandlerResult::Handled;
-                }
+            if let Some(first_char) = self.items[i].sort_key().chars().next()
+                && first_char.to_lowercase().next() == Some(search_char)
+            {
+                self.set_selected(i as i32);
+                return HandlerResult::Handled;
             }
         }
 
