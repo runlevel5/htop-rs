@@ -17,6 +17,7 @@ mod header;
 mod info_screen;
 mod main_panel;
 mod menus;
+mod palette;
 mod panel;
 mod process_info_screens;
 mod rich_string;

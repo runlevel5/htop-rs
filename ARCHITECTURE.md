@@ -1106,8 +1106,25 @@ if let Some(text) = crt.theme_help_text() {
 
 **Benefits:**
 - Components don't need to know which theme is active
-- Adding new themes only requires updating `Theme::from_color_scheme()`
+- Adding new themes only requires a `Palette` (colours) and, if the theme
+  needs different bar characters or help text, a `Theme` entry
 - Single source of truth for theme-specific rendering
+
+### Colour Palettes
+
+Colours are defined in `ui/palette.rs`. Each scheme is one `Palette`: a small
+set of semantic roles (label, value, shadow, status colours, bar segment
+series, panel chrome, process-row semantics). `palette::derive` maps every
+`ColorElement` to a role, so the same kind of information always has the same
+look within a scheme: all de-emphasised text is `shadow`, all primary values
+are `value`, every error indication is `error`. The derivation asserts that no
+element is left unset, and unit tests check the role invariants for every
+scheme.
+
+Bars follow one rule in every meter: segment colours apply to the fill
+characters only. Text written over a bar uses `BarText` where the fill reaches
+it and `BarShadow` beyond the fill, so a value reads the same whichever segment
+happens to sit underneath it, on every platform.
 
 ---
 
