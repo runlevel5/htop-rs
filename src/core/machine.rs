@@ -448,6 +448,8 @@ impl Machine {
     /// nodes, which rows were shown) is carried over by PID.
     pub fn apply_table_snapshot(&mut self, snapshot: crate::core::TableSnapshot) {
         let previous = std::mem::replace(&mut self.processes, snapshot.processes);
+        // Keep the order the user was looking at; a deferred sort will tidy up later
+        self.processes.reorder_like(&previous);
         for old in previous.iter() {
             if let Some(process) = self.processes.get_mut(old.pid) {
                 process.tagged = old.tagged;

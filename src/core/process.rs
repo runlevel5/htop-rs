@@ -2572,6 +2572,30 @@ impl ProcessList {
         (&mut self.processes[idx], is_new)
     }
 
+    /// Put the processes in the same order as `previous`, with processes that
+    /// are not in `previous` appended in their current order.
+    ///
+    /// This is the order an in-place scan would have produced: existing rows
+    /// stay where they are and new ones go to the end. The UI relies on it so
+    /// that a deferred sort does not let rows jump while the user is navigating.
+    pub fn reorder_like(&mut self, previous: &ProcessList) {
+        let mut slots: Vec<Option<Process>> = std::mem::take(&mut self.processes)
+            .into_iter()
+            .map(Some)
+            .collect();
+        let mut ordered = Vec::with_capacity(slots.len());
+        for old in previous.iter() {
+            if let Some(idx) = self.index_of(old.pid)
+                && let Some(process) = slots[idx].take()
+            {
+                ordered.push(process);
+            }
+        }
+        ordered.extend(slots.into_iter().flatten());
+        self.processes = ordered;
+        self.reindex();
+    }
+
     /// Get a process by PID
     pub fn get(&self, pid: i32) -> Option<&Process> {
         let process = self.processes.get(self.index_of(pid)?)?;
@@ -3123,6 +3147,24 @@ mod tests {
         assert!(!pl.contains(2));
         assert_eq!(pl.index_of(3), Some(1));
         assert_eq!(pl.get(3).map(|p| p.pid), Some(3));
+    }
+
+    #[test]
+    fn test_reorder_like_keeps_previous_order_and_appends_new() {
+        let previous = list_with_pids(&[1, 20, 7, 3]);
+        // The fresh scan arrived in a different order, lost 20 and gained 9 and 5
+        let mut fresh = list_with_pids(&[9, 3, 1, 5, 7]);
+        fresh.reorder_like(&previous);
+
+        let pids: Vec<i32> = fresh.iter().map(|p| p.pid).collect();
+        assert_eq!(pids, vec![1, 7, 3, 9, 5]);
+        for (idx, &pid) in pids.iter().enumerate() {
+            assert_eq!(
+                fresh.index_of(pid),
+                Some(idx),
+                "index must follow the new order"
+            );
+        }
     }
 
     #[test]
