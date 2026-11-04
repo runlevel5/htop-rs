@@ -1630,6 +1630,14 @@ impl Process {
         self.get_command()
     }
 
+    /// Set the owner's username from the cache, keeping the existing string when unchanged
+    pub fn update_user(&mut self, users_table: &mut crate::core::UsersTable) {
+        let name = users_table.get_username(self.uid);
+        if self.user.as_deref() != Some(name) {
+            self.user = Some(name.to_string());
+        }
+    }
+
     /// Update the cmdline and compute basename indices
     /// This matches C htop's Process_updateCmdline behavior
     /// - cmdline: the full command line string
@@ -2458,9 +2466,9 @@ impl Default for Process {
 #[derive(Debug, Default)]
 pub struct ProcessList {
     pub processes: Vec<Process>,
-    /// Tracks which PIDs exist (used for O(1) existence check in add())
-    /// Note: Does NOT store indices - use linear search for position lookup
-    pub by_pid: std::collections::HashSet<i32>,
+    /// Maps each PID to its index in `processes`.
+    /// Rebuilt by `reindex` whenever the vector is reordered or compacted.
+    by_pid: std::collections::HashMap<i32, usize>,
     pub tree_display_order: Vec<i32>, // PIDs in tree display order
 }
 
@@ -2468,41 +2476,83 @@ impl ProcessList {
     pub fn new() -> Self {
         ProcessList {
             processes: Vec::new(),
-            by_pid: std::collections::HashSet::new(),
+            by_pid: std::collections::HashMap::new(),
             tree_display_order: Vec::new(),
         }
+    }
+
+    /// Rebuild the PID index after `processes` has been reordered or compacted
+    fn reindex(&mut self) {
+        self.by_pid.clear();
+        self.by_pid.reserve(self.processes.len());
+        for (idx, process) in self.processes.iter().enumerate() {
+            self.by_pid.insert(process.pid, idx);
+        }
+    }
+
+    /// Whether a process with this PID is in the list
+    pub fn contains(&self, pid: i32) -> bool {
+        self.by_pid.contains_key(&pid)
+    }
+
+    /// Index of the process with this PID in `processes`
+    pub fn index_of(&self, pid: i32) -> Option<usize> {
+        self.by_pid.get(&pid).copied()
     }
 
     /// Add or update a process
     /// monotonic_ms is used to set the seen_stamp_ms for new processes (for highlight_changes)
     pub fn add(&mut self, mut process: Process, monotonic_ms: u64) {
         let pid = process.pid;
-        if self.by_pid.contains(&pid) {
-            // Process exists - find and update via linear search
-            // (HashMap only tracks existence, not position, since indices change after sort)
-            if let Some(p) = self.processes.iter_mut().find(|p| p.pid == pid) {
+        match self.index_of(pid) {
+            Some(idx) => {
+                let existing = &mut self.processes[idx];
                 // Preserve highlight tracking fields from existing process
-                process.was_shown = p.was_shown;
-                process.seen_stamp_ms = p.seen_stamp_ms;
-                process.tomb_stamp_ms = p.tomb_stamp_ms;
-                *p = process;
+                process.was_shown = existing.was_shown;
+                process.seen_stamp_ms = existing.seen_stamp_ms;
+                process.tomb_stamp_ms = existing.tomb_stamp_ms;
+                *existing = process;
             }
-        } else {
-            // New process - set seen_stamp_ms for highlight_changes feature
-            process.seen_stamp_ms = monotonic_ms;
-            self.processes.push(process);
-            self.by_pid.insert(pid); // Just track that this PID exists
+            None => {
+                // New process - set seen_stamp_ms for highlight_changes feature
+                process.seen_stamp_ms = monotonic_ms;
+                self.by_pid.insert(pid, self.processes.len());
+                self.processes.push(process);
+            }
         }
     }
 
-    /// Get a process by PID (linear search - called rarely for user interactions)
-    pub fn get(&self, pid: i32) -> Option<&Process> {
-        self.processes.iter().find(|p| p.pid == pid)
+    /// Get the process with this PID, inserting a fresh one if it is not in the list yet.
+    /// Returns the process and whether it was newly inserted, so scanners can update
+    /// processes in place instead of cloning and re-adding them.
+    pub fn get_or_insert(&mut self, pid: i32, monotonic_ms: u64) -> (&mut Process, bool) {
+        let (idx, is_new) = match self.index_of(pid) {
+            Some(idx) => (idx, false),
+            None => {
+                let mut process = Process::new(pid);
+                process.seen_stamp_ms = monotonic_ms;
+                let idx = self.processes.len();
+                self.by_pid.insert(pid, idx);
+                self.processes.push(process);
+                (idx, true)
+            }
+        };
+        (&mut self.processes[idx], is_new)
     }
 
-    /// Get a mutable reference to a process by PID (linear search)
+    /// Get a process by PID
+    pub fn get(&self, pid: i32) -> Option<&Process> {
+        let process = self.processes.get(self.index_of(pid)?)?;
+        debug_assert_eq!(process.pid, pid, "PID index out of date");
+        Some(process)
+    }
+
+    /// Get a mutable reference to a process by PID
     pub fn get_mut(&mut self, pid: i32) -> Option<&mut Process> {
-        self.processes.iter_mut().find(|p| p.pid == pid)
+        let idx = self.index_of(pid)?;
+        let process = self.processes.get_mut(idx)?;
+        debug_assert_eq!(process.pid, pid, "PID index out of date");
+        Some(process)
     }
 
     /// Remove processes that weren't updated in the last scan
@@ -2542,11 +2592,8 @@ impl ProcessList {
             }
         });
 
-        // Rebuild the existence set
-        self.by_pid.clear();
-        for process in self.processes.iter() {
-            self.by_pid.insert(process.pid);
-        }
+        // Indices shifted after removal
+        self.reindex();
         // Build command strings and mark as not updated for next scan
         for process in &mut self.processes {
             if let Some(params) = cmd_params {
@@ -2583,7 +2630,7 @@ impl ProcessList {
                 }
             }
         }
-        // No need to rebuild by_pid - it only tracks existence, not position
+        self.reindex();
     }
 
     /// Get the number of processes
@@ -2648,8 +2695,7 @@ impl ProcessList {
                 other => other,
             }
         });
-
-        // No need to rebuild by_pid - it only tracks existence, not position
+        self.reindex();
 
         // Build display list in tree order
         let mut display_list: Vec<i32> = Vec::new();
@@ -2928,6 +2974,74 @@ impl ProcessList {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ==================== ProcessList index tests ====================
+
+    fn list_with_pids(pids: &[i32]) -> ProcessList {
+        let mut pl = ProcessList::new();
+        for &pid in pids {
+            pl.add(Process::new(pid), 100);
+        }
+        pl
+    }
+
+    #[test]
+    fn test_process_list_get_or_insert_reports_new_once() {
+        let mut pl = ProcessList::new();
+        let (p, is_new) = pl.get_or_insert(42, 500);
+        assert!(is_new);
+        assert_eq!(p.pid, 42);
+        assert_eq!(p.seen_stamp_ms, 500);
+        p.time = 7;
+
+        let (p, is_new) = pl.get_or_insert(42, 900);
+        assert!(!is_new);
+        assert_eq!(p.time, 7, "existing process must be returned in place");
+        assert_eq!(p.seen_stamp_ms, 500, "seen stamp must not be reset");
+        assert_eq!(pl.len(), 1);
+    }
+
+    #[test]
+    fn test_process_list_index_survives_sort() {
+        let mut pl = list_with_pids(&[30, 10, 20]);
+        pl.sort_by(ProcessField::Pid, true);
+
+        let pids: Vec<i32> = pl.iter().map(|p| p.pid).collect();
+        assert_eq!(pids, vec![10, 20, 30]);
+        for (idx, &pid) in pids.iter().enumerate() {
+            assert_eq!(pl.index_of(pid), Some(idx));
+            assert_eq!(pl.get(pid).map(|p| p.pid), Some(pid));
+        }
+        assert!(pl.get_mut(20).is_some());
+        assert!(!pl.contains(99));
+    }
+
+    #[test]
+    fn test_process_list_index_survives_cleanup() {
+        let mut pl = list_with_pids(&[1, 2, 3]);
+        // Only PIDs 1 and 3 were seen in the "scan"
+        pl.get_mut(1).unwrap().updated = true;
+        pl.get_mut(3).unwrap().updated = true;
+        pl.cleanup(None, "|", false, 0, 1000);
+
+        assert_eq!(pl.len(), 2);
+        assert!(!pl.contains(2));
+        assert_eq!(pl.index_of(3), Some(1));
+        assert_eq!(pl.get(3).map(|p| p.pid), Some(3));
+    }
+
+    #[test]
+    fn test_process_list_index_survives_build_tree() {
+        let mut pl = list_with_pids(&[300, 200, 100]);
+        pl.get_mut(200).unwrap().ppid = 100;
+        pl.get_mut(300).unwrap().ppid = 200;
+        pl.build_tree(ProcessField::Pid, true);
+
+        for p in pl.iter() {
+            assert_eq!(pl.get(p.pid).map(|q| q.pid), Some(p.pid));
+        }
+        assert_eq!(pl.tree_display_order, vec![100, 200, 300]);
+    }
 
     // ==================== ProcessField Tests ====================
 

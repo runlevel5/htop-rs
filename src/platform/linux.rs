@@ -445,11 +445,11 @@ pub fn scan_processes(machine: &mut Machine) {
     // This allows widths to shrink back when there are no longer processes with wide values
     machine.field_widths.reset_auto_widths();
 
-    // Reset task counts at start of scan (like Darwin does)
+    // Task counts accumulated during the scan
     // Note: running_tasks is set from /proc/stat procs_running in scan_cpu()
-    machine.total_tasks = 0;
-    machine.userland_threads = 0;
-    machine.kernel_threads = 0;
+    let mut total_tasks: u32 = 0;
+    let mut userland_threads: u32 = 0;
+    let mut kernel_threads: u32 = 0;
 
     let all_procs = match procfs::process::all_processes() {
         Ok(procs) => procs,
@@ -468,6 +468,20 @@ pub fn scan_processes(machine: &mut Machine) {
     let mut max_uid: u32 = 0;
     let mut max_percent_cpu: f32 = 0.0;
 
+    let monotonic_ms = machine.monotonic_ms;
+    let active_cpus = machine.active_cpus;
+    let update_process_names = machine.update_process_names;
+    let hide_userland_threads = machine.hide_userland_threads;
+    let threads_discovered = machine.threads_discovered;
+
+    // Borrow the process list and the username cache separately so each
+    // process can be updated in place while its owner is resolved.
+    let Machine {
+        processes,
+        users_table,
+        ..
+    } = &mut *machine;
+
     for proc_result in all_procs {
         let proc = match proc_result {
             Ok(p) => p,
@@ -481,23 +495,9 @@ pub fn scan_processes(machine: &mut Machine) {
 
         let pid = stat.pid;
 
-        // Check if process already exists
-        let is_new = machine.processes.get(pid).is_none();
-        let prev_time = if !is_new {
-            machine.processes.get(pid).map(|p| p.time).unwrap_or(0)
-        } else {
-            0
-        };
-
-        let mut process = if is_new {
-            Process::new(pid)
-        } else {
-            machine
-                .processes
-                .get(pid)
-                .cloned()
-                .unwrap_or_else(|| Process::new(pid))
-        };
+        // Update the existing entry in place, or start a fresh one
+        let (process, is_new) = processes.get_or_insert(pid, monotonic_ms);
+        let prev_time = process.time;
 
         // Basic info from stat
         process.pid = pid;
@@ -537,7 +537,7 @@ pub fn scan_processes(machine: &mut Machine) {
             let time_diff = (process.time - prev_time) as f64;
             // time_diff is in centiseconds, time_delta is in seconds
             process.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
-            process.percent_cpu = process.percent_cpu.min(100.0 * machine.active_cpus as f32);
+            process.percent_cpu = process.percent_cpu.min(100.0 * active_cpus as f32);
         }
 
         // Start time
@@ -559,7 +559,7 @@ pub fn scan_processes(machine: &mut Machine) {
         // (matches C htop Settings.updateProcessNames behavior)
         // Don't re-read for zombie processes since their cmdline is empty
         let should_update_names =
-            is_new || (machine.update_process_names && process.state != ProcessState::Zombie);
+            is_new || (update_process_names && process.state != ProcessState::Zombie);
 
         if should_update_names {
             // Get command name from stat (move instead of clone - saves ~16 bytes allocation per process)
@@ -604,7 +604,7 @@ pub fn scan_processes(machine: &mut Machine) {
         // proc.uid() uses fstat() on the already-open directory FD
         if let Ok(uid) = proc.uid() {
             process.uid = uid;
-            process.user = Some(machine.get_username(process.uid));
+            process.update_user(users_table);
         }
 
         // NOTE: Memory details from statm (STATM flag) are now handled by background scanner
@@ -683,9 +683,9 @@ pub fn scan_processes(machine: &mut Machine) {
 
         // Count task statistics (matching C htop behavior)
         // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
-        machine.total_tasks += 1;
+        total_tasks += 1;
         if process.is_kernel_thread {
-            machine.kernel_threads += 1;
+            kernel_threads += 1;
         }
 
         // Store main process info for thread inheritance
@@ -704,8 +704,6 @@ pub fn scan_processes(machine: &mut Machine) {
         let main_cgroup_short = process.cgroup_short.clone();
         let main_container_short = process.container_short.clone();
 
-        machine.processes.add(process, machine.monotonic_ms);
-
         // Scan threads (tasks) for this process
         // Skip if:
         // - This is a kernel thread (kernel threads don't have userland tasks)
@@ -715,8 +713,8 @@ pub fn scan_processes(machine: &mut Machine) {
         // We always scan threads at least once (threads_discovered=false) to populate
         // the list, even if hide_userland_threads is true. This ensures threads exist
         // in the list when the user toggles to show them.
-        let should_scan_threads = (!machine.hide_userland_threads || !machine.threads_discovered)
-            && !is_kernel_thread_pid(pid);
+        let should_scan_threads =
+            (!hide_userland_threads || !threads_discovered) && !is_kernel_thread_pid(pid);
         if should_scan_threads && let Ok(tasks) = proc.tasks() {
             for task_result in tasks {
                 let task = match task_result {
@@ -736,23 +734,9 @@ pub fn scan_processes(machine: &mut Machine) {
                     Err(_) => continue,
                 };
 
-                // Check if thread already exists
-                let thread_is_new = machine.processes.get(tid).is_none();
-                let thread_prev_time = if !thread_is_new {
-                    machine.processes.get(tid).map(|p| p.time).unwrap_or(0)
-                } else {
-                    0
-                };
-
-                let mut thread = if thread_is_new {
-                    Process::new(tid)
-                } else {
-                    machine
-                        .processes
-                        .get(tid)
-                        .cloned()
-                        .unwrap_or_else(|| Process::new(tid))
-                };
+                // Update the existing thread entry in place, or start a fresh one
+                let (thread, thread_is_new) = processes.get_or_insert(tid, monotonic_ms);
+                let thread_prev_time = thread.time;
 
                 // Basic info from task stat
                 thread.pid = tid;
@@ -761,7 +745,7 @@ pub fn scan_processes(machine: &mut Machine) {
                 thread.pgrp = task_stat.pgrp;
                 thread.session = task_stat.session;
                 thread.tty_nr = main_tty_nr;
-                thread.tty_name = main_tty_name.clone();
+                inherit(&mut thread.tty_name, &main_tty_name);
                 thread.tpgid = task_stat.tpgid;
                 thread.priority = task_stat.priority;
                 thread.nice = task_stat.nice;
@@ -785,7 +769,7 @@ pub fn scan_processes(machine: &mut Machine) {
                 if !thread_is_new && time_delta > 0.0 && thread.time > thread_prev_time {
                     let time_diff = (thread.time - thread_prev_time) as f64;
                     thread.percent_cpu = ((time_diff / 100.0) / time_delta * 100.0) as f32;
-                    thread.percent_cpu = thread.percent_cpu.min(100.0 * machine.active_cpus as f32);
+                    thread.percent_cpu = thread.percent_cpu.min(100.0 * active_cpus as f32);
                 }
 
                 // Start time
@@ -804,18 +788,18 @@ pub fn scan_processes(machine: &mut Machine) {
 
                 // Inherit shared data from main process
                 thread.uid = main_uid;
-                thread.user = main_user.clone();
+                inherit(&mut thread.user, &main_user);
                 thread.comm = Some(thread_comm); // Thread has its own comm (moved, not cloned)
-                thread.cmdline = main_cmdline.clone();
+                inherit(&mut thread.cmdline, &main_cmdline);
                 thread.cmdline_basename_start = main_cmdline_basename_start;
                 thread.cmdline_basename_end = main_cmdline_basename_end;
-                thread.exe = main_exe.clone();
+                inherit(&mut thread.exe, &main_exe);
                 thread.exe_basename_offset = main_exe_basename_offset;
                 thread.exe_deleted = main_exe_deleted;
-                thread.cwd = main_cwd.clone();
-                thread.cgroup = main_cgroup.clone();
-                thread.cgroup_short = main_cgroup_short.clone();
-                thread.container_short = main_container_short.clone();
+                inherit(&mut thread.cwd, &main_cwd);
+                inherit(&mut thread.cgroup, &main_cgroup);
+                inherit(&mut thread.cgroup_short, &main_cgroup_short);
+                inherit(&mut thread.container_short, &main_container_short);
 
                 // Mark as userland thread
                 thread.is_userland_thread = true;
@@ -836,13 +820,15 @@ pub fn scan_processes(machine: &mut Machine) {
 
                 // Count userland thread statistics
                 // Note: running_tasks comes from /proc/stat procs_running (set in scan_cpu)
-                machine.total_tasks += 1;
-                machine.userland_threads += 1;
-
-                machine.processes.add(thread, machine.monotonic_ms);
+                total_tasks += 1;
+                userland_threads += 1;
             }
         }
     }
+
+    machine.total_tasks = total_tasks;
+    machine.userland_threads = userland_threads;
+    machine.kernel_threads = kernel_threads;
 
     // When hide_userland_threads is enabled, we skip scanning threads but they still
     // exist in the process list from previous scans. We need to mark them as updated
@@ -909,6 +895,14 @@ pub fn scan_processes(machine: &mut Machine) {
             machine.processes.len(),
             flags
         );
+    }
+}
+
+/// Copy an inherited string from the main process to a thread only when it changed,
+/// so unchanged threads keep their existing allocation
+fn inherit(dst: &mut Option<String>, src: &Option<String>) {
+    if dst != src {
+        dst.clone_from(src);
     }
 }
 
