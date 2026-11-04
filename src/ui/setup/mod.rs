@@ -1044,13 +1044,14 @@ impl SetupScreen {
         let mut meter_texts: Vec<(usize, String, bool)> = Vec::new();
         if let Some(meters) = meters {
             for (i, meter) in meters.iter().enumerate().take(display_height) {
-                let is_selected = has_focus && i == selection;
+                // Shown in every panel, in the unfocused colour when the panel has no focus
+                let is_selected = i == selection;
 
                 // Get display name with mode
                 let display = meter_display_name(&meter.name, meter.mode);
 
                 // Add moving indicator (↕) if this item is being moved
-                let display_text = if is_selected && meters_moving {
+                let display_text = if is_selected && has_focus && meters_moving {
                     // Use UTF-8 up-down arrow like C htop
                     let prefix = "↕ ";
                     let max_len = (w - 1) as usize;
@@ -1141,7 +1142,8 @@ impl SetupScreen {
             let item_index = meters_available_scroll as usize + i;
             if item_index < available_meters.len() {
                 let meter_info = available_meters[item_index];
-                let is_selected = has_focus && item_index == meters_available_selection;
+                // Shown in every panel, in the unfocused colour when the panel has no focus
+                let is_selected = item_index == meters_available_selection;
 
                 // Show description in available meters panel (like C htop)
                 let display_text: String = meter_info
@@ -1501,7 +1503,9 @@ impl SetupScreen {
             let item_index = available_columns_scroll as usize + i;
             if item_index < available_fields.len() {
                 let field = available_fields[item_index];
-                let is_selected = has_focus && item_index == available_columns_selection;
+                // Shown in every panel, in the unfocused colour when the panel has no focus,
+                // like the screens list and the active columns beside it
+                let is_selected = item_index == available_columns_selection;
 
                 // Show name with description
                 let display = format!("{} - {}", field.name(), field.description());
