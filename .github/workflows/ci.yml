@@ -43,6 +43,52 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
+  # GitHub has no hosted ppc64le runners: cross-compile on x86_64 and run the
+  # test binaries under QEMU user-mode emulation. The tests read the host's
+  # /proc through QEMU, which exercises the Linux code paths on a big-core,
+  # 64-bit POWER build (ioprio syscall numbers, struct layouts, etc.).
+  test-ppc64le:
+    name: Test - ppc64le (QEMU)
+    runs-on: ubuntu-latest
+    env:
+      TARGET: powerpc64le-unknown-linux-gnu
+      CARGO_TARGET_POWERPC64LE_UNKNOWN_LINUX_GNU_LINKER: powerpc64le-linux-gnu-gcc
+      CARGO_TARGET_POWERPC64LE_UNKNOWN_LINUX_GNU_RUNNER: qemu-ppc64le -L /usr/powerpc64le-linux-gnu
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: powerpc64le-unknown-linux-gnu
+          components: clippy
+
+      - name: Install cross-compilation tools and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-powerpc64le-linux-gnu libc6-dev-ppc64el-cross qemu-user
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-ppc64le-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-ppc64le-cargo-
+
+      - name: Run Clippy
+        run: cargo clippy --target $TARGET --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --target $TARGET --verbose
+
+      - name: Build release binary
+        run: cargo build --release --target $TARGET
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
