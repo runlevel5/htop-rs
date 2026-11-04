@@ -23,6 +23,16 @@ Non-goals:
 
 ## Installing
 
+### Fedora
+
+Use `tle/power` COPR:
+
+```sh
+sudo dnf copr enable tle/power
+sudo def --refresh update
+sudo dnf install htop-rs
+```
+
 ### Homebrew (macOS and Linux)
 
 The repository is its own Homebrew tap:
