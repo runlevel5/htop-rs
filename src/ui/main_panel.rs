@@ -1622,24 +1622,23 @@ impl MainPanel {
                 let old_y = start_y + (self.old_selected - self.scroll_v);
                 if let Some(&process_idx) =
                     self.cached_display_indices.get(self.old_selected as usize)
+                    && let Some(process) = machine.processes.processes.get(process_idx)
                 {
-                    if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(
-                            crt,
-                            old_y,
-                            process,
-                            false,
-                            focus,
-                            settings,
-                            current_uid,
-                            realtime_ms,
-                            monotonic_ms,
-                            initial_scan_done,
-                            active_cpus,
-                            &machine.field_widths,
-                        );
-                        self.shown_indices.push(process_idx);
-                    }
+                    self.draw_process(
+                        crt,
+                        old_y,
+                        process,
+                        false,
+                        focus,
+                        settings,
+                        current_uid,
+                        realtime_ms,
+                        monotonic_ms,
+                        initial_scan_done,
+                        active_cpus,
+                        &machine.field_widths,
+                    );
+                    self.shown_indices.push(process_idx);
                 }
             }
 
@@ -1647,24 +1646,23 @@ impl MainPanel {
             if new_in_range {
                 let new_y = start_y + (self.selected - self.scroll_v);
                 if let Some(&process_idx) = self.cached_display_indices.get(self.selected as usize)
+                    && let Some(process) = machine.processes.processes.get(process_idx)
                 {
-                    if let Some(process) = machine.processes.processes.get(process_idx) {
-                        self.draw_process(
-                            crt,
-                            new_y,
-                            process,
-                            true,
-                            focus,
-                            settings,
-                            current_uid,
-                            realtime_ms,
-                            monotonic_ms,
-                            initial_scan_done,
-                            active_cpus,
-                            &machine.field_widths,
-                        );
-                        self.shown_indices.push(process_idx);
-                    }
+                    self.draw_process(
+                        crt,
+                        new_y,
+                        process,
+                        true,
+                        focus,
+                        settings,
+                        current_uid,
+                        realtime_ms,
+                        monotonic_ms,
+                        initial_scan_done,
+                        active_cpus,
+                        &machine.field_widths,
+                    );
+                    self.shown_indices.push(process_idx);
                 }
             }
         }
