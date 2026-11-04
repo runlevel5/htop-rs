@@ -389,11 +389,14 @@ impl ScreenManager {
     pub fn run(&mut self, crt: &mut Crt, machine: &mut Machine,
                running: &AtomicBool) -> Result<()> {
         loop {
-            // Check update timer
-            if should_update {
-                platform::scan(machine);
+            // Check update timer (or a rescan requested by an action)
+            if timed_out || self.rescan_requested {
+                platform::scan_system(machine);      // meters, always
+                if !self.paused {
+                    platform::scan_tables(machine);  // process table
+                    self.main_panel.invalidate_display_list();
+                }
                 self.header.update(machine);
-                self.main_panel.invalidate_display_list();
             }
 
             // Draw
@@ -1299,9 +1302,14 @@ main.rs
                              │ Yes
                               ▼
               ┌─────────────────────────────────┐
-              │ platform::scan(machine)         │
+              │ platform::scan_system(machine)  │
               │  ├─ scan_memory()               │
-              │  ├─ scan_cpus()                 │
+              │  └─ scan_cpu()                  │
+              └─────────────────────────────────┘
+                              │
+                              ▼ (skipped while paused)
+              ┌─────────────────────────────────┐
+              │ platform::scan_tables(machine)  │
               │  └─ scan_processes()            │
               └─────────────────────────────────┘
                               │
@@ -1378,7 +1386,8 @@ main.rs
 | `Panel_draw()` | `Panel::draw()` / `MainPanel::draw()` |
 | `Panel_onKey()` | `Panel::on_key()` / `MainPanel::on_key()` |
 | `Table_rebuildPanel()` | `MainPanel::rebuild_display_list()` |
-| `Machine_scan()` | `platform::scan()` |
+| `Machine_scan()` | `platform::scan_system()` |
+| `Machine_scanTables()` | `platform::scan_tables()` |
 | `Header_draw()` | `Header::draw()` |
 | `Meter_updateValues()` | `Meter::update()` |
 | `Process_display()` | `MainPanel::draw_process()` |

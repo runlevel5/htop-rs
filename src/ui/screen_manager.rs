@@ -74,6 +74,8 @@ pub struct ScreenManager {
 
     /// Pause updates
     paused: bool,
+    /// Set by actions that need an immediate rescan on the next loop iteration
+    rescan_requested: bool,
 
     /// Last update time
     last_update: Instant,
@@ -104,6 +106,7 @@ impl ScreenManager {
             settings: settings.clone(),
             hide_meters: false,
             paused: false,
+            rescan_requested: false,
             last_update: Instant::now(),
             function_bar_hidden: false,
             header_needs_redraw: true,
@@ -640,6 +643,13 @@ impl ScreenManager {
         crt.refresh();
     }
 
+    /// Force a full rescan on the next loop iteration.
+    /// Also clears the sort timeout so the result is sorted immediately.
+    fn request_rescan(&mut self) {
+        self.rescan_requested = true;
+        self.sort_timeout = 0;
+    }
+
     /// Handle resize
     fn handle_resize(&mut self, crt: &mut Crt) {
         crt.handle_resize();
@@ -726,12 +736,14 @@ impl ScreenManager {
                 break;
             }
 
-            // Determine if we should update (time-based, like C htop checkRecalculation)
-            let should_update = !self.paused
-                && self.last_update.elapsed()
-                    >= Duration::from_millis(self.settings.delay as u64 * 100);
+            // Determine if we should update (time-based).
+            // An action can also force an immediate rescan.
+            let timed_out = self.last_update.elapsed()
+                >= Duration::from_millis(self.settings.delay as u64 * 100);
 
-            if should_update {
+            if timed_out || self.rescan_requested {
+                self.rescan_requested = false;
+
                 // Update settings in machine before scan
                 machine.update_process_names = self.settings.update_process_names;
                 machine.show_cpu_frequency = self.settings.show_cpu_frequency;
@@ -747,42 +759,48 @@ impl ScreenManager {
                 // Update check_deleted_libs from highlight_deleted_exe setting
                 machine.check_deleted_libs = self.settings.highlight_deleted_exe;
 
-                // Only allow sorting when sort_timeout has elapsed (like C htop)
-                // This defers sorting during rapid user interaction
-                if self.sort_timeout == 0 || self.settings.tree_view {
-                    machine.needs_sort = true;
+                // Always sample system metrics so the header meters keep refreshing,
+                // even while paused. Only the process table scan and sorting are skipped.
+                platform::scan_system(machine);
+
+                if !self.paused {
+                    // Only allow sorting when sort_timeout has elapsed (like C htop)
+                    // This defers sorting during rapid user interaction
+                    if self.sort_timeout == 0 || self.settings.tree_view {
+                        machine.needs_sort = true;
+                    }
+
+                    // Scan the process table
+                    platform::scan_tables(machine);
+                    let cmd_params = self.build_command_str_params(crt);
+                    machine.update_processes(
+                        Some(&cmd_params),
+                        crt.tree_str.vert,
+                        self.settings.highlight_changes,
+                        self.settings.highlight_delay_secs,
+                    );
+
+                    // Build tree if in tree view mode
+                    if self.settings.tree_view {
+                        let (sort_key, ascending) = self.get_tree_sort_settings();
+                        machine.processes.build_tree(sort_key, ascending);
+                    }
+
+                    // Data changed - invalidate the cached display list so it gets rebuilt
+                    self.main_panel.invalidate_display_list();
+
+                    // Only force full process list redraw when user is NOT actively interacting
+                    // This keeps navigation smooth while data updates in the background
+                    // sort_timeout > 0 means user recently pressed a key
+                    if self.sort_timeout == 0 {
+                        self.main_panel.needs_redraw = true;
+                    }
                 }
 
-                // Perform platform scan to update system state
-                platform::scan(machine);
-                let cmd_params = self.build_command_str_params(crt);
-                machine.update_processes(
-                    Some(&cmd_params),
-                    crt.tree_str.vert,
-                    self.settings.highlight_changes,
-                    self.settings.highlight_delay_secs,
-                );
-
-                // Build tree if in tree view mode
-                if self.settings.tree_view {
-                    let (sort_key, ascending) = self.get_tree_sort_settings();
-                    machine.processes.build_tree(sort_key, ascending);
-                }
-
-                // Update header meters with new data
+                // Update header meters with new data - the header always needs a
+                // redraw to show updated meters, even while paused
                 self.header.update(machine);
-
-                // Data changed - invalidate the cached display list so it gets rebuilt
-                // Header always needs redraw to show updated meters
                 self.header_needs_redraw = true;
-                self.main_panel.invalidate_display_list();
-
-                // Only force full process list redraw when user is NOT actively interacting
-                // This keeps navigation smooth while data updates in the background
-                // sort_timeout > 0 means user recently pressed a key
-                if self.sort_timeout == 0 {
-                    self.main_panel.needs_redraw = true;
-                }
 
                 self.last_update = Instant::now();
 
@@ -971,9 +989,15 @@ impl ScreenManager {
             KEY_RESIZE => {
                 return HandlerResult::Resize;
             }
+            super::crt::KEY_CTRL_L => {
+                // Ctrl-L - redraw the screen and refresh the data
+                self.request_rescan();
+                return HandlerResult::Redraw;
+            }
             KEY_F1 | KEY_QUESTION => {
-                // F1 or '?' - show help
+                // F1 or '?' - show help, then rescan since time has passed
                 self.show_help(crt);
+                self.request_rescan();
                 return HandlerResult::Redraw;
             }
             KEY_F2 => {
@@ -1039,6 +1063,8 @@ impl ScreenManager {
                     && let Some(field) = self.main_panel.field_at_x(event.x)
                 {
                     self.apply_sort_field(machine, field);
+                    // Rescan so the new sort order is applied immediately
+                    self.request_rescan();
                 }
                 return HandlerResult::Handled;
             }
@@ -1126,6 +1152,8 @@ impl ScreenManager {
                 self.main_panel.needs_redraw = true;
                 // Redraw header so Tasks meter updates immediately (shows thr shadowed/unshadowed)
                 self.header_needs_redraw = true;
+                // Rescan so the thread filter applies immediately
+                self.request_rescan();
                 return HandlerResult::Handled;
             }
             KEY_I => {
@@ -1173,6 +1201,8 @@ impl ScreenManager {
                 self.main_panel.needs_redraw = true;
                 // Redraw header so Tasks meter updates immediately (shows kthr shadowed/unshadowed)
                 self.header_needs_redraw = true;
+                // Rescan so the thread filter applies immediately
+                self.request_rescan();
                 return HandlerResult::Handled;
             }
             KEY_M => {
@@ -1246,6 +1276,7 @@ impl ScreenManager {
             KEY_LC_H => {
                 // 'h' - show help (same as F1)
                 self.show_help(crt);
+                self.request_rescan();
                 return HandlerResult::Redraw;
             }
             KEY_LC_L => {
