@@ -63,6 +63,21 @@ path = "tools/list_kernel_threads.rs"
 name = "debug_kernel_threads"
 path = "tools/debug_kernel_threads.rs"
 
+[package.metadata.deb]
+name = "htop-rs"
+section = "utils"
+priority = "optional"
+extended-description = """\
+htop-rs is a Rust port of htop, the interactive process viewer. \
+It aims to be a faithful recreation of htop's user interface and \
+functionality, implemented entirely in Rust with no external libraries."""
+assets = [
+    ["target/release/htop-rs", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/htop-rs/README.md", "644"],
+    ["packaging/deb/htop-rs.desktop", "usr/share/applications/", "644"],
+    ["logo-small.png", "usr/share/pixmaps/htop-rs.png", "644"],
+]
+
 [profile.release]
 lto = true
 codegen-units = 1

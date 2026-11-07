@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=htop-rs
+GenericName=Process Viewer
+Comment=Show system processes (Rust port of htop)
+Icon=htop-rs
+Exec=htop-rs
+Terminal=true
+Categories=ConsoleOnly;System;Monitor;
+Keywords=system;process;task;

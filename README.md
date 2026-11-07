@@ -33,6 +33,24 @@ sudo def --refresh update
 sudo dnf install htop-rs
 ```
 
+### Debian / Ubuntu
+
+Download the `.deb` for your architecture (`amd64` or `arm64`) from the
+[latest release](https://github.com/skoky/htop-rs/releases/latest) and install it:
+
+```sh
+sudo apt install ./htop-rs_<version>-1_amd64.deb
+```
+
+The package contains a statically linked binary and has no runtime dependencies.
+To build the package locally:
+
+```sh
+cargo install cargo-deb
+cargo build --release --target x86_64-unknown-linux-musl
+cargo deb --no-build --target x86_64-unknown-linux-musl
+```
+
 ### Homebrew (macOS and Linux)
 
 The repository is its own Homebrew tap:

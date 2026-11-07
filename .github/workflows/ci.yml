@@ -89,6 +89,59 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target $TARGET
 
+  deb:
+    name: Debian package
+    runs-on: ubuntu-latest
+    env:
+      TARGET: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install cargo-deb
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Cache cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-musl-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-musl-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --target $TARGET
+
+      - name: Build Debian package
+        run: |
+          cargo deb --no-build --no-strip --target $TARGET --output deb/
+          dpkg-deb --info deb/*.deb
+          dpkg-deb --contents deb/*.deb
+
+      - name: Install and smoke-test package
+        run: |
+          sudo dpkg -i deb/*.deb
+          htop-rs --version
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v6
+        with:
+          name: htop-rs-deb
+          path: deb/*.deb
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

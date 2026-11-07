@@ -153,11 +153,26 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar cJvf ../../../htop-rs-${{ needs.check-version.outputs.version }}-${{ matrix.target }}.tar.xz htop-rs
 
+      - name: Install cargo-deb
+        if: endsWith(matrix.target, '-linux-musl')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+
+      - name: Build Debian package
+        if: endsWith(matrix.target, '-linux-musl')
+        run: |
+          cargo deb --no-build --no-strip --target ${{ matrix.target }} --output deb/
+          dpkg-deb --info deb/*.deb
+          dpkg-deb --contents deb/*.deb
+
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: htop-rs-${{ matrix.target }}
-          path: htop-rs-${{ needs.check-version.outputs.version }}-${{ matrix.target }}.tar.xz
+          path: |
+            htop-rs-${{ needs.check-version.outputs.version }}-${{ matrix.target }}.tar.xz
+            deb/*.deb
 
   # Create GitHub release with all artifacts
   release:
