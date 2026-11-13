@@ -29,7 +29,7 @@ Use `tle/power` COPR:
 
 ```sh
 sudo dnf copr enable tle/power
-sudo def --refresh update
+sudo dnf --refresh update
 sudo dnf install htop-rs
 ```
 
@@ -75,17 +75,19 @@ Or after building:
 Working:
 - Process list with sorting and filtering
 - Tree view
-- CPU, Memory, Swap meters
-- Multiple meter display modes (Bar, Text, LED)
+- Meters: CPU, Memory, Swap, Load average, Tasks, Uptime, Battery, Disk I/O, Network I/O, Clock and more
+- Multiple meter display modes (Bar, Text, Graph, LED, and a stacked graph mode new to htop-rs)
 - Setup screen (F2) with meter configuration
 - Color themes
 - Keyboard navigation
 - Process actions (kill, nice, etc.)
 
 Not yet implemented:
-- Some column types show "TODO"
-- Graph meter mode
-- Some platform-specific features
+- Some meters are stubs that display "Not implemented": GPU, and on Linux the PSI, Zram, ZFS ARC, HugePages, SELinux, Systemd and DiskIOTime meters
+- Delay accounting columns (`PercentCpuDelay`, `PercentIODelay`, `PercentSwapDelay`)
+- GPU columns (`GpuTime`, `GpuPercent`)
+
+See [TODO.md](TODO.md) for the full list.
 
 ## Known Issues
 
