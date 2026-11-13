@@ -9,7 +9,7 @@
 pub use ncurses::Screen;
 pub use ncurses::Window;
 pub use ncurses::acs::{
-    ACS_HLINE, ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER, ACS_VLINE,
+    ACS_HLINE, ACS_LLCORNER, ACS_LRCORNER, ACS_ULCORNER, ACS_URCORNER, ACS_VLINE, acs_char,
 };
 pub use ncurses::attr::{self, A_BOLD, A_DIM, A_NORMAL, A_REVERSE};
 pub use ncurses::color::{
@@ -1073,25 +1073,28 @@ impl Crt {
     }
 
     /// Draw a box
+    ///
+    /// A line-drawing character does not fit in the character bits of a
+    /// `u32` cell, so each one goes through `acs_char`.
     pub fn draw_box(&mut self, y: i32, x: i32, h: i32, w: i32) {
         let win = self.screen.stdscr_mut();
         // Top border
         let _ = win.mv(y, x);
-        let _ = win.hline(ACS_HLINE as u32, w);
-        let _ = win.mvaddch(y, x, ACS_ULCORNER as u32);
-        let _ = win.mvaddch(y, x + w - 1, ACS_URCORNER as u32);
+        let _ = win.hline(acs_char(ACS_HLINE), w);
+        let _ = win.mvaddch(y, x, acs_char(ACS_ULCORNER));
+        let _ = win.mvaddch(y, x + w - 1, acs_char(ACS_URCORNER));
 
         // Side borders
         for i in 1..h - 1 {
-            let _ = win.mvaddch(y + i, x, ACS_VLINE as u32);
-            let _ = win.mvaddch(y + i, x + w - 1, ACS_VLINE as u32);
+            let _ = win.mvaddch(y + i, x, acs_char(ACS_VLINE));
+            let _ = win.mvaddch(y + i, x + w - 1, acs_char(ACS_VLINE));
         }
 
         // Bottom border
         let _ = win.mv(y + h - 1, x);
-        let _ = win.hline(ACS_HLINE as u32, w);
-        let _ = win.mvaddch(y + h - 1, x, ACS_LLCORNER as u32);
-        let _ = win.mvaddch(y + h - 1, x + w - 1, ACS_LRCORNER as u32);
+        let _ = win.hline(acs_char(ACS_HLINE), w);
+        let _ = win.mvaddch(y + h - 1, x, acs_char(ACS_LLCORNER));
+        let _ = win.mvaddch(y + h - 1, x + w - 1, acs_char(ACS_LRCORNER));
     }
 
     /// Clean up terminal
@@ -1127,12 +1130,11 @@ impl Crt {
     /// Handle terminal resize
     pub fn handle_resize(&mut self) {
         let _ = self.screen.update_term_size();
-        // Restore keypad mode on the new stdscr window.
-        // update_term_size() calls resize_term() which recreates stdscr,
-        // and the new window defaults to keypad=false. Without keypad mode,
-        // escape sequences (including mouse SGR sequences) are not parsed,
-        // causing raw bytes like 'M' (0x4D) from "\x1b[<0;x;yM" to be
-        // returned as KEY_M instead of KEY_MOUSE.
+        // Keypad mode has to stay on: without it escape sequences (including
+        // mouse SGR sequences) are not parsed, and raw bytes like 'M' (0x4D)
+        // from "\x1b[<0;x;yM" come back as KEY_M instead of KEY_MOUSE.
+        // ncurses-pure used to replace stdscr on a resize, which switched it
+        // off; it now keeps stdscr, so this is only a safeguard.
         self.screen.keypad(true);
         self.update_size();
     }
