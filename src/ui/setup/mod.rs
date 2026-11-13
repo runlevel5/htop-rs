@@ -1295,8 +1295,7 @@ impl SetupScreen {
         let screens_rename_buffer = self.screens_rename_buffer.clone();
         let mut screen_texts: Vec<(usize, String, bool)> = Vec::new();
 
-        for i in 0..display_height.min(settings.screens.len()) {
-            let screen = &settings.screens[i];
+        for (i, screen) in settings.screens.iter().enumerate().take(display_height) {
             let is_selected = i == screens_selection;
 
             // Get display name (with renaming support)
@@ -1810,7 +1809,7 @@ impl SetupScreen {
                     return HandlerResult::Handled;
                 } else if key == KEY_ENTER_LF || key == KEY_ENTER_CR {
                     // Toggle moving mode (only for Enter, not r/R/F6)
-                    self.meters_moving = !self.meters_moving;
+                    self.meters_moving.toggle();
                     return HandlerResult::Handled;
                 }
             }
@@ -2146,7 +2145,7 @@ impl SetupScreen {
             // Enter - toggle moving mode (disabled when only 1 screen)
             KEY_ENTER | 10 | 13 => {
                 if !single_screen {
-                    self.screens_moving = !self.screens_moving;
+                    self.screens_moving.toggle();
                 }
                 return HandlerResult::Handled;
             }
@@ -2221,7 +2220,7 @@ impl SetupScreen {
             // Enter - toggle moving mode (disabled when only 1 column)
             KEY_ENTER | 10 | 13 => {
                 if !single_column {
-                    self.columns_moving = !self.columns_moving;
+                    self.columns_moving.toggle();
                 }
                 return HandlerResult::Handled;
             }
@@ -3360,7 +3359,7 @@ impl SetupScreen {
                         if focused_col < num_columns {
                             let focused_column_meters = &settings.header_columns[focused_col];
                             if !focused_column_meters.is_empty() {
-                                self.meters_moving = !self.meters_moving;
+                                self.meters_moving.toggle();
                             }
                         }
                         return Some(HandlerResult::Handled);

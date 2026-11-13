@@ -1083,7 +1083,7 @@ fn scan_cpu_frequency_from_cpuinfo(machine: &mut Machine) {
             // PowerPC: "clock : 3000.000MHz"
             line.split(':')
                 .nth(1)
-                .and_then(|v| v.trim().trim_end_matches("MHz").parse().ok())
+                .and_then(|v| v.trim().trim_suffix("MHz").parse().ok())
         } else {
             None
         };
@@ -1579,22 +1579,13 @@ fn read_maps_for_lib_size(process: &mut Process, pid: i32, _page_size_kb: i64) {
 /// This matches C htop's CGroup_filterName behavior
 pub fn filter_cgroup_name(cgroup: &str) -> String {
     // Remove common prefixes and compress the path
-    let mut result = cgroup.to_string();
-
-    // Remove leading /
-    if result.starts_with('/') {
-        result = result[1..].to_string();
-    }
-
-    // Common patterns to compress (from C htop CGroupUtils.c)
-    // Remove "system.slice/" prefix
-    if result.starts_with("system.slice/") {
-        result = result.replacen("system.slice/", "", 1);
-    }
-    // Remove "user.slice/" prefix
-    if result.starts_with("user.slice/") {
-        result = result.replacen("user.slice/", "", 1);
-    }
+    // Remove leading /, then the common patterns to compress
+    // (from C htop CGroupUtils.c): "system.slice/" and "user.slice/" prefixes
+    let mut result = cgroup
+        .trim_prefix('/')
+        .trim_prefix("system.slice/")
+        .trim_prefix("user.slice/")
+        .to_string();
 
     // Truncate .service suffix
     if let Some(pos) = result.find(".service") {

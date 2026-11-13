@@ -2,7 +2,7 @@
 name = "htop-rs"
 version = "0.2.1"
 edition = "2024"
-rust-version = "1.99.1"
+rust-version = "1.100.0"
 authors = ["Trung Lê"]
 description = "A Rust port of htop - an interactive process viewer"
 license = "GPL-2.0-or-later"
@@ -20,7 +20,6 @@ clap = { version = "4.6", features = ["derive"] }
 
 # Error handling
 anyhow = "1.0.104"
-thiserror = "2.0.21"
 
 # Time handling
 chrono = "0.4.45"
@@ -38,8 +37,6 @@ procfs = "0.18.0"
 rayon = "1.12"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-libproc = "0.14.11"
-mach2 = "0.7"
 libc = "1.0.0-alpha.5"
 rayon = "1.12"
 

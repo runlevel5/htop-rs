@@ -907,7 +907,7 @@ impl MainPanel {
                 // C htop shows "(no tty) " for processes without a terminal
                 if let Some(tty) = process.tty_name.as_deref() {
                     // Strip /dev/ prefix if present (matching C htop)
-                    let name = tty.strip_prefix("/dev/").unwrap_or(tty);
+                    let name = tty.trim_prefix("/dev/");
                     let attr = if is_shadowed {
                         shadow_color
                     } else {
@@ -2083,7 +2083,7 @@ impl MainPanel {
 
     /// Toggle cursor following mode
     pub fn toggle_following(&mut self, machine: &Machine) {
-        self.following = !self.following;
+        self.following.toggle();
         if self.following {
             // Store the current selected PID to follow
             self.following_pid = self.get_selected_pid(machine);
@@ -2156,7 +2156,7 @@ impl MainPanel {
 
     /// Toggle wrap command display
     pub fn toggle_wrap_command(&mut self) {
-        self.wrap_command = !self.wrap_command;
+        self.wrap_command.toggle();
     }
 
     /// Start incremental PID search

@@ -2959,7 +2959,7 @@ impl ProcessList {
     /// Toggle tag on a process
     pub fn toggle_tag(&mut self, pid: i32) {
         if let Some(process) = self.get_mut(pid) {
-            process.tagged = !process.tagged;
+            process.tagged.toggle();
         }
     }
 
