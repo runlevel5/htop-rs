@@ -395,7 +395,7 @@ dependencies = [
 [[package]]
 name = "ncurses-pure"
 version = "0.1.1"
-source = "git+https://github.com/runlevel5/ncurses-pure-rs#6b6055cc17aad6ff3950231a8cbae64ddd94e3b3"
+source = "git+https://github.com/runlevel5/ncurses-pure-rs#14c951df3a9ed0fc056d8236aaa9e9141e81062b"
 dependencies = [
  "bitflags",
  "libc 0.2.191",
