@@ -6,7 +6,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.99.1"
+  RUST_VERSION: "1.100.0"
 
 jobs:
   # First, run tests to ensure the code is valid

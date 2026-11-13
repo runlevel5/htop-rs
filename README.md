@@ -53,7 +53,7 @@ cargo build --release
 
 ### Dependencies
 
-- Rust 1.99.1+
+- Rust 1.100.0+
 
 No external libraries required - htop-rs uses a pure Rust terminal implementation.
 

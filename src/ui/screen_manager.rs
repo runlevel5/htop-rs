@@ -1220,7 +1220,7 @@ impl ScreenManager {
             }
             KEY_HASH => {
                 // '#' - hide/show header meters
-                self.hide_meters = !self.hide_meters;
+                self.hide_meters.toggle();
                 self.layout(crt);
                 return HandlerResult::Redraw;
             }
@@ -1277,7 +1277,7 @@ impl ScreenManager {
                 // Remember currently selected PID before changing filter
                 let selected_pid = self.main_panel.get_selected_pid(machine);
 
-                self.settings.hide_userland_threads = !self.settings.hide_userland_threads;
+                self.settings.hide_userland_threads.toggle();
                 self.settings.changed = true;
                 self.main_panel.invalidate_display_list();
 
@@ -1309,7 +1309,7 @@ impl ScreenManager {
                 } else {
                     // In list view: toggle sort direction
                     screen.direction = -screen.direction;
-                    machine.sort_descending = !machine.sort_descending;
+                    machine.sort_descending.toggle();
                     self.settings.sort_descending = machine.sort_descending;
                     // Sort immediately so the display updates right away
                     let ascending = !machine.sort_descending;
@@ -1326,7 +1326,7 @@ impl ScreenManager {
                 // Remember currently selected PID before changing filter
                 let selected_pid = self.main_panel.get_selected_pid(machine);
 
-                self.settings.hide_kernel_threads = !self.settings.hide_kernel_threads;
+                self.settings.hide_kernel_threads.toggle();
                 self.settings.changed = true;
                 self.main_panel.invalidate_display_list();
 
@@ -1397,7 +1397,7 @@ impl ScreenManager {
             }
             KEY_Z => {
                 // 'Z' - pause/resume process updates
-                self.paused = !self.paused;
+                self.paused.toggle();
                 return HandlerResult::Handled;
             }
             KEY_LC_C => {
@@ -1431,7 +1431,7 @@ impl ScreenManager {
             }
             KEY_LC_M => {
                 // 'm' - toggle merged command (like C htop actionToggleMergedCommand)
-                self.settings.show_merged_command = !self.settings.show_merged_command;
+                self.settings.show_merged_command.toggle();
                 self.settings.changed = true;
                 // Rebuild command strings immediately with new setting
                 let cmd_params = self.build_command_str_params(crt);
@@ -1447,7 +1447,7 @@ impl ScreenManager {
             }
             KEY_LC_P => {
                 // 'p' - Toggle program path (like C htop actionToggleProgramPath)
-                self.settings.show_program_path = !self.settings.show_program_path;
+                self.settings.show_program_path.toggle();
                 self.settings.changed = true;
                 // Rebuild command strings immediately with new setting
                 let cmd_params = self.build_command_str_params(crt);
@@ -1577,7 +1577,7 @@ impl ScreenManager {
     /// Toggle tree view - matches C htop actionToggleTreeView behavior
     fn toggle_tree_view(&mut self, machine: &mut Machine) {
         // Toggle the tree view setting
-        self.settings.tree_view = !self.settings.tree_view;
+        self.settings.tree_view.toggle();
         self.main_panel.tree_view = self.settings.tree_view;
 
         // Also update the screen settings to keep them in sync

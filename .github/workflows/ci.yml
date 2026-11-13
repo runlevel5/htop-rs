@@ -24,7 +24,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.99.1"
+          toolchain: "1.100.0"
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -60,7 +60,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.99.1"
+          toolchain: "1.100.0"
           targets: powerpc64le-unknown-linux-gnu
           components: clippy
 
@@ -98,7 +98,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.99.1"
+          toolchain: "1.100.0"
           components: clippy
 
       - name: Cache cargo registry
@@ -124,7 +124,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.99.1"
+          toolchain: "1.100.0"
           components: rustfmt
 
       - name: Check formatting

@@ -619,7 +619,7 @@ fn run_lsof(pid: i32) -> Result<Vec<LsofFileEntry>, String> {
             'o' => {
                 if let Some(ref mut file) = current_file {
                     // Remove "0t" prefix if present
-                    let offset = value.strip_prefix("0t").unwrap_or(value);
+                    let offset = value.trim_prefix("0t");
                     file.offset = offset.to_string();
                 }
             }
@@ -1227,14 +1227,14 @@ pub fn show_strace(crt: &mut Crt, pid: i32, command: &str) {
             }
             KEY_F8 | KEY_LC_F => {
                 // F8 or 'f' - toggle auto-scroll/follow
-                follow = !follow;
+                follow.toggle();
                 if follow && !filtered_indices.is_empty() {
                     selected = (filtered_indices.len() as i32 - 1).max(0);
                 }
             }
             KEY_F9 | KEY_LC_T => {
                 // F9 or 't' - toggle tracing
-                tracing = !tracing;
+                tracing.toggle();
             }
             KEY_UP | KEY_CTRL_P => {
                 follow = false; // Manual navigation disables follow
